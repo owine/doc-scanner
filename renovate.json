@@ -1,0 +1,61 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":dependencyDashboard",
+    ":semanticCommits",
+    ":pinDevDependencies",
+    "schedule:earlyMondays",
+    "group:monorepos",
+    "group:recommended"
+  ],
+  "rangeStrategy": "pin",
+  "lockFileMaintenance": { "enabled": true, "schedule": ["before 6am on monday"] },
+  "packageRules": [
+    {
+      "description": "Auto-merge devDependency patch + minor updates after CI passes",
+      "matchDepTypes": ["devDependencies"],
+      "matchUpdateTypes": ["patch", "minor"],
+      "automerge": true
+    },
+    {
+      "description": "Auto-merge type definition updates",
+      "matchPackagePatterns": ["^@types/"],
+      "automerge": true
+    },
+    {
+      "description": "Group all Hono updates together",
+      "matchPackagePatterns": ["^hono$", "^@hono/"],
+      "groupName": "hono"
+    },
+    {
+      "description": "Group all Vitest updates",
+      "matchPackagePatterns": ["^vitest$", "^@vitest/"],
+      "groupName": "vitest"
+    },
+    {
+      "description": "Group all Preact + Vite tooling",
+      "matchPackagePatterns": ["^preact$", "^@preact/", "^vite$"],
+      "groupName": "preact-vite"
+    },
+    {
+      "description": "Hold major upgrades for manual review",
+      "matchUpdateTypes": ["major"],
+      "automerge": false,
+      "labels": ["dependencies", "major-upgrade"]
+    },
+    {
+      "description": "Pin Docker base images to digest",
+      "matchManagers": ["dockerfile"],
+      "pinDigests": true
+    },
+    {
+      "description": "Never auto-update vendored Proton SRP code (manual re-vendor only)",
+      "matchFileNames": ["server/src/vendor/**"],
+      "enabled": false
+    }
+  ],
+  "vulnerabilityAlerts": { "labels": ["security"], "automerge": false },
+  "prConcurrentLimit": 5,
+  "prHourlyLimit": 2
+}
