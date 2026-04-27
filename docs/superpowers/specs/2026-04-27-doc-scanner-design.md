@@ -71,6 +71,8 @@ Two deployable units in one Docker image:
 
 **Trust boundary:** the phone owns raw page images and the Proton password (entered into PWA, used in SRP exchange, never stored). The server owns the long-lived Proton session and the Anthropic API key.
 
+**Access control (upstream):** the deployment is expected to sit behind **Authelia** (or equivalent) at the reverse proxy, gating *all* traffic to the app via forward-auth headers (`Remote-User`, `Remote-Email`). The app itself does **not** implement its own user accounts or OIDC — it trusts the proxy that any request reaching it is from the authenticated owner. The Proton SRP login inside the app is solely for obtaining a Proton Drive session, not for app authentication. We do not currently consume the forward-auth headers (single-user app, single Proton account), but log them on `/api/auth/login` for audit visibility.
+
 ## Components
 
 ### Server modules
