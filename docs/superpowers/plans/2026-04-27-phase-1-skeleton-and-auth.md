@@ -126,7 +126,7 @@ docs
     "test": "npm run test --workspaces --if-present",
     "test:integration": "INTEGRATION=1 npm run test --workspaces --if-present"
   },
-  "engines": { "node": ">=20.20" }
+  "engines": { "node": "20.20.2" }
 }
 ```
 
@@ -651,9 +651,9 @@ git commit -m "feat(pwa): bootstrap Vite + Preact PWA with login/status screens"
 
 **Files:** `Dockerfile`, `compose.yml`
 
-- [ ] **Step 1: Create multi-stage `Dockerfile`** — stages: `deps` (install workspaces from package-lock with `npm ci`), `build` (run `tsc` for server, `vite build` for pwa), `runtime` (`node:20.20-alpine3.22` + tini, copies `server/dist`, `server/src/migrations` (renamed to dist/migrations), `node_modules`, `pwa/dist`). Sets `DB_PATH=/data/app.db`, `EXPOSE 3000`, `VOLUME ["/data"]`, `ENTRYPOINT ["/sbin/tini","--"]`, `CMD ["node","server/dist/index.js"]`.
+- [ ] **Step 1: Create multi-stage `Dockerfile`** — stages: `deps` (install workspaces from package-lock with `npm ci`), `build` (run `tsc` for server, `vite build` for pwa), `runtime` (`node:20.20.2-alpine3.22` + tini, copies `server/dist`, `server/src/migrations` (renamed to dist/migrations), `node_modules`, `pwa/dist`). Sets `DB_PATH=/data/app.db`, `EXPOSE 3000`, `VOLUME ["/data"]`, `ENTRYPOINT ["/sbin/tini","--"]`, `CMD ["node","server/dist/index.js"]`.
 
-PIN BASE IMAGE TO DIGEST: After the first successful build, capture the resolved digest with `docker buildx imagetools inspect node:20.20-alpine3.22 | grep Digest` and pin in the Dockerfile as `FROM node:20.20-alpine3.22@sha256:<digest> AS deps` (and same for `runtime` stage). Renovate (`pinDigests: true` for dockerfile manager — see Task 1) will keep digests current after that.
+PIN BASE IMAGE TO DIGEST: After the first successful build, capture the resolved digest with `docker buildx imagetools inspect node:20.20.2-alpine3.22 | grep Digest` and pin in the Dockerfile as `FROM node:20.20.2-alpine3.22@sha256:<digest> AS deps` (and same for `runtime` stage). Renovate (`pinDigests: true` for dockerfile manager — see Task 1) will keep digests current after that.
 
   NOTE: PWA static asset serving from the server is added in Phase 4. For Phase 1, the runtime image only serves `/api/*`; the PWA runs via `vite dev` for the smoke test.
 
