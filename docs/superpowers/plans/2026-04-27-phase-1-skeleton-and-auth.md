@@ -20,11 +20,14 @@
 ├── Dockerfile
 ├── .dockerignore
 ├── .gitignore
-├── .nvmrc
+├── .nvmrc                       # specific patch (e.g. 20.20.2)
+├── .npmrc                       # save-exact=true, engine-strict=true
 ├── package.json
+├── package-lock.json            # committed; npm ci in CI/Docker
 ├── tsconfig.base.json
 ├── README.md
 ├── .env.example
+├── renovate.json                # Mend Renovate config — auto-PRs for upgrades
 ├── server/
 │   ├── package.json
 │   ├── tsconfig.json
@@ -75,7 +78,7 @@
 
 ## Task 1: Initialize repo skeleton + tooling
 
-**Files:** `.gitignore`, `.nvmrc`, `.dockerignore`, `package.json` (root), `tsconfig.base.json`, `README.md`, `.env.example`
+**Files:** `.gitignore`, `.nvmrc`, `.npmrc`, `.dockerignore`, `package.json` (root), `tsconfig.base.json`, `README.md`, `.env.example`, `renovate.json`
 
 - [ ] **Step 1: Create `.gitignore`**
 
@@ -93,7 +96,7 @@ playwright-report/
 test-results/
 ```
 
-- [ ] **Step 2: Create `.nvmrc`** containing `20`
+- [ ] **Step 2: Create `.nvmrc`** containing `20.20.2` (specific patch — bumped by Renovate)
 
 - [ ] **Step 3: Create `.dockerignore`**
 
@@ -123,8 +126,15 @@ docs
     "test": "npm run test --workspaces --if-present",
     "test:integration": "INTEGRATION=1 npm run test --workspaces --if-present"
   },
-  "engines": { "node": ">=20" }
+  "engines": { "node": ">=20.20" }
 }
+```
+
+- [ ] **Step 4b: Create `.npmrc`** so future `npm install <pkg>` writes exact pins, not caret ranges:
+
+```ini
+save-exact=true
+engine-strict=true
 ```
 
 - [ ] **Step 5: Create `tsconfig.base.json`**
@@ -162,11 +172,79 @@ TRUST_PROXY=true
 
 - [ ] **Step 7: Create minimal `README.md`** documenting quickstart, env vars, and MIT attribution for vendored code.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 8: Create `renovate.json`** (recommended config for dependency management — Mend Renovate handles all upgrades):
+
+```json
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":dependencyDashboard",
+    ":semanticCommits",
+    ":pinDevDependencies",
+    "schedule:earlyMondays",
+    "group:monorepos",
+    "group:recommended"
+  ],
+  "rangeStrategy": "pin",
+  "lockFileMaintenance": { "enabled": true, "schedule": ["before 6am on monday"] },
+  "packageRules": [
+    {
+      "description": "Auto-merge devDependency patch + minor updates after CI passes",
+      "matchDepTypes": ["devDependencies"],
+      "matchUpdateTypes": ["patch", "minor"],
+      "automerge": true
+    },
+    {
+      "description": "Auto-merge type definition updates",
+      "matchPackagePatterns": ["^@types/"],
+      "automerge": true
+    },
+    {
+      "description": "Group all Hono updates together",
+      "matchPackagePatterns": ["^hono$", "^@hono/"],
+      "groupName": "hono"
+    },
+    {
+      "description": "Group all Vitest updates",
+      "matchPackagePatterns": ["^vitest$", "^@vitest/"],
+      "groupName": "vitest"
+    },
+    {
+      "description": "Group all Preact + Vite tooling",
+      "matchPackagePatterns": ["^preact$", "^@preact/", "^vite$"],
+      "groupName": "preact-vite"
+    },
+    {
+      "description": "Hold major upgrades for manual review",
+      "matchUpdateTypes": ["major"],
+      "automerge": false,
+      "labels": ["dependencies", "major-upgrade"]
+    },
+    {
+      "description": "Pin Docker base images to digest",
+      "matchManagers": ["dockerfile"],
+      "pinDigests": true
+    },
+    {
+      "description": "Never auto-update vendored Proton SRP code (manual re-vendor only)",
+      "matchFileNames": ["server/src/vendor/**"],
+      "enabled": false
+    }
+  ],
+  "vulnerabilityAlerts": { "labels": ["security"], "automerge": false },
+  "prConcurrentLimit": 5,
+  "prHourlyLimit": 2
+}
+```
+
+NOTE: Enable Renovate at https://github.com/apps/renovate after first push. The Dependency Dashboard issue it opens is the source of truth for all pending updates.
+
+- [ ] **Step 9: Commit**
 
 ```bash
-git add .gitignore .nvmrc .dockerignore package.json tsconfig.base.json README.md .env.example
-git commit -m "chore: initialize repo skeleton with workspaces and tooling"
+git add .gitignore .nvmrc .dockerignore .npmrc package.json tsconfig.base.json README.md .env.example renovate.json
+git commit -m "chore: initialize repo skeleton with exact pinning and Renovate config"
 ```
 
 ---
@@ -175,7 +253,41 @@ git commit -m "chore: initialize repo skeleton with workspaces and tooling"
 
 **Files:** `server/package.json`, `server/tsconfig.json`, `server/vitest.config.ts`, `server/src/{index,config,logger}.ts`, `server/tests/config.test.ts`
 
-- [ ] **Step 1: Create `server/package.json`** with deps: `hono`, `@hono/node-server`, `better-sqlite3`, `pino`, `pino-pretty`, `zod`. devDeps: `tsx`, `typescript`, `vitest`, `@types/node`, `@types/better-sqlite3`. Scripts: `dev` (tsx watch), `build` (tsc), `start` (node dist), `test` (vitest run).
+- [ ] **Step 1: Create `server/package.json`** with **exact-pinned** versions (no `^`/`~`; Renovate manages bumps):
+
+```json
+{
+  "name": "@doc-scanner/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@hono/node-server": "2.0.0",
+    "better-sqlite3": "12.9.0",
+    "hono": "4.12.15",
+    "pino": "10.3.1",
+    "pino-pretty": "13.1.3",
+    "zod": "4.3.6"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "7.6.13",
+    "@types/node": "25.6.0",
+    "tsx": "4.21.0",
+    "typescript": "6.0.3",
+    "vitest": "4.1.5"
+  }
+}
+```
+
+NOTE: Versions above are known-good as of 2026-04-27. If a package has moved when you implement this, prefer the latest patch of the listed minor (Renovate will subsequently bump to the latest). If a major has bumped, treat that as a deliberate decision: consult release notes for breaking changes, especially for `zod` (v3→v4 schema syntax), `vitest`, `vite`, and `pino`.
 
 - [ ] **Step 2: Create `server/tsconfig.json`** extending `../tsconfig.base.json` with `outDir: dist`, `rootDir: src`, `types: [node]`.
 
@@ -454,7 +566,37 @@ git commit -m "feat(http): /api/auth login/logout/status with cookie session mid
 
 **Files:** `pwa/package.json`, `pwa/tsconfig.json`, `pwa/vite.config.ts`, `pwa/index.html`, `pwa/public/{manifest.webmanifest,sw.js}`, `pwa/src/{main.tsx,api.ts}`, `pwa/src/ui/{App,LoginScreen,StatusScreen}.tsx`, `pwa/tests/{setup.ts,ui/login.test.tsx}`.
 
-- [ ] **Step 1: Create `pwa/package.json`** — deps: `preact`. devDeps: `@preact/preset-vite`, `@testing-library/preact`, `@testing-library/jest-dom`, `happy-dom`, `vite`, `vitest`, `typescript`, `@types/node`. Scripts: `dev` (vite), `build` (tsc + vite build), `test` (vitest run).
+- [ ] **Step 1: Create `pwa/package.json`** with exact-pinned versions:
+
+```json
+{
+  "name": "@doc-scanner/pwa",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "preact": "10.29.1"
+  },
+  "devDependencies": {
+    "@preact/preset-vite": "2.10.5",
+    "@testing-library/jest-dom": "6.9.1",
+    "@testing-library/preact": "3.2.4",
+    "@types/node": "25.6.0",
+    "happy-dom": "20.9.0",
+    "typescript": "6.0.3",
+    "vite": "8.0.10",
+    "vitest": "4.1.5"
+  }
+}
+```
+
+Same caveat as server: versions are 2026-04-27 currents; if a major has moved, evaluate before bumping.
 
 - [ ] **Step 2: Create `pwa/tsconfig.json`** extending base, with `jsx: react-jsx`, `jsxImportSource: preact`, `lib: [ES2022, DOM, DOM.Iterable, WebWorker]`, `noEmit: true`.
 
@@ -509,7 +651,9 @@ git commit -m "feat(pwa): bootstrap Vite + Preact PWA with login/status screens"
 
 **Files:** `Dockerfile`, `compose.yml`
 
-- [ ] **Step 1: Create multi-stage `Dockerfile`** — stages: `deps` (install workspaces from package-lock), `build` (run `tsc` for server, `vite build` for pwa), `runtime` (node:20-alpine + tini, copies `server/dist`, `server/src/migrations` (renamed to dist/migrations), `node_modules`, `pwa/dist`). Sets `DB_PATH=/data/app.db`, `EXPOSE 3000`, `VOLUME ["/data"]`, `ENTRYPOINT ["/sbin/tini","--"]`, `CMD ["node","server/dist/index.js"]`.
+- [ ] **Step 1: Create multi-stage `Dockerfile`** — stages: `deps` (install workspaces from package-lock with `npm ci`), `build` (run `tsc` for server, `vite build` for pwa), `runtime` (`node:20.20-alpine3.22` + tini, copies `server/dist`, `server/src/migrations` (renamed to dist/migrations), `node_modules`, `pwa/dist`). Sets `DB_PATH=/data/app.db`, `EXPOSE 3000`, `VOLUME ["/data"]`, `ENTRYPOINT ["/sbin/tini","--"]`, `CMD ["node","server/dist/index.js"]`.
+
+PIN BASE IMAGE TO DIGEST: After the first successful build, capture the resolved digest with `docker buildx imagetools inspect node:20.20-alpine3.22 | grep Digest` and pin in the Dockerfile as `FROM node:20.20-alpine3.22@sha256:<digest> AS deps` (and same for `runtime` stage). Renovate (`pinDigests: true` for dockerfile manager — see Task 1) will keep digests current after that.
 
   NOTE: PWA static asset serving from the server is added in Phase 4. For Phase 1, the runtime image only serves `/api/*`; the PWA runs via `vite dev` for the smoke test.
 
