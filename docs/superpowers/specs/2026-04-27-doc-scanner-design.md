@@ -26,7 +26,7 @@ A self-hosted Progressive Web App that lets the owner scan paper documents with 
   - Never store the user's Proton password.
 - **SDK does not include** authentication, session management, or user-address provisioning. We must port these.
 - **Anthropic Claude Haiku 4.5** for classification. Vision-capable, cheap (~$1/M in, ~$5/M out). Server-held API key.
-- **Deployment target**: any Docker host (homelab or VPS). HTTPS terminated upstream (assume Cloudflare Tunnel).
+- **Deployment target**: any Docker host (homelab or VPS). HTTPS is terminated by an upstream reverse proxy supplied by the operator (SWAG, Traefik, Cloudflare Tunnel, Caddy, etc.). The app speaks plain HTTP inside its container with `trust proxy` enabled and reads `X-Forwarded-*` headers.
 
 ## Decisions Made During Brainstorming
 
@@ -37,7 +37,7 @@ A self-hosted Progressive Web App that lets the owner scan paper documents with 
 | Volume | Light, batched (few/week) |
 | Server stack | Node 20+ / TypeScript / Hono |
 | Server location | Homelab or VPS, packaged as one Docker image |
-| Remote access | Cloudflare Tunnel (HTTPS required for PWA + camera) |
+| Remote access | Operator-supplied reverse proxy (SWAG + Cloudflare Tunnel, Traefik, etc.); HTTPS required for PWA + camera |
 | AI provider | Claude Haiku 4.5 |
 | Image processing | Edge detection + perspective correction + OCR + searchable PDF |
 | OCR location | Client-side (Tesseract.js, Web Worker, cached `eng.traineddata`) |
@@ -205,7 +205,7 @@ Server calls Proton's **events endpoint** (the SDK-blessed event-based sync mech
 | SRP port subtly wrong → can't log in or 2FA breaks | High | Start from official open-source Proton client code. Comprehensive integration test against real Proton account before any other work. |
 | Tesseract.js performance unusable on older phones | Medium | Test on owner's phone early. Fallback: server-side OCR if needed (architecture supports the swap). |
 | Haiku misclassifies → wrong folder | Low | Always-confirm UX catches it. Hallucination guard rejects unknown folder linkIds. |
-| Cloudflare Tunnel down → app unreachable | Low | Outbox queue means scans aren't lost; user retries when tunnel recovers. |
+| Reverse proxy / tunnel down → app unreachable | Low | Outbox queue means scans aren't lost; user retries when proxy recovers. |
 
 ## Open Questions
 
