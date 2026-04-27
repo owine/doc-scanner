@@ -25,6 +25,7 @@ A self-hosted Progressive Web App that lets the owner scan paper documents with 
   - No Proton branding. Display credential-handling warning to the user.
   - Never store the user's Proton password.
 - **SDK does not include** authentication, session management, or user-address provisioning. We must port these.
+- **`@proton/srp` is not published to npm.** It exists only as an internal workspace package inside [`ProtonMail/WebClients`](https://github.com/ProtonMail/WebClients) (MIT licensed) and depends on `@proton/crypto` (OpenPGP.js wrapper), `@proton/shared`, and `@proton/utils` — also workspace-only. **Approach: vendor a minimal subset** — copy `packages/srp/lib/*.ts` plus the specific `@proton/crypto/lib/bigInteger.ts` and `utils.ts` functions it actually imports, plus the small bits of `@proton/shared` and `@proton/utils` it touches (~15–25 files). Keep MIT attribution. This is a one-time copy with periodic refresh; no runtime dependency on the monorepo.
 - **Anthropic Claude Haiku 4.5** for classification. Vision-capable, cheap (~$1/M in, ~$5/M out). Server-held API key.
 - **Deployment target**: any Docker host (homelab or VPS). HTTPS is terminated by an upstream reverse proxy supplied by the operator (SWAG, Traefik, Cloudflare Tunnel, Caddy, etc.). The app speaks plain HTTP inside its container with `trust proxy` enabled and reads `X-Forwarded-*` headers.
 
@@ -77,7 +78,7 @@ Two deployable units in one Docker image:
 
 ### Server modules
 
-- **`auth/srp.ts`** — Wraps `@protontech/srp`. Exposes `login(email, password, totp?)` returning Proton session tokens (`AccessToken`, `RefreshToken`, `UID`) and a `refresh()` helper. No HTTP routing, no storage.
+- **`auth/srp.ts`** — Wraps the vendored `@proton/srp` code (in `server/src/vendor/proton-srp/`). Exposes `login(email, password, totp?)` returning Proton session tokens (`AccessToken`, `RefreshToken`, `UID`) and a `refresh()` helper. Handles the two-step Proton auth flow: `POST /auth/info` → SRP proof → `POST /auth/v4` → optional `POST /auth/v4/2fa`. No HTTP routing, no storage.
 - **`auth/session-store.ts`** — Persists the session blob to SQLite, encrypted with AES-GCM using `SESSION_ENCRYPTION_KEY` (32 bytes, base64). Exposes `save`, `load`, `clear`. Sole owner of the encryption boundary.
 - **`drive/client.ts`** — Thin wrapper over `@protontech/drive-sdk`, constructed with a session loaded from `session-store`. Exposes only `listFolderTree()`, `uploadFile(parentLinkId, name, bytes, mimeType)`, `subscribeEvents(cursor, onEvent)`. Hides SDK-internal types behind our own.
 - **`drive/folder-cache.ts`** — Maintains the cached folder tree in SQLite. On startup, hydrates from cache then calls `subscribeEvents` from the saved cursor to apply deltas. Exposes `getTree()` returning `{ linkId, path, name }[]`.
@@ -204,7 +205,8 @@ Server calls Proton's **events endpoint** (the SDK-blessed event-based sync mech
 | Risk | Severity | Mitigation |
 |---|---|---|
 | Proton SDK breaking crypto-model change lands mid-build | High | Pin SDK version; budget rework. Keep `drive/client.ts` thin so re-port surface is small. |
-| SRP port subtly wrong → can't log in or 2FA breaks | High | Start from official open-source Proton client code. Comprehensive integration test against real Proton account before any other work. |
+| SRP port subtly wrong → can't log in or 2FA breaks | High | Vendor source from official `@proton/srp` workspace package (don't reimplement). Comprehensive integration test against real Proton account before any other work. |
+| Vendored SRP/crypto code drifts from upstream over time | Medium | Pin to a specific WebClients commit SHA in the vendor directory's README. Periodically re-vendor if Proton changes auth. |
 | Tesseract.js performance unusable on older phones | Medium | Test on owner's phone early. Fallback: server-side OCR if needed (architecture supports the swap). |
 | Haiku misclassifies → wrong folder | Low | Always-confirm UX catches it. Hallucination guard rejects unknown folder linkIds. |
 | Reverse proxy / tunnel down → app unreachable | Low | Outbox queue means scans aren't lost; user retries when proxy recovers. |
