@@ -85,7 +85,7 @@ Two deployable units in one Docker image:
   - `POST /api/auth/login`
   - `POST /api/auth/logout`
   - `GET /api/folders` (cached tree)
-  - `POST /api/classify` (multipart: PDF + OCR text + thumbnail → suggestion)
+  - `POST /api/classify` (multipart: 512px page-1 thumbnail + OCR text → suggestion). Note: the full PDF is **not** sent at this step; it stays on the phone until upload.
   - `POST /api/upload` (PDF + chosen name + folder linkId → upload, record, return Drive link)
   - Static asset serving for the PWA.
 - **`config.ts`** — Loads env vars; fails fast if any required value is missing. No defaults for secrets.
@@ -128,7 +128,7 @@ Same as Journey B from step 4. Image uploads run through flatten + OCR; PDFs ski
 
 ### Journey D: Folder-tree refresh
 
-Server polls Proton's event endpoint every 5 minutes (Proton's recommended cadence for personal apps), applies deltas to cache. PWA fetches fresh tree on each scan-confirmation step.
+Server calls Proton's **events endpoint** (the SDK-blessed event-based sync mechanism — *not* recursive folder traversal) every 5 minutes, applies deltas to cache. This satisfies the "use event-based sync" ToS requirement; the 5-minute cadence is Proton's recommended polling interval *of the events endpoint*. PWA fetches fresh tree on each scan-confirmation step.
 
 ## Error Handling & Edge Cases
 
@@ -209,5 +209,5 @@ Server polls Proton's event endpoint every 5 minutes (Proton's recommended caden
 
 ## Open Questions
 
-- 2FA method assumption: TOTP-only, or do we also need to support FIDO2/U2F? (TOTP covers the common case; FIDO2 in browser would add complexity. Confirm during implementation.)
+- 2FA method: **TOTP only for v1.** The `login(email, password, totp?)` signature bakes this assumption in. FIDO2/U2F is explicitly out of scope for v1; if needed later, it requires a separate auth flow and is a non-trivial addition.
 - Anthropic API key rotation cadence — env var only, or worth a small admin endpoint? (Defer; env var is fine for v1.)
