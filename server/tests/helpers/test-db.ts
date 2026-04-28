@@ -14,3 +14,11 @@ export function createTestDb(): { db: DB; cleanup: () => void } {
     },
   };
 }
+
+export function createTestDbPath(): { path: string; cleanup: () => void } {
+  const dir = mkdtempSync(join(tmpdir(), 'docscanner-test-'));
+  return {
+    path: join(dir, 'test.db'),
+    cleanup: () => rmSync(dir, { recursive: true, force: true }),
+  };
+}

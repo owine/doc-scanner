@@ -21,9 +21,12 @@ function runMigrations(db: DB): void {
   db.exec(`CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL DEFAULT (datetime('now')));`);
   const current = (db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number | null }).v ?? 0;
 
+  const FILENAME_RE = /^(\d+)_.+\.sql$/;
   const files = readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).sort();
   for (const file of files) {
-    const version = parseInt(file.split('_')[0]!, 10);
+    const match = FILENAME_RE.exec(file);
+    if (!match) throw new Error(`Invalid migration filename: ${file} (expected NNN_description.sql)`);
+    const version = parseInt(match[1]!, 10);
     if (version <= current) continue;
     const sql = readFileSync(join(MIGRATIONS_DIR, file), 'utf8');
     logger.info({ file, version }, 'applying migration');

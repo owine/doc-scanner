@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS audit_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   timestamp TEXT NOT NULL DEFAULT (datetime('now')),
   event TEXT NOT NULL,
-  detail TEXT,
+  detail TEXT CHECK (detail IS NULL OR json_valid(detail)),
   remote_user TEXT
 );
 
