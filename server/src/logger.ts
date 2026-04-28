@@ -1,7 +1,9 @@
-import pino from 'pino';
-export const logger = pino({
+import pino, { type LoggerOptions } from 'pino';
+
+const options: LoggerOptions = {
   level: process.env.LOG_LEVEL ?? 'info',
-  transport: process.env.NODE_ENV === 'production'
-    ? undefined
-    : { target: 'pino-pretty', options: { colorize: true } },
-});
+};
+if (process.env.NODE_ENV !== 'production') {
+  options.transport = { target: 'pino-pretty', options: { colorize: true } };
+}
+export const logger = pino(options);

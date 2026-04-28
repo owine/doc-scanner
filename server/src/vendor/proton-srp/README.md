@@ -114,7 +114,22 @@ vendored SRP code: `CryptoProxy`, `VERIFICATION_STATUS`, and the
 
 ## Configuration changes outside the vendor tree
 
-`server/tsconfig.json` was modified to:
+The vendored code is type-checked under a separate
+`server/src/vendor/tsconfig.json` with `noUncheckedIndexedAccess: false` and
+`exactOptionalPropertyTypes: false`. The vendored code does not satisfy these
+extra-strict checks (e.g., it indexes static lookup tables without `?? ''`
+and passes `undefined` to optional parameters). Per policy we cannot rewrite
+the vendored logic, and these two flags are above and beyond the standard
+`strict: true` baseline.
+
+The main `server/tsconfig.json` excludes `src/vendor/**` from its compilation,
+so production code is type-checked normally and gets the strict flags
+(`noUncheckedIndexedAccess: true`, `exactOptionalPropertyTypes: true`).
+Production code that imports from `@vendor/proton-srp/*` is type-checked
+under the strict main config — only the vendored module's internal type
+checking is relaxed.
+
+`server/tsconfig.json` was also modified to:
 
 1. Add `"lib": ["ES2022", "ESNext.TypedArrays"]` so TypeScript knows about
    `Uint8Array.fromBase64`, `Uint8Array.prototype.toBase64`, and `.toHex`,
@@ -122,13 +137,9 @@ vendored SRP code: `CryptoProxy`, `VERIFICATION_STATUS`, and the
    ECMAScript proposals available in Node 22+.
 2. Add `"paths": { "@vendor/proton-srp/*": ["./src/vendor/proton-srp/*"] }`
    so consumer code can import via the `@vendor/proton-srp/*` alias.
-3. Disable `"noUncheckedIndexedAccess"` and `"exactOptionalPropertyTypes"`
-   (both enabled in the root `tsconfig.base.json`). The vendored code does
-   not satisfy these extra-strict checks (e.g., it indexes static lookup
-   tables without `?? ''` and passes `undefined` to optional parameters).
-   Per policy we cannot rewrite the vendored logic, and these two flags are
-   above and beyond the standard `strict: true` baseline. All other strict
-   checks remain in force.
+
+`npm run typecheck` runs both tsconfigs: the main one against `src/` (excluding
+vendor), and the vendor one against `src/vendor/`.
 
 `server/package.json` gained a runtime dependency on `bcryptjs` (pinned
 exact, currently `3.0.3`). The vendored `passwords.ts` and `keys.ts`

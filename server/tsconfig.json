@@ -5,11 +5,12 @@
     "rootDir": "src",
     "types": ["node"],
     "lib": ["ES2022", "ESNext.TypedArrays"],
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
     "paths": {
       "@vendor/proton-srp/*": ["./src/vendor/proton-srp/*"]
-    },
-    "noUncheckedIndexedAccess": false,
-    "exactOptionalPropertyTypes": false
+    }
   },
-  "include": ["src/**/*", "tests/**/*"]
+  "include": ["src/**/*"],
+  "exclude": ["src/vendor/**", "tests/**", "dist", "node_modules"]
 }
