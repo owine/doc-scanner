@@ -1,0 +1,11 @@
+services:
+  app:
+    build: .
+    ports: ["3000:3000"]
+    volumes: ["./data:/data"]
+    environment:
+      SESSION_ENCRYPTION_KEY: ${SESSION_ENCRYPTION_KEY:?required}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?required}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      TRUST_PROXY: "true"
+    restart: unless-stopped
