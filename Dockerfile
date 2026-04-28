@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-FROM node:20.20.2-alpine3.22 AS deps
+FROM node:24.15.0-alpine AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY server/package.json ./server/
@@ -17,7 +17,7 @@ RUN cd server && npx tsc -p src/vendor/tsconfig.json --noEmit false --outDir dis
  && echo '{"type":"commonjs"}' > dist/vendor/package.json
 RUN npm --workspace @doc-scanner/pwa run build
 
-FROM node:20.20.2-alpine3.22 AS runtime
+FROM node:24.15.0-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 RUN apk add --no-cache tini
