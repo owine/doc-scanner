@@ -3,7 +3,13 @@
   "compilerOptions": {
     "outDir": "dist",
     "rootDir": "src",
-    "types": ["node"]
+    "types": ["node"],
+    "lib": ["ES2022", "ESNext.TypedArrays"],
+    "paths": {
+      "@vendor/proton-srp/*": ["./src/vendor/proton-srp/*"]
+    },
+    "noUncheckedIndexedAccess": false,
+    "exactOptionalPropertyTypes": false
   },
   "include": ["src/**/*", "tests/**/*"]
 }
