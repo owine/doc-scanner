@@ -1,0 +1,83 @@
+export interface AuthInfo {
+  Version: number;
+  Modulus: string;
+  ServerEphemeral: string;
+  Salt: string;
+  SRPSession: string;
+  '2FA'?: { Enabled: number; TOTP: number; FIDO2?: unknown };
+}
+
+export interface AuthResponse {
+  AccessToken: string;
+  RefreshToken: string;
+  TokenType: string;
+  Scope: string;
+  UID: string;
+  UserID: string;
+  EventID: string;
+  '2FA'?: { Enabled: number };
+}
+
+export class ProtonApi {
+  constructor(private readonly baseUrl: string, private readonly appVersion: string) {}
+
+  async getAuthInfo(username: string): Promise<AuthInfo> {
+    return this.request<AuthInfo>('POST', '/auth/v4/info', { Username: username });
+  }
+
+  async submitAuth(body: {
+    Username: string;
+    ClientEphemeral: string;
+    ClientProof: string;
+    SRPSession: string;
+  }): Promise<AuthResponse> {
+    return this.request<AuthResponse>('POST', '/auth/v4', body);
+  }
+
+  async submit2FA(uid: string, accessToken: string, totp: string): Promise<{ Code: number }> {
+    return this.request<{ Code: number }>('POST', '/auth/v4/2fa', { TwoFactorCode: totp }, {
+      'x-pm-uid': uid,
+      authorization: `Bearer ${accessToken}`,
+    });
+  }
+
+  async refresh(uid: string, refreshToken: string): Promise<AuthResponse> {
+    return this.request<AuthResponse>('POST', '/auth/v4/refresh', {
+      ResponseType: 'token',
+      GrantType: 'refresh_token',
+      RefreshToken: refreshToken,
+      RedirectURI: 'https://protonmail.com',
+    }, { 'x-pm-uid': uid });
+  }
+
+  private async request<T>(method: string, path: string, body?: unknown, extraHeaders: Record<string, string> = {}): Promise<T> {
+    const init: RequestInit = {
+      method,
+      headers: {
+        'content-type': 'application/json',
+        accept: 'application/json',
+        'x-pm-appversion': this.appVersion,
+        ...extraHeaders,
+      },
+    };
+    if (body !== undefined) {
+      init.body = JSON.stringify(body);
+    }
+    const res = await fetch(`${this.baseUrl}${path}`, init);
+    const text = await res.text();
+    let parsed: unknown;
+    try { parsed = text ? JSON.parse(text) : {}; } catch { parsed = { raw: text }; }
+    if (!res.ok) {
+      const err = parsed as { Error?: string; Code?: number };
+      throw new ProtonApiError(err.Error ?? `HTTP ${res.status}`, res.status, err.Code);
+    }
+    return parsed as T;
+  }
+}
+
+export class ProtonApiError extends Error {
+  constructor(message: string, public readonly status: number, public readonly code?: number) {
+    super(message);
+    this.name = 'ProtonApiError';
+  }
+}
