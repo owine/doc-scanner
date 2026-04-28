@@ -74,6 +74,23 @@ node -e "const b3 = require('bcryptjs'); console.log('v3:', b3.hashSync('x','$2a
 
 If the SDK works with v3 (likely; bcryptjs API has been stable), keep `3.0.3`. If npm complains or the SDK's own tests don't run against 3.x, downgrade by setting `"bcryptjs": "2.4.3"` exactly in `server/package.json` and running `npm install`. **Document the decision** in the findings file.
 
+- [ ] **Step 2b: Resolve KeySalt source from Proton API**
+
+The vendored `computeKeyPassword(password: string, salt: string): Promise<string>` requires a 24-char base64 salt (16 binary bytes) — this is the user's **KeySalt**, distinct from the SRP `info.Salt` returned by `/auth/v4/info` (which only governs SRP password hashing). The KeySalt may come from one of:
+
+1. `/core/v4/keys/salts` — explicit endpoint
+2. The auth response body's extra fields (some Proton API versions include it inline)
+3. The user object at `/users`
+4. The keys list at `/core/v4/keys/all`
+
+Determine the actual source for the SDK version we installed. Reference the SDK's own auth flow or hit a real test account once with logging to capture the response shapes:
+
+```bash
+grep -rn "KeySalt\|keySalt\|keysalts" /Users/owine/Git/doc-scanner/node_modules/@protontech/drive-sdk/dist/ | head -20
+```
+
+Also record the answer in the findings file. **Task 4 and Task 14 depend on this.**
+
 - [ ] **Step 3: Inspect SDK constructor wiring**
 
 Read enough of the SDK source to answer: does `OpenPGPCryptoWithCryptoProxy` set CryptoProxy globally (singleton) or per-instance?
@@ -100,6 +117,10 @@ Create `docs/superpowers/notes/2026-04-28-drive-sdk-findings.md`:
 
 **SDK version installed:** <exact pinned version>
 **openpgp version installed:** <exact pinned version>
+
+## KeySalt source
+
+<one paragraph: which endpoint or response field provides the user's KeySalt; cite file:line in SDK source if applicable, or describe the test-account response field that contains it. Task 4 and Task 14 depend on this answer.>
 
 ## bcryptjs decision
 
@@ -557,8 +578,10 @@ describe('fetchAndDecryptUserKey', () => {
       getAuthInfo: vi.fn(),  // unused
     } as unknown as ProtonApi;
 
-    // Phase 2 derives mailbox password via vendored computeKeyPassword(plaintext, salt)
-    // For this unit test, we bypass that path by passing the pre-derived bytes.
+    // Phase 2 derives mailbox password via vendored computeKeyPassword(plaintext, keySalt)
+    // which returns a STRING (bcrypt-derived ASCII passphrase). We encode it to
+    // Uint8Array for storage in MailboxSecret. For this unit test, we bypass
+    // the derivation and pass the pre-encoded passphrase bytes directly.
     // The full login-with-keys integration test exercises the real derivation.
     const result = await fetchAndDecryptUserKey({
       api: fakeApi,
@@ -1730,8 +1753,20 @@ import { computeKeyPassword } from '../vendor/proton-srp/keys.js';
 import { MailboxSecret } from './secrets/mailbox-password.js';
 import { fetchAndDecryptUserKey } from './keys.js';
 
-// inside login(), after the auth response is available:
-const mailboxPasswordBytes = await computeKeyPassword(password, info.Salt);
+// inside login(), after the auth response is available.
+//
+// IMPORTANT: computeKeyPassword takes the user's KEY SALT, NOT the SRP info.Salt.
+// They are distinct: info.Salt (from /auth/v4/info) governs SRP password hashing
+// during authentication. The KeySalt is what derives the mailbox password used
+// to decrypt the user's PGP private key. Source for KeySalt is resolved during
+// Task 1 Step 2b — see the findings file for the actual endpoint or field.
+//
+// computeKeyPassword(password, salt) returns a STRING (bcrypt ASCII), so we
+// encode to bytes for MailboxSecret storage and decode in keys.ts before
+// passing to openpgp.decryptKey.
+const keySalt = /* fetched per Task 1 Step 2b finding */ '';
+const mailboxPassphrase = await computeKeyPassword(password, keySalt);
+const mailboxPasswordBytes = new TextEncoder().encode(mailboxPassphrase);
 const mailboxSecret = new MailboxSecret(mailboxPasswordBytes);
 
 const decryptedKeys = await fetchAndDecryptUserKey({
