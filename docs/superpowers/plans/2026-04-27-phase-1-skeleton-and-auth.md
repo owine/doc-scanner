@@ -750,8 +750,36 @@ When all true, Phase 1 is done; ready for Phase 2 (Drive integration).
 
 ---
 
-## Smoke Results (filled in during Task 11)
+## Smoke Results
 
-_Date:_
-_WebClients SHA pinned:_
-_Notes:_
+**Date:** 2026-04-28
+**WebClients SHA pinned:** `c324b82f2b83867798d942e115c1fd12cbd73f5b`
+**Node runtime:** `24.15.0-alpine` (bumped from initially-pinned `20.20.2-alpine3.22` during smoke — see Notes)
+**Test account:** `testingdocscanner@proton.me` (dedicated, no 2FA)
+
+**Verified end-to-end:**
+- PWA loads at `http://localhost:5173/` (Vite dev) with credential warning banner
+- Login form submits to `/api/auth/login` (proxied through Vite to Docker'd API on :3000)
+- Real-Proton SRP exchange completes against `https://mail.proton.me/api`
+- Session encrypted with AES-GCM and persisted to `/data/app.db` SQLite
+- HttpOnly + SameSite=Strict + Secure cookie issued and round-tripped through the Vite proxy
+- StatusScreen renders "Logged in as testingdocscanner@proton.me"
+- Sign out clears session
+
+**Issues surfaced and fixed during smoke:**
+
+1. **Node version pin chosen too conservatively** (`20.20.2`) — Node 20 exits LTS maintenance imminently in 2026. Bumped to `24.15.0` (Krypton, Active LTS through April 2028).
+
+2. **Stage-3 typed-array methods missing in all Node releases** — vendored `@proton/srp` uses `Uint8Array.fromBase64`, `prototype.toBase64`, `prototype.toHex` (TC39 Stage 3). Modern browsers ship these; no Node release through 24.15 enables them by default. Added `server/src/polyfills/typed-array-base64.ts` (Buffer-backed) imported as first line of `index.ts`. **The unit + integration test suite did not catch this** — vitest ran on whatever Node the host had at the time, which on the integration-test run was a Node version that happened to work; the alpine Docker runtime was the first test of the failing path.
+
+3. **Conflicting `house-manager-web-1` container on port 3000** (operator-local, unrelated). Resolved by stopping that container during smoke.
+
+4. **Local dev shell needed `fnm`** to satisfy `engines.node` strict pin. `brew install fnm && fnm use` (picks up `.nvmrc`) is the documented path; system-installed Node will trip `engine-strict=true` from `.npmrc`.
+
+**Known limitations carried forward from Phase 1 (acceptable per spec):**
+
+- In-memory `liveSids` set in `http/middleware.ts` resets on container restart — server restart forces re-login. Encrypted session blob in SQLite *is* preserved across restarts; only the cookie-binding map is volatile. Persisting sids is trivial Phase 2 work.
+- Modulus signature verification is stubbed in `server/src/auth/crypto-impl.ts` — TLS-to-Proton is the trust boundary. Wiring real OpenPGP verification is deferred to a later phase.
+- PWA static assets are bundled into the runtime image but not served by the API. Dev story requires Vite dev server alongside the Docker container. Phase 4 wires up same-origin static serving.
+
+**Phase 1 closed:** all five definition-of-done criteria met. Tagged `phase-1-complete` at HEAD of `main`.
