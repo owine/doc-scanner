@@ -1,3 +1,5 @@
+import './polyfills/typed-array-base64.js';
+
 import { serve } from '@hono/node-server';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
