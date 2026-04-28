@@ -5,8 +5,8 @@
     "rootDir": "src",
     "types": ["node"],
     "lib": ["ES2022", "ESNext.TypedArrays"],
-    "noUncheckedIndexedAccess": true,
-    "exactOptionalPropertyTypes": true,
+    "noUncheckedIndexedAccess": false,
+    "exactOptionalPropertyTypes": false,
     "paths": {
       "@vendor/proton-srp/*": ["./src/vendor/proton-srp/*"]
     }

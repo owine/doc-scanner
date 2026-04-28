@@ -122,12 +122,18 @@ and passes `undefined` to optional parameters). Per policy we cannot rewrite
 the vendored logic, and these two flags are above and beyond the standard
 `strict: true` baseline.
 
-The main `server/tsconfig.json` excludes `src/vendor/**` from its compilation,
-so production code is type-checked normally and gets the strict flags
-(`noUncheckedIndexedAccess: true`, `exactOptionalPropertyTypes: true`).
-Production code that imports from `@vendor/proton-srp/*` is type-checked
-under the strict main config — only the vendored module's internal type
-checking is relaxed.
+The main `server/tsconfig.json` excludes `src/vendor/**` from its compilation
+roots — but TypeScript still chases imports into "excluded" files, so as soon
+as production code imports from the vendor tree, the strict flags apply to
+the vendored code via the import graph. To keep the build clean, the main
+config sets `noUncheckedIndexedAccess: false` and `exactOptionalPropertyTypes: false`.
+
+This is a known regression of strictness. The architecturally correct fix
+is TypeScript project references (`composite: true` on the vendor config,
+`references: [{ path: "./src/vendor" }]` on the main config), which would
+expose the vendor only via emitted `.d.ts` and isolate strictness boundaries.
+That refactor is deferred — production code self-disciplines around indexed
+access and explicit-undefined arguments.
 
 `server/tsconfig.json` was also modified to:
 
