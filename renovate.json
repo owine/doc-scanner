@@ -20,23 +20,35 @@
     },
     {
       "description": "Auto-merge type definition updates",
-      "matchPackagePatterns": ["^@types/"],
-      "automerge": true
+      "automerge": true,
+      "matchPackageNames": [
+        "/^@types//"
+      ]
     },
     {
       "description": "Group all Hono updates together",
-      "matchPackagePatterns": ["^hono$", "^@hono/"],
-      "groupName": "hono"
+      "groupName": "hono",
+      "matchPackageNames": [
+        "/^hono$/",
+        "/^@hono//"
+      ]
     },
     {
       "description": "Group all Vitest updates",
-      "matchPackagePatterns": ["^vitest$", "^@vitest/"],
-      "groupName": "vitest"
+      "groupName": "vitest",
+      "matchPackageNames": [
+        "/^vitest$/",
+        "/^@vitest//"
+      ]
     },
     {
       "description": "Group all Preact + Vite tooling",
-      "matchPackagePatterns": ["^preact$", "^@preact/", "^vite$"],
-      "groupName": "preact-vite"
+      "groupName": "preact-vite",
+      "matchPackageNames": [
+        "/^preact$/",
+        "/^@preact//",
+        "/^vite$/"
+      ]
     },
     {
       "description": "Hold major upgrades for manual review",
