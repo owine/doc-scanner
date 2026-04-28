@@ -56,6 +56,8 @@ export class ProtonApi {
       headers: {
         'content-type': 'application/json',
         accept: 'application/json',
+        'accept-language': 'en-US,en;q=0.9',
+        'user-agent': `Mozilla/5.0 (compatible; ${this.appVersion})`,
         'x-pm-appversion': this.appVersion,
         ...extraHeaders,
       },
