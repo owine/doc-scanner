@@ -142,7 +142,7 @@ End state: hit `POST /api/drive/test-upload`, see a file appear in Proton Drive'
 5. SDK encrypts payload locally, calls `DriveHttpClient.fetch(...)` for chunk upload.
 6. SDK populates entities + crypto caches transparently.
 7. Returns `{ nodeUid }`. Server constructs `driveUrl` (Drive web format), writes audit log entry.
-8. Response: `{ nodeUid, driveUrl }`.
+8. Response: `{ nodeUid, driveUrl }`. `driveUrl` format prefers SDK's `experimental.getNodeUrl(nodeUid)` helper if exposed; otherwise falls back to `https://drive.proton.me/u/0/${nodeUid}` matching Proton's web client URL convention.
 
 ### Journey C: Token refresh mid-flight
 
@@ -244,7 +244,7 @@ End state: hit `POST /api/drive/test-upload`, see a file appear in Proton Drive'
 
 ## Definition of Done
 
-- All unit tests pass (`npm test` from repo root): Phase 1's 21 + new ones.
+- All unit tests pass (`npm test` from repo root): all existing tests + new Phase 2 tests.
 - Integration tests pass with `INTEGRATION=1` against real Proton test account: Phase 1's SRP login + new login-with-keys + list-root + upload (with cleanup).
 - Phase 1 manual smoke (login + status persistence) still works.
 - Phase 2 manual smoke succeeds end-to-end.
@@ -253,6 +253,8 @@ End state: hit `POST /api/drive/test-upload`, see a file appear in Proton Drive'
 
 ## Open Questions
 
-- Whether `bcryptjs ^2.4.3` (SDK) and `3.0.3` (Phase 1) are compatible — verify at install.
-- Whether the SDK's `OpenPGPCryptoWithCryptoProxy` requires CryptoProxy to be set globally (singleton) or accepts per-instance wiring — TBD by SDK source inspection during implementation.
+The implementation plan should carve out a **first investigative task** that resolves these before further design commitments are locked in. Both are install-time / source-inspection checks, not architectural unknowns.
+
+- Whether `bcryptjs ^2.4.3` (SDK) and `3.0.3` (Phase 1) are compatible — verify at install. If incompatible, downgrade to a 2.x patch and document.
+- Whether the SDK's `OpenPGPCryptoWithCryptoProxy` requires CryptoProxy to be set globally (singleton) or accepts per-instance wiring — read SDK source under `node_modules/@protontech/drive-sdk/dist/` to confirm before writing the adapter.
 - Path to Phase 5's persistent `liveSids` change: when that lands, decide whether to also persist mailbox password (encrypted) or keep "Drive-needing operations require re-login" UX — out of scope for Phase 2.
