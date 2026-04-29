@@ -2,10 +2,10 @@
 // Caches the scanner chunk (split out by Vite as a dynamic-import chunk) and
 // the jscanify wasm so subsequent opens work fully offline.
 
-const CACHE_NAME = 'docscanner-scanner-v1';
+const CACHE_NAME = 'docscanner-scanner-v2';
 const RUNTIME_CACHE_PATTERNS = [
-  /\/assets\/scanner-jscanify-.*\.js$/,
   /\/assets\/scanner-core-.*\.js$/,
+  /\/scanner\//,
   /\/opencv\//,
 ];
 

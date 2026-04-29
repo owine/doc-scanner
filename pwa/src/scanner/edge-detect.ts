@@ -3,14 +3,25 @@ import type { Quad } from './types.js';
 export const JPEG_QUALITY = 0.92;
 export const MAX_EDGE_PX = 2200;
 
+function injectScript(src: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = src;
+    script.async = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error(`failed to load ${src}`));
+    document.head.appendChild(script);
+  });
+}
+
 let opencvPromise: Promise<void> | null = null;
 
 function loadOpenCV(): Promise<void> {
   if (!opencvPromise) {
     opencvPromise = new Promise<void>((resolve, reject) => {
       if ((globalThis as any).cv?.getBuildInformation) { resolve(); return; }
-      // Assign Module.onRuntimeInitialized BEFORE injecting the script so that
-      // a cached response whose wasm finishes before script.onload fires still
+      // Assign Module.onRuntimeInitialized BEFORE injecting the script so a
+      // cached response whose wasm finishes before script.onload fires still
       // triggers the callback.
       (globalThis as any).Module = { onRuntimeInitialized: () => resolve() };
       const script = document.createElement('script');
@@ -23,15 +34,27 @@ function loadOpenCV(): Promise<void> {
   return opencvPromise;
 }
 
+let jscanifyPromise: Promise<void> | null = null;
+
+function loadJscanify(): Promise<void> {
+  if (!jscanifyPromise) {
+    jscanifyPromise = (async () => {
+      if ((globalThis as any).jscanify) return;
+      await injectScript('/scanner/jscanify.js');
+    })();
+  }
+  return jscanifyPromise;
+}
+
 let modulePromise: Promise<{ scanner: any }> | null = null;
 
 async function loadScanner() {
   if (!modulePromise) {
     modulePromise = (async () => {
       await loadOpenCV();
-      // @ts-expect-error - jscanify has no upstream types
-      const mod = await import('jscanify');
-      const Scanner = mod.default ?? mod;
+      await loadJscanify();
+      const Scanner = (globalThis as any).jscanify;
+      if (!Scanner) throw new Error('jscanify global not found after load');
       const scanner = new Scanner();
       return { scanner };
     })();

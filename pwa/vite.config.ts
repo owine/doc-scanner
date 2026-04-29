@@ -11,7 +11,7 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks(id) {
-          if (id.includes('jscanify')) return 'scanner-jscanify';
+          // jscanify is loaded via <script> tag from /scanner/jscanify.js, not bundled.
           if (id.includes('/scanner/edge-detect') || id.includes('/scanner/scanner-session')) return 'scanner-core';
         },
       },
