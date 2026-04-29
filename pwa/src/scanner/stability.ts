@@ -2,11 +2,12 @@ import type { Quad } from './types.js';
 
 export type StabilityState = 'searching' | 'counting' | 'stable';
 export const STABILITY_WINDOW_MS = 1500;
-// Tuned empirically on iPhone with 1080-wide camera frames: jscanify's corner
-// extremes jitter ~30-50px frame-to-frame on textured backgrounds because the
-// "largest contour" alternates between the page outline and noise. A tighter
-// threshold prevents auto-capture from ever firing on real-world surfaces.
-export const STABILITY_DRIFT_PX = 60;
+// Tuned empirically on iPhone with 1080-wide camera frames combined with
+// EMA quad smoothing in scanner-session: jscanify's corner extremes are
+// inherently noisy on textured backgrounds (the "largest contour" alternates
+// between the page outline and other blobs), so a generous threshold here is
+// what makes auto-capture viable at all. Real-world testing settled at 100.
+export const STABILITY_DRIFT_PX = 100;
 
 interface Sample { quad: Quad; t: number; }
 

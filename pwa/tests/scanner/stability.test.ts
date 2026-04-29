@@ -31,8 +31,8 @@ describe('StabilityDetector', () => {
   it('does not return stable when corners drift beyond threshold', () => {
     const s = new StabilityDetector();
     s.update(quad(10, 10), 0);
-    // Each corner moves by hypot(90,90) ≈ 127px, well past the 60px threshold.
-    expect(s.update(quad(100, 100), 1500)).toBe('counting');
+    // Each corner moves by hypot(150,150) ≈ 212px, well past the 100px threshold.
+    expect(s.update(quad(160, 160), 1500)).toBe('counting');
   });
 
   it('resets counting when quad disappears', () => {

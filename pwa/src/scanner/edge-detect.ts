@@ -81,7 +81,15 @@ export async function findQuad(canvas: HTMLCanvasElement): Promise<FindQuadResul
   let img: any = null;
   try {
     img = cv.imread(canvas);
-    const contour = scanner.findPaperContour(img);
+    // jscanify's findPaperContour calls contours.get(-1) when zero contours are
+    // found, which throws an embind "outside valid range" error. Treat all
+    // failures here as "no quad detected" rather than surfacing as an error.
+    let contour: any;
+    try {
+      contour = scanner.findPaperContour(img);
+    } catch {
+      return result;
+    }
     if (!contour || !contour.data32S) return result;
     result.contourPts = contour.data32S.length / 2;
     if (result.contourPts < 4) return result;
