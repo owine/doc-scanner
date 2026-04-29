@@ -14,5 +14,14 @@ export function App() {
   }, []);
 
   if (!loaded) return <main style={{ padding: 16 }}>Loading…</main>;
-  return email ? <StatusScreen email={email} onLoggedOut={() => setEmail(null)} /> : <LoginScreen onLoggedIn={setEmail} />;
+  return email ? (
+    <StatusScreen
+      email={email}
+      onLoggedOut={() => setEmail(null)}
+      onNewScan={() => console.warn('scanner not wired yet')}
+      onViewSavedScans={() => console.warn('saved scans not wired yet')}
+    />
+  ) : (
+    <LoginScreen onLoggedIn={setEmail} />
+  );
 }
