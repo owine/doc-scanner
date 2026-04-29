@@ -50,7 +50,7 @@ export function SavedScansScreen({ store, onBack, onNewScan, onView }: SavedScan
   }
 
   return (
-    <main style={{ minHeight: '100vh', background: 'var(--bg)' }}>
+    <main style={{ minHeight: '100dvh', background: 'var(--bg)' }}>
       <header style={{ display: 'flex', justifyContent: 'space-between', padding: 12, background: 'var(--bg-elev)', borderBottom: '1px solid var(--border)' }}>
         <button class="btn btn-secondary" onClick={onBack}>← Back</button>
         <strong>Saved Scans</strong>

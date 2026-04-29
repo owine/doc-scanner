@@ -33,7 +33,7 @@ export function ScanViewerScreen({ store, scanId, onBack }: ScanViewerScreenProp
   if (urls.length === 0) return <main class="auth-screen"><p class="muted">Loading…</p></main>;
 
   return (
-    <main style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: 'var(--bg)' }}>
+    <main style={{ display: 'flex', flexDirection: 'column', height: '100dvh', background: 'var(--bg)', paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' }}>
       <header style={{ display: 'flex', justifyContent: 'space-between', padding: 12, background: 'var(--bg-elev)', borderBottom: '1px solid var(--border)' }}>
         <button class="btn btn-secondary" onClick={onBack}>← Back</button>
         <strong>{idx + 1} / {pages.length}</strong>

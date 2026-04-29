@@ -29,11 +29,22 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: (email: string) => voi
         only to your own server. Proton does not endorse this app. Your password is never stored.
       </div>
       <form onSubmit={submit}>
-        <label>Email<br /><input type="email" value={email} onInput={(e) => setEmail((e.target as HTMLInputElement).value)} required autoComplete="username" /></label><br /><br />
-        <label>Password<br /><input type="password" value={password} onInput={(e) => setPassword((e.target as HTMLInputElement).value)} required autoComplete="current-password" /></label><br /><br />
-        {needsTotp && (<><label>TOTP<br /><input type="text" inputMode="numeric" pattern="\d{6}" maxLength={6} value={totp} onInput={(e) => setTotp((e.target as HTMLInputElement).value)} required /></label><br /><br /></>)}
+        <label class="field">
+          <span class="field-label">Email</span>
+          <input type="email" value={email} onInput={(e) => setEmail((e.target as HTMLInputElement).value)} required autoComplete="username" />
+        </label>
+        <label class="field">
+          <span class="field-label">Password</span>
+          <input type="password" value={password} onInput={(e) => setPassword((e.target as HTMLInputElement).value)} required autoComplete="current-password" />
+        </label>
+        {needsTotp && (
+          <label class="field">
+            <span class="field-label">TOTP</span>
+            <input type="text" inputMode="numeric" pattern="\d{6}" maxLength={6} value={totp} onInput={(e) => setTotp((e.target as HTMLInputElement).value)} required />
+          </label>
+        )}
         {error && <p class="error-text">{error}</p>}
-        <button type="submit" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
+        <button class="btn btn-block" type="submit" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
       </form>
     </main>
   );

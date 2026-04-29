@@ -67,7 +67,7 @@ export function EditCornersScreen({ canvas, initialQuad, onCancel, onApply }: Ed
   const valid = quadIsValid(quad);
 
   return (
-    <main style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: 'var(--bg)' }}>
+    <main style={{ display: 'flex', flexDirection: 'column', height: '100dvh', background: 'var(--bg)', paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' }}>
       <header style={{ display: 'flex', justifyContent: 'space-between', padding: 12, background: 'var(--bg-elev)', borderBottom: '1px solid var(--border)' }}>
         <button class="btn btn-secondary" onClick={onCancel}>Cancel</button>
         <strong>Adjust corners</strong>

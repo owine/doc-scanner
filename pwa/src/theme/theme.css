@@ -65,18 +65,37 @@ body { font-family: -apple-system, system-ui, sans-serif; }
 
 .btn {
   background: var(--accent); color: var(--accent-fg);
-  border: none; padding: 10px 16px; border-radius: 6px;
-  font-size: 14px; font-weight: 500; cursor: pointer;
+  border: none; padding: 12px 16px; border-radius: 6px;
+  font-size: 16px; font-weight: 500; cursor: pointer;
+  min-height: 44px;
 }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-secondary { background: transparent; color: var(--fg); border: 1px solid var(--border); }
 .btn-danger { background: var(--danger); color: #fff; }
+.btn-block { display: block; width: 100%; }
 
 .card { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
 .warn { background: var(--warn-bg); border: 1px solid var(--warn-border); padding: 12px; border-radius: 6px; }
 .muted { color: var(--fg-muted); font-size: 13px; }
 
-input, select { background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 4px; padding: 6px 8px; }
+input, select {
+  background: var(--bg); color: var(--fg);
+  border: 1px solid var(--border); border-radius: 6px;
+  padding: 10px 12px; font-size: 16px;
+  width: 100%; box-sizing: border-box;
+}
 
-.auth-screen { max-width: 400px; margin: 40px auto; padding: 16px; }
+.field { display: block; margin-bottom: 16px; }
+.field-label { display: block; font-size: 14px; font-weight: 500; margin-bottom: 6px; }
+
+.auth-screen {
+  max-width: 480px; margin: 0 auto;
+  padding: 24px 16px;
+  padding-top: max(24px, env(safe-area-inset-top));
+  padding-bottom: max(24px, env(safe-area-inset-bottom));
+}
+@media (min-width: 600px) {
+  .auth-screen { padding-top: 40px; padding-bottom: 40px; }
+}
+
 .error-text { color: var(--danger); }
