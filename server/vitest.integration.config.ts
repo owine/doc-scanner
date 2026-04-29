@@ -6,5 +6,6 @@ export default defineConfig({
     exclude: ['node_modules/**'],
     environment: 'node',
     testTimeout: 30_000,
+    setupFiles: ['./tests/setup-polyfills.ts'],
   },
 });

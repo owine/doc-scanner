@@ -4,5 +4,6 @@ export default defineConfig({
     include: ['tests/**/*.test.ts'],
     exclude: ['tests/**/*.integration.test.ts', 'node_modules/**'],
     environment: 'node',
+    setupFiles: ['./tests/setup-polyfills.ts'],
   },
 });
