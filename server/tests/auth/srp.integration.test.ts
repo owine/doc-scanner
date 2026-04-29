@@ -18,10 +18,12 @@ describe.skipIf(!RUN)('ProtonAuth (integration)', () => {
 
   it('logs in with real credentials', async () => {
     try {
-      const session = await auth.login(email!, password!, totp);
-      expect(session.uid).toBeTruthy();
-      expect(session.accessToken).toBeTruthy();
-      expect(session.refreshToken).toBeTruthy();
+      const result = await auth.login(email!, password!, totp);
+      expect(result.session.uid).toBeTruthy();
+      expect(result.session.accessToken).toBeTruthy();
+      expect(result.session.refreshToken).toBeTruthy();
+      expect(result.decryptedKeys.primaryKey).toBeDefined();
+      result.mailboxSecret.dispose();
     } catch (e) {
       if (e instanceof TwoFactorRequiredError && !totp) {
         throw new Error('Account has 2FA enabled — set PROTON_TEST_TOTP');
