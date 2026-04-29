@@ -21,6 +21,6 @@ export function createApp(deps: AppDeps): Hono {
 
   const app = new Hono();
   app.get('/api/health', (c) => c.json({ ok: true }));
-  app.route('/api/auth', authRoutes({ store, protonAuth }));
+  app.route('/api/auth', authRoutes({ store, protonAuth, db: deps.db, encryptionKey: deps.encryptionKey, appVersion: deps.appVersion }));
   return app;
 }

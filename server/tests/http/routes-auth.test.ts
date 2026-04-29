@@ -1,14 +1,41 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from 'vitest';
+import * as openpgp from 'openpgp';
 import { createApp } from '../../src/http/server.js';
 import { createTestDb } from '../helpers/test-db.js';
 import { ProtonAuth, TwoFactorRequiredError } from '../../src/auth/srp.js';
 import { _resetSids } from '../../src/http/middleware.js';
+import { _resetLiveSessions } from '../../src/auth/live-session.js';
+import { MailboxSecret } from '../../src/auth/secrets/mailbox-password.js';
+import type { DecryptedUserKey } from '../../src/auth/keys.js';
 
 let cleanupFn: (() => void) | null = null;
-beforeEach(() => { _resetSids(); });
+beforeEach(() => { _resetSids(); _resetLiveSessions(); });
 afterEach(() => { cleanupFn?.(); cleanupFn = null; vi.restoreAllMocks(); });
 
 const KEY = Buffer.alloc(32, 1).toString('base64');
+
+let testDecryptedKeys: DecryptedUserKey;
+
+beforeAll(async () => {
+  const { privateKey } = await openpgp.generateKey({
+    type: 'ecc', curve: 'ed25519Legacy',
+    userIDs: [{ email: 'e@x.test' }], passphrase: 'p', format: 'object',
+  });
+  const decrypted = await openpgp.decryptKey({ privateKey, passphrase: 'p' });
+  testDecryptedKeys = {
+    primaryAddress: { email: 'e@x.test', addressId: 'a1' },
+    primaryKey: decrypted,
+    addresses: [{ email: 'e@x.test', addressId: 'a1', key: decrypted }],
+  };
+});
+
+function makeLoginSuccess() {
+  return {
+    session: { uid: 'u', accessToken: 'a', refreshToken: 'r', email: 'e@x.test' },
+    mailboxSecret: new MailboxSecret(new Uint8Array([0])),
+    decryptedKeys: testDecryptedKeys,
+  };
+}
 
 function setup() {
   const { db, cleanup } = createTestDb(); cleanupFn = cleanup;
@@ -23,7 +50,7 @@ function setup() {
 describe('POST /api/auth/login', () => {
   it('returns 200 + sets cookie on success', async () => {
     const { app, fakeAuth } = setup();
-    (fakeAuth.login as any).mockResolvedValue({ uid: 'u', accessToken: 'a', refreshToken: 'r', email: 'e@x.test' });
+    (fakeAuth.login as any).mockResolvedValue(makeLoginSuccess());
 
     const res = await app.request('/api/auth/login', {
       method: 'POST',
@@ -79,7 +106,7 @@ describe('GET /api/auth/status', () => {
 
   it('returns 200 + email after login', async () => {
     const { app, fakeAuth } = setup();
-    (fakeAuth.login as any).mockResolvedValue({ uid: 'u', accessToken: 'a', refreshToken: 'r', email: 'e@x.test' });
+    (fakeAuth.login as any).mockResolvedValue(makeLoginSuccess());
     const login = await app.request('/api/auth/login', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -95,7 +122,7 @@ describe('GET /api/auth/status', () => {
 describe('POST /api/auth/logout', () => {
   it('clears the session and cookie', async () => {
     const { app, fakeAuth } = setup();
-    (fakeAuth.login as any).mockResolvedValue({ uid: 'u', accessToken: 'a', refreshToken: 'r', email: 'e@x.test' });
+    (fakeAuth.login as any).mockResolvedValue(makeLoginSuccess());
     const login = await app.request('/api/auth/login', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },

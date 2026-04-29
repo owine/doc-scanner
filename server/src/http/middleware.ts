@@ -3,6 +3,7 @@ import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import type { Context } from 'hono';
 import { randomBytes } from 'node:crypto';
 import type { SessionStore } from '../auth/session-store.js';
+import { getLiveSession, disposeLiveSession, type LiveSession } from '../auth/live-session.js';
 
 export const COOKIE_NAME = 'docscanner_sid';
 
@@ -12,7 +13,11 @@ export const COOKIE_NAME = 'docscanner_sid';
 // restart, which forces re-login by-design (P1 single-user behavior).
 const liveSids = new Set<string>();
 
-export interface AuthContext { email: string }
+export interface AuthContext {
+  email: string;
+  sid: string;
+  liveSession?: LiveSession;
+}
 
 type Env = { Variables: { auth?: AuthContext } };
 
@@ -20,7 +25,10 @@ export const sessionMiddleware = (store: SessionStore): MiddlewareHandler<Env> =
   const sid = getCookie(c, COOKIE_NAME);
   if (sid && liveSids.has(sid)) {
     const session = store.load();
-    if (session) c.set('auth', { email: session.email });
+    if (session) {
+      const liveSession = getLiveSession(sid);
+      c.set('auth', { email: session.email, sid, liveSession });
+    }
   }
   await next();
 };
@@ -36,7 +44,10 @@ export function issueSession(c: Context<Env>): string {
 
 export function revokeSession(c: Context<Env>): void {
   const sid = getCookie(c, COOKIE_NAME);
-  if (sid) liveSids.delete(sid);
+  if (sid) {
+    liveSids.delete(sid);
+    disposeLiveSession(sid);
+  }
   deleteCookie(c, COOKIE_NAME, { path: '/' });
 }
 

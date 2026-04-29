@@ -4,6 +4,9 @@ import { TwoFactorRequiredError, type ProtonAuth } from '../auth/srp.js';
 import type { SessionStore } from '../auth/session-store.js';
 import { issueSession, revokeSession, sessionMiddleware, type AuthContext } from './middleware.js';
 import { logger } from '../logger.js';
+import { DriveClient } from '../drive/client.js';
+import { registerLiveSession } from '../auth/live-session.js';
+import type { DB } from '../db.js';
 
 const LoginSchema = z.object({
   email: z.string().email(),
@@ -13,7 +16,13 @@ const LoginSchema = z.object({
 
 type Env = { Variables: { auth?: AuthContext } };
 
-export function authRoutes(deps: { store: SessionStore; protonAuth: ProtonAuth }) {
+export function authRoutes(deps: {
+  store: SessionStore;
+  protonAuth: ProtonAuth;
+  db: DB;
+  encryptionKey: string;
+  appVersion?: string;
+}) {
   const r = new Hono<Env>();
   r.use('*', sessionMiddleware(deps.store));
 
@@ -24,11 +33,29 @@ export function authRoutes(deps: { store: SessionStore; protonAuth: ProtonAuth }
     const { email, password, totp } = parseResult.data;
     const remoteUser = c.req.header('Remote-User');
     try {
-      const session = await deps.protonAuth.login(email, password, totp);
-      deps.store.save(session);
-      issueSession(c);
+      const result = await deps.protonAuth.login(email, password, totp);
+      deps.store.save(result.session);
+      const sid = issueSession(c);
+
+      const driveClient = new DriveClient({
+        db: deps.db,
+        encryptionKey: deps.encryptionKey,
+        appVersion: deps.appVersion ?? 'external-drive-docscanner@0.1.0',
+        user: result.decryptedKeys,
+        session: result.session,
+        protonAuth: deps.protonAuth,
+      });
+
+      registerLiveSession({
+        sid,
+        session: result.session,
+        mailboxSecret: result.mailboxSecret,
+        decryptedKeys: result.decryptedKeys,
+        driveClient,
+      });
+
       logger.info({ email, remoteUser }, 'login succeeded');
-      return c.json({ ok: true, email: session.email });
+      return c.json({ ok: true, email: result.session.email });
     } catch (e) {
       if (e instanceof TwoFactorRequiredError) return c.json({ error: 'totp_required' }, 422);
       const status = (e as { status?: number }).status === 401 ? 401 : 500;
