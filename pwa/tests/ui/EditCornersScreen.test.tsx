@@ -43,7 +43,7 @@ describe('EditCornersScreen', () => {
   it('Cancel calls onCancel', () => {
     const onCancel = vi.fn();
     render(<EditCornersScreen canvas={fakeCanvas()} initialQuad={VALID_QUAD} onCancel={onCancel} onApply={() => {}} />);
-    fireEvent.click(screen.getAllByRole('button', { name: /cancel/i })[0]);
+    fireEvent.click(screen.getAllByRole('button', { name: /cancel/i })[0]!);
     expect(onCancel).toHaveBeenCalled();
   });
 });

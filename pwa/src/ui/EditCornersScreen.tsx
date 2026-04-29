@@ -18,8 +18,8 @@ function quadIsValid(q: Quad): boolean {
 function signedArea(pts: Point[]): number {
   let s = 0;
   for (let i = 0; i < pts.length; i++) {
-    const a = pts[i];
-    const b = pts[(i + 1) % pts.length];
+    const a = pts[i]!;
+    const b = pts[(i + 1) % pts.length]!;
     s += a.x * b.y - b.x * a.y;
   }
   return s / 2;
