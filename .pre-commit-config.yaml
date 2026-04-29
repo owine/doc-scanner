@@ -1,0 +1,10 @@
+# Pre-commit hooks. Install with:
+#   brew install pre-commit
+#   pre-commit install   # one-time, sets up .git/hooks/pre-commit
+repos:
+  - repo: https://github.com/gitguardian/ggshield
+    rev: v1.50.2
+    hooks:
+      - id: ggshield
+        language_version: python3
+        stages: [pre-commit]
