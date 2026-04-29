@@ -6,5 +6,6 @@ repos:
     rev: v1.50.2
     hooks:
       - id: ggshield
-        language_version: python3
-        stages: [pre-commit]
+        # No overrides needed — upstream .pre-commit-hooks.yaml correctly sets:
+        #   stages: [pre-commit]
+        #   pass_filenames: false  (ggshield gets filenames from commit IDs)
