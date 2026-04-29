@@ -18,6 +18,31 @@ export interface AuthResponse {
   '2FA'?: { Enabled: number };
 }
 
+export interface ProtonUserKey {
+  ID: string;
+  Version: number;
+  Primary: number;
+  Active: number;
+  Flags: number;
+  PrivateKey: string;
+  Fingerprint: string;
+  Address?: string;
+}
+
+export interface ProtonUser {
+  ID: string;
+  Name: string;
+  Currency: string;
+  Email: string;
+  DisplayName: string;
+  Keys: ProtonUserKey[];
+}
+
+export interface KeySaltEntry {
+  ID: string;
+  KeySalt: string;
+}
+
 export class ProtonApi {
   constructor(private readonly baseUrl: string, private readonly appVersion: string) {}
 
@@ -36,6 +61,20 @@ export class ProtonApi {
 
   async submit2FA(uid: string, accessToken: string, totp: string): Promise<{ Code: number }> {
     return this.request<{ Code: number }>('POST', '/auth/v4/2fa', { TwoFactorCode: totp }, {
+      'x-pm-uid': uid,
+      authorization: `Bearer ${accessToken}`,
+    });
+  }
+
+  async getUser(uid: string, accessToken: string): Promise<{ User: ProtonUser }> {
+    return this.request<{ User: ProtonUser }>('GET', '/core/v4/users', undefined, {
+      'x-pm-uid': uid,
+      authorization: `Bearer ${accessToken}`,
+    });
+  }
+
+  async getKeySalts(uid: string, accessToken: string): Promise<{ KeySalts: KeySaltEntry[] }> {
+    return this.request<{ KeySalts: KeySaltEntry[] }>('GET', '/core/v4/keys/salts', undefined, {
       'x-pm-uid': uid,
       authorization: `Bearer ${accessToken}`,
     });
