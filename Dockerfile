@@ -5,7 +5,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 COPY server/package.json ./server/
 COPY pwa/package.json ./pwa/
-RUN npm ci
+RUN npm ci --ignore-scripts
 
 FROM deps AS build
 COPY tsconfig.base.json ./
