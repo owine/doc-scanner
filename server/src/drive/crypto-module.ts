@@ -34,6 +34,30 @@ const VS_NOT_SIGNED = 0 as SDK_VERIFICATION_STATUS;
 const VS_SIGNED_AND_VALID = 1 as SDK_VERIFICATION_STATUS;
 const VS_SIGNED_AND_INVALID = 2 as SDK_VERIFICATION_STATUS;
 
+/**
+ * Translate Proton's custom `@proton/crypto` config options to upstream
+ * `openpgp` config options.
+ *
+ * Proton's custom OpenPGP build accepts `ignoreSEIPDv2FeatureFlag` to
+ * control AEAD behavior; upstream `openpgp` v6 doesn't recognize that flag
+ * and throws `Unknown config property` if it's passed. From the SDK source
+ * comment: `ignoreSEIPDv2FeatureFlag: true` means "use standard non-AEAD",
+ * `false` means "follow encryption key preferences".
+ *
+ * Mapping to upstream openpgp v6:
+ *   - `ignoreSEIPDv2FeatureFlag: true` → `aeadProtect: false`
+ *   - `ignoreSEIPDv2FeatureFlag: false` → omit (let openpgp use defaults / key prefs)
+ *
+ * Other unknown fields are dropped.
+ */
+function translateConfig(
+  input?: { ignoreSEIPDv2FeatureFlag?: boolean } & Record<string, unknown>,
+): Record<string, unknown> | undefined {
+  if (!input) return undefined;
+  if (input.ignoreSEIPDv2FeatureFlag === true) return { aeadProtect: false };
+  return undefined;
+}
+
 async function evaluateSignatures(
   signatures: ReadonlyArray<{ verified: Promise<boolean> }>,
 ): Promise<{ status: SDK_VERIFICATION_STATUS; errors?: Error[] }> {
@@ -108,7 +132,7 @@ const proxyImpl = {
       }>
     )({
       encryptionKeys: options.recipientKeys,
-      config: options.config,
+      config: translateConfig(options.config),
     });
     return {
       data: asArrayBufferBacked(sk.data),
@@ -181,9 +205,10 @@ const proxyImpl = {
         }
       : undefined;
     // openpgp's `compress` is a config flag (preferredCompressionAlgorithm),
-    // not a top-level option. We pass `config` through and let callers ask
-    // for compression via that path; for our usage `compress` is rarely set.
-    const config = options.config;
+    // not a top-level option. We pass `config` through (translated) and let
+    // callers ask for compression via that path; for our usage `compress`
+    // is rarely set.
+    const config = translateConfig(options.config);
     const baseOpts = {
       message,
       format,
