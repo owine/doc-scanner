@@ -2306,6 +2306,45 @@ git push origin phase-3-complete
 
 ## Smoke Results
 
-_Date:_
-_Test device:_
+_Date:_ 2026-04-29
+_Test device:_ iPhone (Safari) via ngrok HTTPS tunnel → docker-served PWA on `localhost:3000`
 _Notes:_
+
+End-to-end verified on real iPhone. Auto-capture confirmed working after extensive real-device tuning (see "Issues found" below). Manual shutter + EditCorners path works as designed.
+
+### What was verified
+
+- Login on iPhone Safari → cookie set → Status screen with theme picker, "+ New Scan", and "Saved Scans" buttons
+- Camera permission grant → live viewfinder mounts
+- Auto-capture: detects page corners, shows "Hold steady…", auto-fires after 1.5s of stable detection (with the 100px drift threshold + EMA smoothing)
+- Manual shutter → EditCornersScreen with all 4 corners reachable in viewport, drag-to-adjust, Apply commits the page
+- Multi-page collation: 3+ pages captured into one in-progress scan, page strip updates
+- Done → page count persists; Saved Scans list reflects the new scan with thumbnail, page count, timestamp, size
+- Theme picker (System/Light/Dark) re-themes all chrome immediately
+- iPhone Safari URL bar no longer overlays the bottom controls (`100dvh` + safe-area insets)
+
+### Issues found during smoke (and fixed in commits on this branch)
+
+The smoke surfaced 11 real bugs and an architectural gap. All were fixed in-tree before tagging:
+
+1. **Server never served the PWA bundle.** Phase 1 and 2 smokes used `vite dev` on `:5173` so this was never noticed. Added `serveStatic` middleware gated on a `PWA_DIST_PATH` config; compose.yml injects `/app/pwa/dist`. Fix in `feat(server): serve PWA static assets when PWA_DIST_PATH is set`.
+2. **Docker `npm ci` failed** because jscanify pulls in a transitive `canvas` native dep that needs Python/g++/cairo build tooling not present in the Alpine image. Fix: `npm ci --ignore-scripts` — we only ever use jscanify's browser bundle, never its Node entry. Fix landed in the `fix(compose)` chain.
+3. **iPhone Safari URL bar overlaid the capture controls** (`100vh` is wrong on mobile because it includes the now-shrunken-but-conceptually-present browser chrome). Replaced with `100dvh` and `env(safe-area-inset-*)` padding across all four full-screen pages.
+4. **LoginScreen had no proper field styling** — narrow inputs, sub-16px font triggered iOS auto-zoom, no breathing room around the warning box. Migrated to a `.field` class layout with full-width 16px inputs, 44px-min touch targets, and a 24px margin under the warning.
+5. **`findQuad` passed an `HTMLCanvasElement` to jscanify's `getCornerPoints`**, which expects a `cv.Mat` contour. The corner-finding loop iterated over an `undefined` `data32S` and returned all-undefined corners, so detection silently never fired. Correct call sequence is `cv.imread(canvas) → findPaperContour → getCornerPoints(contour)`.
+6. **Vite resolved `import('jscanify')` to the package's Node entry** (`jscanify-node.js` requires `canvas` + `jsdom`), producing garbage in the browser bundle that threw `"undefined is not an object (evaluating 'r.prototype')"`. Vendored `jscanify/src/jscanify.js` into `pwa/public/scanner/` and load via `<script>` tag, same pattern as opencv.js.
+7. **OpenCV.js was loaded cross-origin from CDN.** SW's same-origin guard meant the wasm was never cached; spec's "offline after first load" was silently broken. Vendored `opencv.js` (10 MB) into `pwa/public/opencv/`.
+8. **`loadOpenCV()` had two race conditions**: no promise cache (concurrent callers would inject duplicate `<script>` tags) and `Module.onRuntimeInitialized` was assigned in `script.onload` (a cached response could initialize wasm before that callback was set, hanging forever). Caught in code review pre-smoke; fixed in `ea58d7a`.
+9. **Auto-capture never fired** because jscanify's `getCornerPoints` picks the contour-extreme points farthest from centroid, which jitter dramatically frame-to-frame on noisy 15k-point contours from textured backgrounds. Added EMA smoothing (`α=0.7`) on the quads in `scanner-session` and bumped `STABILITY_DRIFT_PX` from 20 → 60 → 100 (final value found empirically on this iPhone + wood-grain surface).
+10. **Manual shutter routed to EditCorners with the default 10 % inset quad** because `currentQuad` was null on the exact frame the user tapped. Now falls back to `lastNonNullQuad` so the user gets the corners they could see highlighted.
+11. **Live preview went black after returning from EditCornersScreen** — the new `<video>` element had no `srcObject` even though the camera stream was still alive. Added `rebindVideo()` and a `useEffect` that re-attaches when `pendingEdit` clears.
+12. **EditCornersScreen showed only 2 of 4 handles** because the captured 1080×1920 portrait canvas was rendered at `width: 100%` with `height: auto`, making it taller than the viewport. Replaced with object-fit-contain centering; handles are positioned relative to the actual displayed image rect.
+13. **Auto-capture re-fired on the same still-visible page** within 1.5 s of a successful capture, before the user could swap pages. Added a 3-second `POST_CAPTURE_COOLDOWN_MS` during which stability is forced to "searching".
+14. **`commitPage` errors were silently swallowed.** Now propagated via `onError` so they surface in the diagnostic overlay during development.
+15. **jscanify's `findPaperContour` calls `contours.get(-1)`** when zero contours are found, throwing an embind range error every time the camera looked at empty desk between pages. Wrapped in its own try/catch in `findQuad` and treated as no-detection.
+
+### Known limitations (acceptable for Phase 3, candidates for follow-up)
+
+- **jscanify's auto-detected corners are inaccurate on textured backgrounds** (e.g. wood grain). The library picks the points-farthest-from-centroid in each quadrant of the largest contour; with 15k-point contours that include text + barcode + receipt outline + noise, those extremes are biased toward the centroid of the largest blob, not the actual page corners. The `EditCornersScreen` manual-adjust path is the realistic workflow when the auto-detected quad is wrong. A future phase could add proper preprocessing (adaptive threshold, dilate/erode, polygon-approximation) before contour selection.
+- **"Fix corners" affordance on a page already in the strip is not implemented.** The spec called out two routes into EditCorners; only the post-shutter route is wired. Adding this requires per-page UI in the strip and a `store.updatePage` call from `applyEdit`.
+- **`SavedScansScreen`/`ScanViewerScreen` land in the main bundle** rather than a separate `scanner-saved` chunk per the spec's bundle strategy. Acceptable given their size; differs from the stated architecture.

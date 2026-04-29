@@ -6,9 +6,9 @@ import type { Quad } from '../scanner/types.js';
 import { CameraError } from '../scanner/camera.js';
 import { EditCornersScreen } from './EditCornersScreen.js';
 
-// Diagnostic flag: shows OpenCV/scanner load state in the viewfinder.
-// Set to false once edge detection is reliable on real devices.
-const SHOW_DIAGNOSTICS = true;
+// Diagnostic flag: shows scanner pipeline state in the viewfinder.
+// Flip to true when debugging real-device detection issues.
+const SHOW_DIAGNOSTICS = false;
 
 const AUTO_CAPTURE_KEY = 'auto_capture_enabled';
 
