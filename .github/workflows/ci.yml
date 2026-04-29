@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test + typecheck
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e  # v6.4.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck (server)
+        run: npm --workspace @doc-scanner/server run typecheck
+
+      - name: Test (server)
+        run: npm --workspace @doc-scanner/server test
+
+      - name: Test (pwa)
+        run: npm --workspace @doc-scanner/pwa test
+
+      - name: Build (server)
+        run: npm --workspace @doc-scanner/server run build
+
+      - name: Build (pwa)
+        run: npm --workspace @doc-scanner/pwa run build
+
+  docker-build:
+    name: docker build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+
+      - name: Build image
+        run: docker build -t doc-scanner:ci .
