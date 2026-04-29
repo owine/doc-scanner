@@ -12,7 +12,7 @@ export default defineConfig({
     // login counts against the account's "recent logins" anti-abuse budget;
     // de-duplicating across files saves us from rate-limiting ourselves.
     pool: 'forks',
-    poolOptions: { forks: { singleFork: true } },
+    forks: { singleFork: true },
     fileParallelism: false,
   },
 });
