@@ -1,0 +1,82 @@
+:root {
+  --bg: #ffffff;
+  --bg-elev: #f7f7f7;
+  --fg: #1a1a1a;
+  --fg-muted: #6b6b6b;
+  --border: #e0e0e0;
+  --accent: #2563eb;
+  --accent-fg: #ffffff;
+  --danger: #b91c1c;
+  --warn-bg: #fef3c7;
+  --warn-border: #f59e0b;
+  --success: #16a34a;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f0f0f;
+    --bg-elev: #1a1a1a;
+    --fg: #e8e8e8;
+    --fg-muted: #9a9a9a;
+    --border: #2a2a2a;
+    --accent: #60a5fa;
+    --accent-fg: #0f0f0f;
+    --danger: #f87171;
+    --warn-bg: #3a2f10;
+    --warn-border: #b88a30;
+    --success: #4ade80;
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme="light"] {
+  --bg: #ffffff;
+  --bg-elev: #f7f7f7;
+  --fg: #1a1a1a;
+  --fg-muted: #6b6b6b;
+  --border: #e0e0e0;
+  --accent: #2563eb;
+  --accent-fg: #ffffff;
+  --danger: #b91c1c;
+  --warn-bg: #fef3c7;
+  --warn-border: #f59e0b;
+  --success: #16a34a;
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  --bg: #0f0f0f;
+  --bg-elev: #1a1a1a;
+  --fg: #e8e8e8;
+  --fg-muted: #9a9a9a;
+  --border: #2a2a2a;
+  --accent: #60a5fa;
+  --accent-fg: #0f0f0f;
+  --danger: #f87171;
+  --warn-bg: #3a2f10;
+  --warn-border: #b88a30;
+  --success: #4ade80;
+  color-scheme: dark;
+}
+
+html, body { background: var(--bg); color: var(--fg); margin: 0; }
+body { font-family: -apple-system, system-ui, sans-serif; }
+
+.btn {
+  background: var(--accent); color: var(--accent-fg);
+  border: none; padding: 10px 16px; border-radius: 6px;
+  font-size: 14px; font-weight: 500; cursor: pointer;
+}
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-secondary { background: transparent; color: var(--fg); border: 1px solid var(--border); }
+.btn-danger { background: var(--danger); color: #fff; }
+
+.card { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
+.warn { background: var(--warn-bg); border: 1px solid var(--warn-border); padding: 12px; border-radius: 6px; }
+.muted { color: var(--fg-muted); font-size: 13px; }
+
+input, select { background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 4px; padding: 6px 8px; }
+
+.auth-screen { max-width: 400px; margin: 40px auto; padding: 16px; }
+.error-text { color: var(--danger); }
