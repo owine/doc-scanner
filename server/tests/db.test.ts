@@ -23,7 +23,21 @@ describe('openDb', () => {
     cleanupFn = cleanup;
 
     const v = db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number };
-    expect(v.v).toBe(1);
+    expect(v.v).toBe(2);
+  });
+
+  it('migration 002 creates drive cache tables', () => {
+    const { db, cleanup } = createTestDb();
+    cleanupFn = cleanup;
+
+    const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all() as { name: string }[];
+    const names = tables.map((t) => t.name);
+
+    expect(names).toContain('entities_cache');
+    expect(names).toContain('event_cursors');
+
+    const v = db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number };
+    expect(v.v).toBe(2);
   });
 
   it('does not re-apply migrations on re-open', () => {
@@ -40,7 +54,7 @@ describe('openDb', () => {
     const secondCount = (db2.prepare('SELECT COUNT(*) AS c FROM schema_version').get() as { c: number }).c;
     db2.close();
 
-    expect(secondCount).toBe(1);
+    expect(secondCount).toBe(2);
     expect(secondCount).toBe(firstCount);
     expect(secondApplied).toBe(firstApplied);
   });
