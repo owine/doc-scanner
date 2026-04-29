@@ -209,27 +209,44 @@ const proxyImpl = {
     // callers ask for compression via that path; for our usage `compress`
     // is rarely set.
     const config = translateConfig(options.config);
-    const baseOpts = {
+    if (options.detached) {
+      // openpgp v6 removed the `detached` flag from encrypt(): produce the
+      // encrypted message and the detached signature separately, then return
+      // both. Encryption proceeds without signingKeys; signing operates on
+      // the original plaintext.
+      if (!options.signingKeys) {
+        throw new Error('encryptMessage: detached=true requires signingKeys');
+      }
+      const encrypted = await (openpgp.encrypt as unknown as (o: unknown) => Promise<unknown>)({
+        message,
+        format,
+        sessionKey,
+        encryptionKeys: options.encryptionKeys,
+        config,
+      });
+      const sigMessage = await openpgp.createMessage({ binary: options.binaryData });
+      const signature = await (openpgp.sign as unknown as (o: unknown) => Promise<unknown>)({
+        message: sigMessage,
+        signingKeys: options.signingKeys,
+        format,
+        detached: true,
+        config,
+      });
+      return {
+        message:
+          typeof encrypted === 'string' ? encrypted : asArrayBufferBacked(encrypted as Uint8Array),
+        signature:
+          typeof signature === 'string' ? signature : asArrayBufferBacked(signature as Uint8Array),
+      };
+    }
+    const result = await (openpgp.encrypt as unknown as (o: unknown) => Promise<unknown>)({
       message,
       format,
       sessionKey,
       encryptionKeys: options.encryptionKeys,
       signingKeys: options.signingKeys,
       config,
-    };
-    if (options.detached) {
-      const result = await (openpgp.encrypt as unknown as (o: unknown) => Promise<unknown>)({
-        ...baseOpts,
-        detached: true,
-      });
-      const r = result as { data: string | Uint8Array; signature: string | Uint8Array };
-      return {
-        message: typeof r.data === 'string' ? r.data : asArrayBufferBacked(r.data),
-        signature:
-          typeof r.signature === 'string' ? r.signature : asArrayBufferBacked(r.signature),
-      };
-    }
-    const result = await (openpgp.encrypt as unknown as (o: unknown) => Promise<unknown>)(baseOpts);
+    });
     return {
       message: typeof result === 'string' ? result : asArrayBufferBacked(result as Uint8Array),
     };
