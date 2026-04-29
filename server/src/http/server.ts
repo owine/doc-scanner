@@ -4,6 +4,7 @@ import { SessionStore } from '../auth/session-store.js';
 import { ProtonAuth } from '../auth/srp.js';
 import { ProtonApi } from '../auth/proton-api.js';
 import { authRoutes } from './routes-auth.js';
+import { driveRoutes } from './routes-drive.js';
 
 export interface AppDeps {
   db: DB;
@@ -22,5 +23,6 @@ export function createApp(deps: AppDeps): Hono {
   const app = new Hono();
   app.get('/api/health', (c) => c.json({ ok: true }));
   app.route('/api/auth', authRoutes({ store, protonAuth, db: deps.db, encryptionKey: deps.encryptionKey, appVersion: deps.appVersion }));
+  app.route('/api/drive', driveRoutes({ db: deps.db, store }));
   return app;
 }
