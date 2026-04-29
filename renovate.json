@@ -57,9 +57,15 @@
       "labels": ["dependencies", "major-upgrade"]
     },
     {
-      "description": "Pin Docker base images to digest",
-      "matchManagers": ["dockerfile"],
+      "description": "Pin Docker base images and GitHub Actions to digest",
+      "matchManagers": ["dockerfile", "github-actions"],
       "pinDigests": true
+    },
+    {
+      "description": "Auto-merge GitHub Actions patch + minor updates",
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["patch", "minor", "digest"],
+      "automerge": true
     },
     {
       "description": "Never auto-update vendored Proton SRP code (manual re-vendor only)",
