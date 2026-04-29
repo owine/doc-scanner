@@ -7,8 +7,14 @@ import type { Quad } from './types.js';
 export const LIVE_PREVIEW_FPS = 6;
 const FRAME_INTERVAL_MS = 1000 / LIVE_PREVIEW_FPS;
 
+export interface FrameDiagnostics {
+  canvasW: number;
+  canvasH: number;
+  contourPts: number;
+}
+
 export interface SessionEvents {
-  onStability?: (state: StabilityState, quad: Quad | null) => void;
+  onStability?: (state: StabilityState, quad: Quad | null, diag?: FrameDiagnostics) => void;
   onPageAdded?: (ordinal: number, blob: Blob) => void;
   onError?: (err: Error) => void;
 }
@@ -107,11 +113,18 @@ export class ScannerSession {
   private async processFrame(): Promise<void> {
     if (!this.video) return;
     const canvas = captureFrame(this.video);
+    let diag: FrameDiagnostics = { canvasW: canvas.width, canvasH: canvas.height, contourPts: 0 };
     let quad: Quad | null = null;
-    try { quad = await findQuad(canvas); } catch { quad = null; }
+    try {
+      const r = await findQuad(canvas);
+      quad = r.quad;
+      diag = { canvasW: r.canvasW, canvasH: r.canvasH, contourPts: r.contourPts };
+    } catch (e) {
+      this.events.onError?.(e as Error);
+    }
     this.currentQuad = quad;
     const state = this.stability.update(quad, performance.now());
-    this.events.onStability?.(state, quad);
+    this.events.onStability?.(state, quad, diag);
     if (state === 'stable' && this.autoCaptureEnabled && quad) {
       await this.commitPage(canvas, quad);
     }

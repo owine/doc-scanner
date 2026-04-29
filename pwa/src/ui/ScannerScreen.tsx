@@ -32,16 +32,30 @@ export function ScannerScreen({ store, resumeScanId, onBack, onDone }: ScannerSc
   const [autoCapture, setAutoCapture] = useState(() => localStorage.getItem(AUTO_CAPTURE_KEY) !== 'false');
   const [error, setError] = useState<string | null>(null);
   const [pendingEdit, setPendingEdit] = useState<PendingEdit | null>(null);
-  const [diag, setDiag] = useState({ frames: 0, lastQuad: null as Quad | null, lastErr: null as string | null });
+  const [diag, setDiag] = useState({
+    frames: 0,
+    lastQuad: null as Quad | null,
+    lastErr: null as string | null,
+    canvasW: 0,
+    canvasH: 0,
+    contourPts: 0,
+  });
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
         const events = {
-          onStability: (s: StabilityState, q: Quad | null) => {
+          onStability: (s: StabilityState, q: Quad | null, fd?: { canvasW: number; canvasH: number; contourPts: number }) => {
             setStability(s);
-            setDiag((d) => ({ ...d, frames: d.frames + 1, lastQuad: q }));
+            setDiag((d) => ({
+              ...d,
+              frames: d.frames + 1,
+              lastQuad: q,
+              canvasW: fd?.canvasW ?? d.canvasW,
+              canvasH: fd?.canvasH ?? d.canvasH,
+              contourPts: fd?.contourPts ?? d.contourPts,
+            }));
           },
           onPageAdded: () => setPageCount((c) => c + 1),
           onError: (err: Error) => setDiag((d) => ({ ...d, lastErr: err.message })),
@@ -159,8 +173,8 @@ export function ScannerScreen({ store, resumeScanId, onBack, onDone }: ScannerSc
             fontFamily: 'monospace', fontSize: 11, padding: 6, borderRadius: 4,
             lineHeight: 1.4,
           }}>
-            <div>frames: {diag.frames} · stab: {stability}</div>
-            <div>quad: {diag.lastQuad ? 'detected' : 'none'}</div>
+            <div>frames: {diag.frames} · stab: {stability} · canvas: {diag.canvasW}×{diag.canvasH}</div>
+            <div>contour pts: {diag.contourPts} · quad: {diag.lastQuad ? 'detected' : 'none'}</div>
             {diag.lastErr && <div style={{ color: '#ff8888' }}>err: {diag.lastErr}</div>}
           </div>
         )}

@@ -39,26 +39,40 @@ async function loadScanner() {
   return modulePromise;
 }
 
-export async function findQuad(canvas: HTMLCanvasElement): Promise<Quad | null> {
+export interface FindQuadResult {
+  quad: Quad | null;
+  // Diagnostic info, surfaced to the UI overlay during development
+  canvasW: number;
+  canvasH: number;
+  contourPts: number; // number of points in the largest contour (data32S.length / 2)
+}
+
+export async function findQuad(canvas: HTMLCanvasElement): Promise<FindQuadResult> {
+  const result: FindQuadResult = { quad: null, canvasW: canvas.width, canvasH: canvas.height, contourPts: 0 };
+  if (canvas.width === 0 || canvas.height === 0) return result;
+
   const { scanner } = await loadScanner();
   const cv = (globalThis as any).cv;
-  if (!cv) return null;
+  if (!cv) return result;
 
   let img: any = null;
   try {
     img = cv.imread(canvas);
     const contour = scanner.findPaperContour(img);
-    if (!contour || !contour.data32S || contour.data32S.length < 8) return null;
+    if (!contour || !contour.data32S) return result;
+    result.contourPts = contour.data32S.length / 2;
+    if (result.contourPts < 4) return result;
     const points = scanner.getCornerPoints(contour);
     if (!points?.topLeftCorner || !points?.topRightCorner || !points?.bottomLeftCorner || !points?.bottomRightCorner) {
-      return null;
+      return result;
     }
-    return {
+    result.quad = {
       tl: points.topLeftCorner,
       tr: points.topRightCorner,
       bl: points.bottomLeftCorner,
       br: points.bottomRightCorner,
     };
+    return result;
   } finally {
     img?.delete?.();
   }
