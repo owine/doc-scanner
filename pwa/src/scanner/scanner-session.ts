@@ -6,6 +6,9 @@ import type { Quad } from './types.js';
 
 export const LIVE_PREVIEW_FPS = 6;
 const FRAME_INTERVAL_MS = 1000 / LIVE_PREVIEW_FPS;
+// After committing a page, suppress auto-capture for this long so the user has
+// time to swap pages before a re-trigger on the same (still-visible) page.
+const POST_CAPTURE_COOLDOWN_MS = 3000;
 
 export interface FrameDiagnostics {
   canvasW: number;
@@ -28,6 +31,8 @@ export class ScannerSession {
   private capturing = false;
   private autoCaptureEnabled = true;
   private currentQuad: Quad | null = null;
+  private lastNonNullQuad: Quad | null = null;
+  private cooldownUntil = 0;
 
   constructor(
     public readonly scanId: string,
@@ -52,6 +57,19 @@ export class ScannerSession {
     this.startLoop();
   }
 
+  /**
+   * Re-bind the camera stream to a (possibly new) video element. Called when
+   * ScannerScreen unmounts/remounts (e.g. round-trip to EditCornersScreen)
+   * so the new video element shows the live preview.
+   */
+  rebindVideo(video: HTMLVideoElement): void {
+    this.video = video;
+    if (this.cam) {
+      video.srcObject = this.cam.stream;
+      void video.play().catch(() => {});
+    }
+  }
+
   setAutoCapture(on: boolean): void {
     this.autoCaptureEnabled = on;
     if (!on) this.stability.reset();
@@ -65,7 +83,10 @@ export class ScannerSession {
   manualCapture(): { canvas: HTMLCanvasElement; quad: Quad | null } {
     if (!this.video) throw new Error('no video');
     const canvas = captureFrame(this.video);
-    return { canvas, quad: this.currentQuad };
+    // Prefer the last successfully-detected quad over a momentary null. The
+    // user pressed shutter because they saw a quad highlighted; honor that
+    // even if the very latest frame happened to lose detection.
+    return { canvas, quad: this.currentQuad ?? this.lastNonNullQuad };
   }
 
   /** Commit a captured frame as a page (after auto-capture or EditCornersScreen Apply). */
@@ -76,6 +97,10 @@ export class ScannerSession {
       const ordinal = await this.store.appendPage(this.scanId, blob, quad);
       this.events.onPageAdded?.(ordinal, blob);
       this.stability.reset();
+      this.cooldownUntil = performance.now() + POST_CAPTURE_COOLDOWN_MS;
+    } catch (err) {
+      this.events.onError?.(err as Error);
+      throw err;
     } finally {
       this.capturing = false;
     }
@@ -123,7 +148,13 @@ export class ScannerSession {
       this.events.onError?.(e as Error);
     }
     this.currentQuad = quad;
-    const state = this.stability.update(quad, performance.now());
+    if (quad) this.lastNonNullQuad = quad;
+    const now = performance.now();
+    const inCooldown = now < this.cooldownUntil;
+    // While in post-capture cooldown, force "searching" so the UI doesn't show
+    // a misleading countdown and stability won't accumulate toward auto-fire.
+    const state = inCooldown ? 'searching' : this.stability.update(quad, now);
+    if (inCooldown) this.stability.reset();
     this.events.onStability?.(state, quad, diag);
     if (state === 'stable' && this.autoCaptureEnabled && quad) {
       await this.commitPage(canvas, quad);

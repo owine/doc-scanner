@@ -28,18 +28,33 @@ function signedArea(pts: Point[]): number {
 export function EditCornersScreen({ canvas, initialQuad, onCancel, onApply }: EditCornersScreenProps) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const [quad, setQuad] = useState<Quad>(initialQuad);
-  const [scale, setScale] = useState(1);
   const [dragKey, setDragKey] = useState<keyof Quad | null>(null);
+  // Where the canvas is rendered (object-fit: contain semantics) inside its
+  // container, so the corner handles can be positioned in the visible image.
+  const [render, setRender] = useState({ scale: 1, offsetX: 0, offsetY: 0 });
 
   useEffect(() => {
     if (!wrapRef.current) return;
     wrapRef.current.appendChild(canvas);
-    canvas.style.width = '100%';
-    canvas.style.height = 'auto';
     canvas.style.display = 'block';
+    canvas.style.maxWidth = '100%';
+    canvas.style.maxHeight = '100%';
+    canvas.style.width = 'auto';
+    canvas.style.height = 'auto';
+    canvas.style.objectFit = 'contain';
     const observe = () => {
-      const rect = canvas.getBoundingClientRect();
-      setScale(rect.width / canvas.width || 1);
+      const wrap = wrapRef.current;
+      if (!wrap) return;
+      const wrapW = wrap.clientWidth;
+      const wrapH = wrap.clientHeight;
+      const s = Math.min(wrapW / canvas.width, wrapH / canvas.height);
+      const displayedW = canvas.width * s;
+      const displayedH = canvas.height * s;
+      const offsetX = (wrapW - displayedW) / 2;
+      const offsetY = (wrapH - displayedH) / 2;
+      canvas.style.width = `${displayedW}px`;
+      canvas.style.height = `${displayedH}px`;
+      setRender({ scale: s, offsetX, offsetY });
     };
     observe();
     window.addEventListener('resize', observe);
@@ -57,8 +72,8 @@ export function EditCornersScreen({ canvas, initialQuad, onCancel, onApply }: Ed
   function onPointerMove(e: PointerEvent) {
     if (!dragKey || !wrapRef.current) return;
     const rect = wrapRef.current.getBoundingClientRect();
-    const x = (e.clientX - rect.left) / scale;
-    const y = (e.clientY - rect.top) / scale;
+    const x = (e.clientX - rect.left - render.offsetX) / render.scale;
+    const y = (e.clientY - rect.top - render.offsetY) / render.scale;
     setQuad((q) => ({ ...q, [dragKey]: { x: clamp(x, 0, canvas.width), y: clamp(y, 0, canvas.height) } }));
   }
 
@@ -73,7 +88,7 @@ export function EditCornersScreen({ canvas, initialQuad, onCancel, onApply }: Ed
         <strong>Adjust corners</strong>
         <span style={{ width: 60 }} />
       </header>
-      <div ref={wrapRef} style={{ flex: 1, position: 'relative', padding: 12, overflow: 'auto' }}
+      <div ref={wrapRef} style={{ flex: 1, position: 'relative', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
            onPointerMove={onPointerMove}
            onPointerUp={onPointerUp}>
         {(['tl', 'tr', 'bl', 'br'] as const).map((k) => (
@@ -83,8 +98,9 @@ export function EditCornersScreen({ canvas, initialQuad, onCancel, onApply }: Ed
             style={{
               position: 'absolute', width: HANDLE_RADIUS * 2, height: HANDLE_RADIUS * 2,
               borderRadius: '50%', background: 'var(--accent)', border: '2px solid #fff',
-              left: quad[k].x * scale - HANDLE_RADIUS + 12,
-              top: quad[k].y * scale - HANDLE_RADIUS + 12,
+              boxShadow: '0 1px 4px rgba(0,0,0,0.5)',
+              left: quad[k].x * render.scale + render.offsetX - HANDLE_RADIUS,
+              top: quad[k].y * render.scale + render.offsetY - HANDLE_RADIUS,
               touchAction: 'none', cursor: 'grab',
             }}
             aria-label={`Corner ${k}`}

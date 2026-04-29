@@ -79,6 +79,14 @@ export function ScannerScreen({ store, resumeScanId, onBack, onDone }: ScannerSc
     return () => { cancelled = true; sessionRef.current?.stop(); };
   }, [resumeScanId]);
 
+  // When EditCornersScreen unmounts and we return to the scanner, the previous
+  // video element is gone — re-bind the live stream to the newly-mounted one.
+  useEffect(() => {
+    if (!pendingEdit && videoRef.current && sessionRef.current) {
+      sessionRef.current.rebindVideo(videoRef.current);
+    }
+  }, [pendingEdit]);
+
   function toggleAuto() {
     const next = !autoCapture;
     setAutoCapture(next);
