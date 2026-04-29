@@ -8,4 +8,5 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?required}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       TRUST_PROXY: "true"
+      INSECURE_COOKIES: ${INSECURE_COOKIES:-false}
     restart: unless-stopped
