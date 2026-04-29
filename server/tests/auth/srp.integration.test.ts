@@ -1,34 +1,14 @@
-import { describe, it, expect, beforeAll } from 'vitest';
-import { ProtonApi } from '../../src/auth/proton-api.js';
-import { ProtonAuth, TwoFactorRequiredError } from '../../src/auth/srp.js';
+import { describe, it, expect } from 'vitest';
+import { getSharedSession } from '../helpers/integration-session.js';
 
 const RUN = process.env.INTEGRATION === '1';
 
 describe.skipIf(!RUN)('ProtonAuth (integration)', () => {
-  let auth: ProtonAuth;
-  const email = process.env.PROTON_TEST_EMAIL;
-  const password = process.env.PROTON_TEST_PASSWORD;
-  const totp = process.env.PROTON_TEST_TOTP;
-
-  beforeAll(() => {
-    if (!email || !password) throw new Error('Set PROTON_TEST_EMAIL and PROTON_TEST_PASSWORD');
-    const api = new ProtonApi('https://mail.proton.me/api', 'external-drive-docscanner@0.1.0');
-    auth = new ProtonAuth(api);
-  });
-
   it('logs in with real credentials', async () => {
-    try {
-      const result = await auth.login(email!, password!, totp);
-      expect(result.session.uid).toBeTruthy();
-      expect(result.session.accessToken).toBeTruthy();
-      expect(result.session.refreshToken).toBeTruthy();
-      expect(result.decryptedKeys.primaryKey).toBeDefined();
-      result.mailboxSecret.dispose();
-    } catch (e) {
-      if (e instanceof TwoFactorRequiredError && !totp) {
-        throw new Error('Account has 2FA enabled — set PROTON_TEST_TOTP');
-      }
-      throw e;
-    }
+    const shared = await getSharedSession();
+    expect(shared.session.uid).toBeTruthy();
+    expect(shared.session.accessToken).toBeTruthy();
+    expect(shared.session.refreshToken).toBeTruthy();
+    expect(shared.decryptedKeys.primaryKey).toBeDefined();
   }, 30_000);
 });
