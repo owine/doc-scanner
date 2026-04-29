@@ -2,13 +2,17 @@ import { startCamera, captureFrame, type CameraHandle } from './camera.js';
 import { findQuad, warpToFlat, defaultQuad } from './edge-detect.js';
 import { StabilityDetector, type StabilityState } from './stability.js';
 import { ScansStore } from './scans-store.js';
-import type { Quad } from './types.js';
+import type { Point, Quad } from './types.js';
 
 export const LIVE_PREVIEW_FPS = 6;
 const FRAME_INTERVAL_MS = 1000 / LIVE_PREVIEW_FPS;
 // After committing a page, suppress auto-capture for this long so the user has
 // time to swap pages before a re-trigger on the same (still-visible) page.
 const POST_CAPTURE_COOLDOWN_MS = 3000;
+// EMA weight on the previous smoothed quad. Higher = more smoothing, more lag.
+// 0.7 means each new frame contributes 30% — effective window ~3 frames.
+// Reduces jscanify's corner jitter so the stability detector can converge.
+const QUAD_SMOOTHING = 0.7;
 
 export interface FrameDiagnostics {
   canvasW: number;
@@ -32,6 +36,7 @@ export class ScannerSession {
   private autoCaptureEnabled = true;
   private currentQuad: Quad | null = null;
   private lastNonNullQuad: Quad | null = null;
+  private smoothedQuad: Quad | null = null;
   private cooldownUntil = 0;
 
   constructor(
@@ -147,18 +152,44 @@ export class ScannerSession {
     } catch (e) {
       this.events.onError?.(e as Error);
     }
-    this.currentQuad = quad;
-    if (quad) this.lastNonNullQuad = quad;
+    // Smooth raw jscanify corners so jitter doesn't reset the stability anchor
+    // every frame. EMA-blend the new quad with the previous smoothed one.
+    const smoothed = this.smoothQuad(quad);
+    this.currentQuad = smoothed;
+    if (smoothed) this.lastNonNullQuad = smoothed;
     const now = performance.now();
     const inCooldown = now < this.cooldownUntil;
     // While in post-capture cooldown, force "searching" so the UI doesn't show
     // a misleading countdown and stability won't accumulate toward auto-fire.
-    const state = inCooldown ? 'searching' : this.stability.update(quad, now);
+    const state = inCooldown ? 'searching' : this.stability.update(smoothed, now);
     if (inCooldown) this.stability.reset();
-    this.events.onStability?.(state, quad, diag);
-    if (state === 'stable' && this.autoCaptureEnabled && quad) {
-      await this.commitPage(canvas, quad);
+    this.events.onStability?.(state, smoothed, diag);
+    if (state === 'stable' && this.autoCaptureEnabled && smoothed) {
+      await this.commitPage(canvas, smoothed);
     }
+  }
+
+  private smoothQuad(quad: Quad | null): Quad | null {
+    if (!quad) {
+      this.smoothedQuad = null;
+      return null;
+    }
+    if (!this.smoothedQuad) {
+      this.smoothedQuad = quad;
+      return quad;
+    }
+    const a = QUAD_SMOOTHING;
+    const blend = (p: Point, q: Point): Point => ({
+      x: p.x * a + q.x * (1 - a),
+      y: p.y * a + q.y * (1 - a),
+    });
+    this.smoothedQuad = {
+      tl: blend(this.smoothedQuad.tl, quad.tl),
+      tr: blend(this.smoothedQuad.tr, quad.tr),
+      bl: blend(this.smoothedQuad.bl, quad.bl),
+      br: blend(this.smoothedQuad.br, quad.br),
+    };
+    return this.smoothedQuad;
   }
 }
 
