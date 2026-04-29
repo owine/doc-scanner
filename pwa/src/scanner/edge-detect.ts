@@ -14,7 +14,7 @@ function loadOpenCV(): Promise<void> {
       // triggers the callback.
       (globalThis as any).Module = { onRuntimeInitialized: () => resolve() };
       const script = document.createElement('script');
-      script.src = 'https://docs.opencv.org/4.x/opencv.js';
+      script.src = '/opencv/opencv.js';
       script.async = true;
       script.onerror = () => reject(new Error('failed to load opencv.js'));
       document.head.appendChild(script);

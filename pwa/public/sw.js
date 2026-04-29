@@ -6,7 +6,7 @@ const CACHE_NAME = 'docscanner-scanner-v1';
 const RUNTIME_CACHE_PATTERNS = [
   /\/assets\/scanner-jscanify-.*\.js$/,
   /\/assets\/scanner-core-.*\.js$/,
-  /\.wasm$/,
+  /\/opencv\//,
 ];
 
 self.addEventListener('install', () => self.skipWaiting());
