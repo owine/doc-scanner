@@ -26,7 +26,7 @@ export class SessionStore {
   }
 
   load(): ProtonSession | null {
-    const row = this.db.prepare('SELECT encrypted_blob FROM sessions WHERE id = 1').get() as { encrypted_blob: Buffer } | undefined;
+    const row = this.db.prepare('SELECT encrypted_blob FROM sessions WHERE id = 1').get() as { encrypted_blob: Uint8Array } | undefined;
     if (!row) return null;
     const json = this.decrypt(row.encrypted_blob);
     return JSON.parse(json) as ProtonSession;
@@ -44,7 +44,7 @@ export class SessionStore {
     return Buffer.concat([iv, tag, ct]);
   }
 
-  private decrypt(blob: Buffer): string {
+  private decrypt(blob: Uint8Array): string {
     const iv = blob.subarray(0, IV_LEN);
     const tag = blob.subarray(IV_LEN, IV_LEN + TAG_LEN);
     const ct = blob.subarray(IV_LEN + TAG_LEN);

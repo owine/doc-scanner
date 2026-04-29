@@ -59,7 +59,7 @@ export class EntitiesCache implements ProtonDriveCache<string> {
   async getEntity(key: string): Promise<string> {
     const row = this.db
       .prepare('SELECT encrypted_blob FROM entities_cache WHERE key = ?')
-      .get(key) as { encrypted_blob: Buffer } | undefined;
+      .get(key) as { encrypted_blob: Uint8Array } | undefined;
     if (!row) {
       throw new Error(`Entity not found: ${key}`);
     }
@@ -80,7 +80,7 @@ export class EntitiesCache implements ProtonDriveCache<string> {
   async *iterateEntitiesByTag(tag: string): AsyncGenerator<EntityResult<string>> {
     const rows = this.db
       .prepare('SELECT key, encrypted_blob FROM entities_cache')
-      .all() as Array<{ key: string; encrypted_blob: Buffer }>;
+      .all() as Array<{ key: string; encrypted_blob: Uint8Array }>;
     for (const row of rows) {
       try {
         const payload = this.decryptPayload(row.encrypted_blob);
@@ -95,10 +95,14 @@ export class EntitiesCache implements ProtonDriveCache<string> {
 
   async removeEntities(keys: string[]): Promise<void> {
     const stmt = this.db.prepare('DELETE FROM entities_cache WHERE key = ?');
-    const tx = this.db.transaction((ks: string[]) => {
-      for (const k of ks) stmt.run(k);
-    });
-    tx(keys);
+    this.db.prepare('BEGIN').run();
+    try {
+      for (const k of keys) stmt.run(k);
+      this.db.prepare('COMMIT').run();
+    } catch (err) {
+      this.db.prepare('ROLLBACK').run();
+      throw err;
+    }
   }
 
   private encrypt(plaintext: string): Buffer {
@@ -109,7 +113,7 @@ export class EntitiesCache implements ProtonDriveCache<string> {
     return Buffer.concat([iv, tag, ct]);
   }
 
-  private decryptPayload(blob: Buffer): StoredPayload {
+  private decryptPayload(blob: Uint8Array): StoredPayload {
     const iv = blob.subarray(0, IV_LEN);
     const tag = blob.subarray(IV_LEN, IV_LEN + TAG_LEN);
     const ct = blob.subarray(IV_LEN + TAG_LEN);
