@@ -75,7 +75,7 @@ body { font-family: -apple-system, system-ui, sans-serif; }
 .btn-block { display: block; width: 100%; }
 
 .card { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
-.warn { background: var(--warn-bg); border: 1px solid var(--warn-border); padding: 12px; border-radius: 6px; }
+.warn { background: var(--warn-bg); border: 1px solid var(--warn-border); padding: 12px; border-radius: 6px; margin-bottom: 24px; }
 .muted { color: var(--fg-muted); font-size: 13px; }
 
 input, select {
