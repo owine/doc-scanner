@@ -11,6 +11,7 @@
   ],
   "rangeStrategy": "pin",
   "lockFileMaintenance": { "enabled": true, "schedule": ["before 6am on monday"] },
+  "pre-commit": { "enabled": true },
   "packageRules": [
     {
       "description": "Auto-merge devDependency patch + minor updates after CI passes",
@@ -64,6 +65,12 @@
     {
       "description": "Auto-merge GitHub Actions patch + minor updates",
       "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["patch", "minor", "digest"],
+      "automerge": true
+    },
+    {
+      "description": "Auto-merge pre-commit hook patch + minor updates (e.g., ggshield)",
+      "matchManagers": ["pre-commit"],
       "matchUpdateTypes": ["patch", "minor", "digest"],
       "automerge": true
     },
