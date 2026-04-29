@@ -24,6 +24,10 @@ const ConfigSchema = z.object({
     .string()
     .default('true')
     .transform((v) => v === 'true' || v === '1'),
+  INSECURE_COOKIES: z
+    .string()
+    .default('false')
+    .transform((v) => v === 'true' || v === '1'),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;

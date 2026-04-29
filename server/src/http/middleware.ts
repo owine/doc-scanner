@@ -33,11 +33,11 @@ export const sessionMiddleware = (store: SessionStore): MiddlewareHandler<Env> =
   await next();
 };
 
-export function issueSession(c: Context<Env>): string {
+export function issueSession(c: Context<Env>, secureCookie: boolean = true): string {
   const sid = randomBytes(32).toString('base64url');
   liveSids.add(sid);
   setCookie(c, COOKIE_NAME, sid, {
-    httpOnly: true, sameSite: 'Strict', secure: true, path: '/',
+    httpOnly: true, sameSite: 'Strict', secure: secureCookie, path: '/',
   });
   return sid;
 }

@@ -59,8 +59,28 @@ describe('POST /api/auth/login', () => {
     });
 
     expect(res.status).toBe(200);
-    expect(res.headers.get('set-cookie')).toMatch(/HttpOnly/);
+    const setCookieHeader = res.headers.get('set-cookie');
+    expect(setCookieHeader).toMatch(/HttpOnly/);
+    expect(setCookieHeader).toMatch(/Secure/);
     expect(await res.json()).toMatchObject({ ok: true, email: 'e@x.test' });
+  });
+
+  it('omits Secure flag when secureCookie=false (local HTTP dev)', async () => {
+    const { db, cleanup } = createTestDb(); cleanupFn = cleanup;
+    const fakeAuth = { login: vi.fn(), refresh: vi.fn() } as unknown as ProtonAuth;
+    (fakeAuth.login as any).mockResolvedValue(makeLoginSuccess());
+    const app = createApp({ db, encryptionKey: KEY, protonAuth: fakeAuth, secureCookie: false });
+
+    const res = await app.request('/api/auth/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: 'e@x.test', password: 'p' }),
+    });
+
+    expect(res.status).toBe(200);
+    const setCookieHeader = res.headers.get('set-cookie');
+    expect(setCookieHeader).toMatch(/HttpOnly/);
+    expect(setCookieHeader).not.toMatch(/Secure/);
   });
 
   it('returns 401 on bad credentials', async () => {

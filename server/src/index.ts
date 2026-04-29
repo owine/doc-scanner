@@ -12,7 +12,11 @@ const config = loadConfig();
 mkdirSync(dirname(config.DB_PATH), { recursive: true });
 const db = openDb(config.DB_PATH);
 
-const app = createApp({ db, encryptionKey: config.SESSION_ENCRYPTION_KEY });
+const app = createApp({
+  db,
+  encryptionKey: config.SESSION_ENCRYPTION_KEY,
+  secureCookie: !config.INSECURE_COOKIES,
+});
 
 serve({ fetch: app.fetch, port: config.PORT }, (info) => {
   logger.info({ port: info.port }, 'server listening');

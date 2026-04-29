@@ -22,6 +22,7 @@ export function authRoutes(deps: {
   db: DB;
   encryptionKey: string;
   appVersion?: string;
+  secureCookie?: boolean;
 }) {
   const r = new Hono<Env>();
   r.use('*', sessionMiddleware(deps.store));
@@ -35,7 +36,7 @@ export function authRoutes(deps: {
     try {
       const result = await deps.protonAuth.login(email, password, totp);
       deps.store.save(result.session);
-      const sid = issueSession(c);
+      const sid = issueSession(c, deps.secureCookie ?? true);
 
       const driveClient = new DriveClient({
         db: deps.db,
