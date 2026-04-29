@@ -3,19 +3,24 @@ import type { Quad } from './types.js';
 export const JPEG_QUALITY = 0.92;
 export const MAX_EDGE_PX = 2200;
 
-async function loadOpenCV(): Promise<void> {
-  if ((globalThis as any).cv) return;
-  await new Promise<void>((resolve, reject) => {
-    const script = document.createElement('script');
-    script.src = 'https://docs.opencv.org/4.x/opencv.js';
-    script.async = true;
-    script.onload = () => {
-      // OpenCV.js calls onRuntimeInitialized when the wasm is ready
-      (globalThis as any).cv['onRuntimeInitialized'] = () => resolve();
-    };
-    script.onerror = () => reject(new Error('failed to load opencv.js'));
-    document.head.appendChild(script);
-  });
+let opencvPromise: Promise<void> | null = null;
+
+function loadOpenCV(): Promise<void> {
+  if (!opencvPromise) {
+    opencvPromise = new Promise<void>((resolve, reject) => {
+      if ((globalThis as any).cv?.getBuildInformation) { resolve(); return; }
+      // Assign Module.onRuntimeInitialized BEFORE injecting the script so that
+      // a cached response whose wasm finishes before script.onload fires still
+      // triggers the callback.
+      (globalThis as any).Module = { onRuntimeInitialized: () => resolve() };
+      const script = document.createElement('script');
+      script.src = 'https://docs.opencv.org/4.x/opencv.js';
+      script.async = true;
+      script.onerror = () => reject(new Error('failed to load opencv.js'));
+      document.head.appendChild(script);
+    });
+  }
+  return opencvPromise;
 }
 
 let modulePromise: Promise<{ scanner: any }> | null = null;
