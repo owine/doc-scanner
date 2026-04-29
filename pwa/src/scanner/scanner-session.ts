@@ -1,0 +1,121 @@
+import { startCamera, captureFrame, type CameraHandle } from './camera.js';
+import { findQuad, warpToFlat, defaultQuad } from './edge-detect.js';
+import { StabilityDetector, type StabilityState } from './stability.js';
+import { ScansStore } from './scans-store.js';
+import type { Quad } from './types.js';
+
+export const LIVE_PREVIEW_FPS = 6;
+const FRAME_INTERVAL_MS = 1000 / LIVE_PREVIEW_FPS;
+
+export interface SessionEvents {
+  onStability?: (state: StabilityState, quad: Quad | null) => void;
+  onPageAdded?: (ordinal: number, blob: Blob) => void;
+  onError?: (err: Error) => void;
+}
+
+export class ScannerSession {
+  private cam: CameraHandle | null = null;
+  private video: HTMLVideoElement | null = null;
+  private stability = new StabilityDetector();
+  private rafId: number | null = null;
+  private lastFrameAt = 0;
+  private capturing = false;
+  private autoCaptureEnabled = true;
+  private currentQuad: Quad | null = null;
+
+  constructor(
+    public readonly scanId: string,
+    private readonly store: ScansStore,
+    private readonly events: SessionEvents = {},
+  ) {}
+
+  static async start(store: ScansStore, events: SessionEvents = {}): Promise<ScannerSession> {
+    const id = await store.createInProgress();
+    return new ScannerSession(id, store, events);
+  }
+
+  static async resume(scanId: string, store: ScansStore, events: SessionEvents = {}): Promise<ScannerSession> {
+    return new ScannerSession(scanId, store, events);
+  }
+
+  async attachVideo(video: HTMLVideoElement): Promise<void> {
+    this.cam = await startCamera();
+    this.video = video;
+    video.srcObject = this.cam.stream;
+    await video.play();
+    this.startLoop();
+  }
+
+  setAutoCapture(on: boolean): void {
+    this.autoCaptureEnabled = on;
+    if (!on) this.stability.reset();
+  }
+
+  /**
+   * Manual shutter. Returns the current frame's canvas + the last detected quad
+   * (or null). UI routes to EditCornersScreen with this canvas + a fallback quad
+   * when no detection was available.
+   */
+  manualCapture(): { canvas: HTMLCanvasElement; quad: Quad | null } {
+    if (!this.video) throw new Error('no video');
+    const canvas = captureFrame(this.video);
+    return { canvas, quad: this.currentQuad };
+  }
+
+  /** Commit a captured frame as a page (after auto-capture or EditCornersScreen Apply). */
+  async commitPage(canvas: HTMLCanvasElement, quad: Quad): Promise<void> {
+    this.capturing = true;
+    try {
+      const blob = await warpToFlat(canvas, quad);
+      const ordinal = await this.store.appendPage(this.scanId, blob, quad);
+      this.events.onPageAdded?.(ordinal, blob);
+      this.stability.reset();
+    } finally {
+      this.capturing = false;
+    }
+  }
+
+  async finish(): Promise<void> {
+    this.stop();
+    await this.store.finish(this.scanId);
+  }
+
+  async discard(): Promise<void> {
+    this.stop();
+    await this.store.delete(this.scanId);
+  }
+
+  stop(): void {
+    if (this.rafId !== null) cancelAnimationFrame(this.rafId);
+    this.rafId = null;
+    this.cam?.stop();
+    this.cam = null;
+    if (this.video) this.video.srcObject = null;
+  }
+
+  private startLoop(): void {
+    const loop = (t: number) => {
+      this.rafId = requestAnimationFrame(loop);
+      if (this.capturing) return;
+      if (t - this.lastFrameAt < FRAME_INTERVAL_MS) return;
+      this.lastFrameAt = t;
+      this.processFrame().catch((e) => this.events.onError?.(e as Error));
+    };
+    this.rafId = requestAnimationFrame(loop);
+  }
+
+  private async processFrame(): Promise<void> {
+    if (!this.video) return;
+    const canvas = captureFrame(this.video);
+    let quad: Quad | null = null;
+    try { quad = await findQuad(canvas); } catch { quad = null; }
+    this.currentQuad = quad;
+    const state = this.stability.update(quad, performance.now());
+    this.events.onStability?.(state, quad);
+    if (state === 'stable' && this.autoCaptureEnabled && quad) {
+      await this.commitPage(canvas, quad);
+    }
+  }
+}
+
+export { defaultQuad };
