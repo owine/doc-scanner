@@ -41,14 +41,27 @@ async function loadScanner() {
 
 export async function findQuad(canvas: HTMLCanvasElement): Promise<Quad | null> {
   const { scanner } = await loadScanner();
-  const points = scanner.getCornerPoints(canvas);
-  if (!points || !points.topLeftCorner) return null;
-  return {
-    tl: points.topLeftCorner,
-    tr: points.topRightCorner,
-    bl: points.bottomLeftCorner,
-    br: points.bottomRightCorner,
-  };
+  const cv = (globalThis as any).cv;
+  if (!cv) return null;
+
+  let img: any = null;
+  try {
+    img = cv.imread(canvas);
+    const contour = scanner.findPaperContour(img);
+    if (!contour || !contour.data32S || contour.data32S.length < 8) return null;
+    const points = scanner.getCornerPoints(contour);
+    if (!points?.topLeftCorner || !points?.topRightCorner || !points?.bottomLeftCorner || !points?.bottomRightCorner) {
+      return null;
+    }
+    return {
+      tl: points.topLeftCorner,
+      tr: points.topRightCorner,
+      bl: points.bottomLeftCorner,
+      br: points.bottomRightCorner,
+    };
+  } finally {
+    img?.delete?.();
+  }
 }
 
 export async function warpToFlat(canvas: HTMLCanvasElement, quad: Quad): Promise<Blob> {
