@@ -2057,7 +2057,7 @@ git -C /Users/owine/Git/doc-scanner commit -m "feat(http): /api/drive/test-uploa
 
 User-driven, not automated. Validates the full flow.
 
-- [ ] **Step 1: Boot the stack**
+- [x] **Step 1: Boot the stack**
 
 ```bash
 cd /Users/owine/Git/doc-scanner
@@ -2072,11 +2072,11 @@ cd /Users/owine/Git/doc-scanner/pwa
 npm run dev
 ```
 
-- [ ] **Step 2: Log in via PWA at `http://localhost:5173/`**
+- [x] **Step 2: Log in via PWA at `http://localhost:5173/`**
 
 Use the test account. Should land on StatusScreen.
 
-- [ ] **Step 3: Hit the test endpoint via curl**
+- [x] **Step 3: Hit the test endpoint via curl**
 
 ```bash
 COOKIE=$(grep -oE 'docscanner_sid=[^;]+' < browser-extracted-cookie-or-similar)
@@ -2089,13 +2089,13 @@ curl -X POST http://localhost:3000/api/drive/test-upload \
 
 Expected: JSON response with `nodeUid` and `driveUrl`.
 
-- [ ] **Step 4: Verify in Proton Drive web UI**
+- [x] **Step 4: Verify in Proton Drive web UI**
 
 Open https://drive.proton.me — the file `phase-2-smoke.txt` should appear in My Files within seconds. Open it; contents should be `doc-scanner test <timestamp>`.
 
 Delete it manually after verification.
 
-- [ ] **Step 5: Record smoke results in this plan**
+- [x] **Step 5: Record smoke results in this plan**
 
 Add to the bottom of this plan file:
 
@@ -2107,7 +2107,7 @@ _Test account:_
 _Notes:_
 ```
 
-- [ ] **Step 6: Final commit + tag**
+- [x] **Step 6: Final commit + tag**
 
 ```bash
 git -C /Users/owine/Git/doc-scanner add docs/superpowers/plans/
@@ -2130,6 +2130,28 @@ git -C /Users/owine/Git/doc-scanner tag -a phase-2-complete -m "Phase 2: Drive i
 
 ## Smoke Results (filled in during Task 16)
 
-_Date:_
-_Test account:_
+_Date:_ 2026-04-29
+_Test account:_ testingdocscanner@proton.me
 _Notes:_
+
+- Smoke succeeded against the node:sqlite-migrated build (commits `2aeb06e` + `7b3a85d`).
+- Login via PWA at `http://localhost:5173/`; cookie `docscanner_sid` set on `localhost`.
+- `POST /api/drive/test-upload` returned HTTP 200 with payload:
+  ```
+  { "ok": true,
+    "nodeUid": "IPMHEuu8ipO_qZHc1cw0gA~H7S-yQC76Dx2SZv8TUBndQ",
+    "driveUrl": "https://drive.proton.me/9CdXBN0M_9z2y4Yr-kO5Ig/file/H7S-yQC76Dx2SZv8TUBndQ",
+    "filename": "phase-2-smoke.txt" }
+  ```
+- File `phase-2-smoke.txt` confirmed visible in Proton Drive web UI.
+- Verification fully covered against the new node:sqlite backend:
+  - `npm test` → 74/74 unit tests pass (added `secureCookie=false` test)
+  - `INTEGRATION=1 npm run test:integration` → 3/3 integration tests pass
+  - manual end-to-end smoke (this entry) → pass
+
+### Issues found during smoke (and fixed)
+
+The smoke surfaced two real bugs that are now fixed in-tree:
+
+1. **Hard-coded `secure: true` on the session cookie** blocked all local HTTP login. Browsers silently drop `Set-Cookie` with `Secure` over plain `http://localhost`. Fixed in commit `9932f80` by adding the `INSECURE_COOKIES` env var (default `false`; production stays HTTPS-only). The unit test in `routes-auth.test.ts` now asserts both code paths.
+2. **`compose.yml` did not forward `INSECURE_COOKIES`** to the container. Compose's `environment:` block is an explicit allow-list — vars in `.env` are available for `${...}` interpolation but not auto-injected into containers. Fixed by adding the var to the forwarded list.
