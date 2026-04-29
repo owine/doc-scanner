@@ -43,6 +43,29 @@ export interface KeySaltEntry {
   KeySalt: string;
 }
 
+export interface ProtonAddressKey {
+  ID: string;
+  Version: number;
+  Primary: number;
+  Active: number;
+  Flags: number;
+  PrivateKey: string;
+  Token?: string | null;
+  Signature?: string | null;
+  Fingerprint: string;
+}
+
+export interface ProtonAddress {
+  ID: string;
+  Email: string;
+  Status: number;
+  Type: number;
+  Order: number;
+  Receive: number;
+  Send: number;
+  Keys: ProtonAddressKey[];
+}
+
 export class ProtonApi {
   constructor(private readonly baseUrl: string, private readonly appVersion: string) {}
 
@@ -68,6 +91,13 @@ export class ProtonApi {
 
   async getUser(uid: string, accessToken: string): Promise<{ User: ProtonUser }> {
     return this.request<{ User: ProtonUser }>('GET', '/core/v4/users', undefined, {
+      'x-pm-uid': uid,
+      authorization: `Bearer ${accessToken}`,
+    });
+  }
+
+  async getAddresses(uid: string, accessToken: string): Promise<{ Addresses: ProtonAddress[] }> {
+    return this.request<{ Addresses: ProtonAddress[] }>('GET', '/core/v4/addresses', undefined, {
       'x-pm-uid': uid,
       authorization: `Bearer ${accessToken}`,
     });

@@ -59,6 +59,28 @@ describe('ProtonApi', () => {
     });
   });
 
+  it('GET /core/v4/addresses sends uid + bearer headers and parses Addresses', async () => {
+    mockFetch.mockResolvedValueOnce(new Response(JSON.stringify({
+      Addresses: [{
+        ID: 'addr-1', Email: 'e@x', Status: 1, Type: 1, Order: 1, Receive: 1, Send: 1,
+        Keys: [{ ID: 'ak1', Version: 3, Primary: 1, Active: 1, Flags: 3, PrivateKey: 'PGP', Token: null, Signature: null, Fingerprint: 'fp' }],
+      }],
+    }), { status: 200, headers: { 'content-type': 'application/json' } }));
+
+    const api = new ProtonApi('https://api.example.test', 'external-drive-docscanner@0.1.0');
+    const res = await api.getAddresses('uid-3', 'at-3');
+
+    expect(res.Addresses).toHaveLength(1);
+    expect(res.Addresses[0]!.ID).toBe('addr-1');
+    const [url, init] = mockFetch.mock.calls[0]!;
+    expect(url).toContain('/core/v4/addresses');
+    expect((init as RequestInit).method).toBe('GET');
+    expect((init as RequestInit).headers).toMatchObject({
+      'x-pm-uid': 'uid-3',
+      authorization: 'Bearer at-3',
+    });
+  });
+
   it('throws on non-2xx with response body', async () => {
     mockFetch.mockResolvedValueOnce(new Response('{"Code":2001,"Error":"Bad request"}', { status: 422 }));
     const api = new ProtonApi('https://api.example.test', 'external-drive-docscanner@0.1.0');
