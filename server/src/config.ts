@@ -28,6 +28,7 @@ const ConfigSchema = z.object({
     .string()
     .default('false')
     .transform((v) => v === 'true' || v === '1'),
+  PWA_DIST_PATH: z.string().optional(),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;

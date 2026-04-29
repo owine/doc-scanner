@@ -9,4 +9,5 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-info}
       TRUST_PROXY: "true"
       INSECURE_COOKIES: ${INSECURE_COOKIES:-false}
+      PWA_DIST_PATH: /app/pwa/dist
     restart: unless-stopped

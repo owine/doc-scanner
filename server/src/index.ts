@@ -16,6 +16,7 @@ const app = createApp({
   db,
   encryptionKey: config.SESSION_ENCRYPTION_KEY,
   secureCookie: !config.INSECURE_COOKIES,
+  pwaDistPath: config.PWA_DIST_PATH,
 });
 
 serve({ fetch: app.fetch, port: config.PORT }, (info) => {
