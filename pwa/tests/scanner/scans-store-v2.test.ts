@@ -48,14 +48,14 @@ describe('ScansStore v2 migration', () => {
     expect(await store.getPdf('nonexistent')).toBeNull();
   });
 
-  it('findPendingPdf returns legacy scans + running scans + pending scans, excludes done/failed', async () => {
+  it('findPendingPdf returns running + pending; excludes done, failed, and partial', async () => {
     const store = new ScansStore();
     await store.open();
     // legacy: created via ScansStore, but with pdfStatus undefined
     const a = await store.createInProgress();
     await store.appendPage(a, blob('a'), Q);
     await store.finish(a);
-    // pdfStatus is undefined after finish in Phase 3 code; we'll simulate 'running' / 'done' / 'failed'
+    // pdfStatus is undefined after finish in Phase 3 code; we'll simulate 'running' / 'done' / 'failed' / 'partial'
     await store.setPdfStatus(a, 'done');
     const b = await store.createInProgress();
     await store.appendPage(b, blob('b'), Q);
@@ -69,6 +69,10 @@ describe('ScansStore v2 migration', () => {
     await store.appendPage(d, blob('d'), Q);
     await store.finish(d);
     await store.setPdfStatus(d, 'running');
+    const e = await store.createInProgress();
+    await store.appendPage(e, blob('e'), Q);
+    await store.finish(e);
+    await store.setPdfStatus(e, 'partial');
 
     const pending = await store.findPendingPdf();
     const ids = pending.map((s) => s.id).sort();

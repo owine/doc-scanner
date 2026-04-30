@@ -177,7 +177,7 @@ export class ScansStore {
     const all = await this.d.getAllFromIndex('scans', 'by_updatedAt');
     return all
       .filter((s) => s.status === 'completed')
-      .filter((s) => s.pdfStatus !== 'done' && s.pdfStatus !== 'failed');
+      .filter((s) => s.pdfStatus !== 'done' && s.pdfStatus !== 'partial' && s.pdfStatus !== 'failed');
   }
 
   async listCompleted(): Promise<Scan[]> {
