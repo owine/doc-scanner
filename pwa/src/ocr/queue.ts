@@ -89,9 +89,11 @@ export class OcrQueue {
         if (page.ocrText && page.ocrWords) { okCount++; this.emit('progress', { scanId, doneCount: okCount + failCount, totalCount: pages.length }); continue; }
         try {
           const r = await this.client.recognize(page.blob);
+          if (this.cancelled.has(scanId)) break;
           await this.store.setPageOcr(scanId, page.ordinal, r.text, r.words);
           okCount++;
         } catch (err) {
+          if (this.cancelled.has(scanId)) break;
           await this.store.setPageOcr(scanId, page.ordinal, '', []);
           failCount++;
         }
@@ -120,10 +122,12 @@ export class OcrQueue {
         this.emit('done', { scanId, pdfStatus: status });
       }
     } catch (err) {
-      await this.store.setPdfStatus(scanId, 'failed', (err as Error).message);
-      this.emit('failed', { scanId, error: (err as Error).message });
+      if (!this.cancelled.has(scanId)) {
+        await this.store.setPdfStatus(scanId, 'failed', (err as Error).message);
+        this.emit('failed', { scanId, error: (err as Error).message });
+      }
     } finally {
-      this.currentScanId = null;
+      if (this.currentScanId === scanId) this.currentScanId = null;
       void this.processNext();
     }
   }

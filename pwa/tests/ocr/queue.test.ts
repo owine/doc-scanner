@@ -174,6 +174,34 @@ describe('OcrQueue', () => {
     });
   });
 
+  it('cancel during in-flight: finally does not clobber a subsequent retry\'s state', async () => {
+    const id = await makeCompletedScan(['p1', 'p2']);
+    const q = new OcrQueue(store, client, fakePdf);
+    await q.start();
+    await vi.waitFor(() => expect(client.recognize).toHaveBeenCalledTimes(1));
+
+    // Cancel mid-flight (terminates worker; OLD processNext's recognize rejects)
+    q.cancel(id);
+    // terminate() already calls failAll internally in FakeClient, so pending jobs are drained
+
+    // Retry — kicks a NEW processNext for the same scan
+    await q.retry(id);
+    await vi.waitFor(() => expect(client.recognize).toHaveBeenCalledTimes(2));
+    client.resolveNext(ocr('a'));
+    await vi.waitFor(() => expect(client.recognize).toHaveBeenCalledTimes(3));
+    client.resolveNext(ocr('b'));
+
+    await vi.waitFor(async () => {
+      const list = await store.listCompleted();
+      expect(list[0]!.pdfStatus).toBe('done');
+    });
+
+    // Verify pages have the NEW OCR text, not the cancelled-flow's empty strings
+    const pages = await store.getPages(id);
+    expect(pages[0]!.ocrText).toBe('a');
+    expect(pages[1]!.ocrText).toBe('b');
+  });
+
   it('emits progress events', async () => {
     const id = await makeCompletedScan(['p1', 'p2']);
     const q = new OcrQueue(store, client, fakePdf);
