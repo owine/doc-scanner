@@ -3,7 +3,7 @@
 #   pre-commit install   # one-time, sets up .git/hooks/pre-commit
 repos:
   - repo: https://github.com/gitguardian/ggshield
-    rev: v1.50.2
+    rev: v1.50.3
     hooks:
       - id: ggshield
         # No overrides needed — upstream .pre-commit-hooks.yaml correctly sets:
