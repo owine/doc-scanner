@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Auto-OCR every saved scan in a single Tesseract.js Web Worker (FIFO queue), assemble searchable PDFs with `pdf-lib`, and expose a Download action on the SavedScansScreen row when ready.
+**Goal:** Auto-OCR every saved scan in a single Tesseract.js Web Worker (FIFO queue), assemble searchable PDFs with `@cantoo/pdf-lib`, and expose a Download action on the SavedScansScreen row when ready.
 
-**Architecture:** Two new module groups (`pwa/src/ocr/`, `pwa/src/pdf/`). One `OcrQueue` singleton owns the queue + drives the Web Worker via a Promise-based client. `pdf-lib` assembles the final PDF (image layer + invisible text layer aligned to per-word boxes). IndexedDB schema bumps to v2 with additive changes (no data mutation) plus a new `pdfs` object store. PWA-only; zero server changes.
+**Architecture:** Two new module groups (`pwa/src/ocr/`, `pwa/src/pdf/`). One `OcrQueue` singleton owns the queue + drives the Web Worker via a Promise-based client. `@cantoo/pdf-lib` assembles the final PDF (image layer + invisible text layer aligned to per-word boxes). IndexedDB schema bumps to v2 with additive changes (no data mutation) plus a new `pdfs` object store. PWA-only; zero server changes.
 
-**Tech Stack:** Phase 1+2+3 stack + new PWA deps: `tesseract.js` (browser OCR engine), `pdf-lib` (pure-JS PDF assembly). Vendored asset: `pwa/public/ocr/eng.traineddata.gz` (~10 MB).
+**Tech Stack:** Phase 1+2+3 stack + new PWA deps: `tesseract.js` (browser OCR engine, currently v7), `@cantoo/pdf-lib` (the actively-maintained fork of `@cantoo/pdf-lib`; the original is abandoned at 1.17.1 from Nov 2021). Vendored asset: `pwa/public/ocr/eng.traineddata.gz` (~2 MB compressed).
 
 **Spec:** [`docs/superpowers/specs/2026-04-30-phase-4-ocr-pdf-design.md`](../specs/2026-04-30-phase-4-ocr-pdf-design.md)
 
@@ -78,7 +78,7 @@ package-lock.json                      refreshed
 
 Notes:
 - `tesseract.js` is a runtime dep this time (not lazy-vendored like jscanify) because Vite handles its browser bundle correctly — the package's `main` points at the browser entry. The wasm chunk is auto-loaded from `node_modules/tesseract.js-core` and Vite copies it into `dist/assets/`.
-- `pdf-lib` is pure JS, no native deps, very stable.
+- `@cantoo/pdf-lib` is pure JS, no native deps, very stable.
 - Pin minor versions for Renovate.
 
 - [ ] **Step 2: Vendor `eng.traineddata.gz`**
@@ -1107,7 +1107,7 @@ git commit -m "feat(pwa): OcrQueue orchestrator with FIFO + resume + cancel"
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { PDFDocument } from 'pdf-lib';
+import { PDFDocument } from '@cantoo/pdf-lib';
 import { buildSearchablePdf } from '../../src/pdf/build.js';
 import type { OcrWord } from '../../src/scanner/types.js';
 
@@ -1187,7 +1187,7 @@ If the embedded base64 above is rejected by pdf-lib (some JPEG decoders are stri
 - [ ] Create `pwa/src/pdf/build.ts`:
 
 ```ts
-import { PDFDocument, rgb } from 'pdf-lib';
+import { PDFDocument, rgb } from '@cantoo/pdf-lib';
 import type { OcrWord } from '../scanner/types.js';
 
 const PDF_PAGE_DPI = 144;

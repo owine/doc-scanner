@@ -14,8 +14,8 @@
     "preact": "10.29.1",
     "idb": "8.0.3",
     "ulid": "3.0.2",
-    "tesseract.js": "6.0.1",
-    "pdf-lib": "1.17.1"
+    "tesseract.js": "7.0.0",
+    "@cantoo/pdf-lib": "2.6.5"
   },
   "devDependencies": {
     "@preact/preset-vite": "2.10.5",
