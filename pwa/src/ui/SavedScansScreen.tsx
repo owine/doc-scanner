@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'preact/hooks';
 import { ScansStore } from '../scanner/scans-store.js';
 import { ESTIMATED_PAGE_BYTES, type Scan } from '../scanner/types.js';
+import { OcrQueue } from '../ocr/queue.js';
 
 export interface SavedScansScreenProps {
   store: ScansStore;
+  queue: OcrQueue;
   onBack: () => void;
   onNewScan: () => void;
   onView: (scanId: string) => void;
@@ -22,7 +24,7 @@ function formatTime(ms: number): string {
   return d.toLocaleString();
 }
 
-export function SavedScansScreen({ store, onBack, onNewScan, onView }: SavedScansScreenProps) {
+export function SavedScansScreen({ store, queue, onBack, onNewScan, onView }: SavedScansScreenProps) {
   const [scans, setScans] = useState<Scan[] | null>(null);
   const [thumbs, setThumbs] = useState<Record<string, string>>({});
 

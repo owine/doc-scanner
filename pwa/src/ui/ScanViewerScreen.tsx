@@ -1,14 +1,16 @@
 import { useEffect, useState } from 'preact/hooks';
 import { ScansStore } from '../scanner/scans-store.js';
 import type { Page } from '../scanner/types.js';
+import { OcrQueue } from '../ocr/queue.js';
 
 export interface ScanViewerScreenProps {
   store: ScansStore;
+  queue: OcrQueue;
   scanId: string;
   onBack: () => void;
 }
 
-export function ScanViewerScreen({ store, scanId, onBack }: ScanViewerScreenProps) {
+export function ScanViewerScreen({ store, queue, scanId, onBack }: ScanViewerScreenProps) {
   const [pages, setPages] = useState<Page[]>([]);
   const [urls, setUrls] = useState<string[]>([]);
   const [idx, setIdx] = useState(0);

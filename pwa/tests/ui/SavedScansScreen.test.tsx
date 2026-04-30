@@ -18,7 +18,7 @@ const blob = (s: string) => new Blob([s], { type: 'image/jpeg' });
 
 describe('SavedScansScreen', () => {
   it('shows empty state when no scans', async () => {
-    render(<SavedScansScreen store={store} onBack={() => {}} onNewScan={() => {}} onView={() => {}} />);
+    render(<SavedScansScreen store={store} queue={{} as any} onBack={() => {}} onNewScan={() => {}} onView={() => {}} />);
     await waitFor(() => expect(screen.getByText(/no saved scans/i)).toBeInTheDocument());
   });
 
@@ -28,7 +28,7 @@ describe('SavedScansScreen', () => {
     await store.appendPage(id, blob('p'), Q);
     await store.finish(id);
 
-    render(<SavedScansScreen store={store} onBack={() => {}} onNewScan={() => {}} onView={() => {}} />);
+    render(<SavedScansScreen store={store} queue={{} as any} onBack={() => {}} onNewScan={() => {}} onView={() => {}} />);
     await waitFor(() => expect(screen.getByText(/2 pages/i)).toBeInTheDocument());
   });
 
@@ -38,7 +38,7 @@ describe('SavedScansScreen', () => {
     await store.finish(id);
     window.confirm = vi.fn().mockReturnValue(true);
 
-    render(<SavedScansScreen store={store} onBack={() => {}} onNewScan={() => {}} onView={() => {}} />);
+    render(<SavedScansScreen store={store} queue={{} as any} onBack={() => {}} onNewScan={() => {}} onView={() => {}} />);
     await waitFor(() => expect(screen.getByText(/1 page/i)).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: /^delete$/i }));
     await waitFor(() => expect(screen.getByText(/no saved scans/i)).toBeInTheDocument());
