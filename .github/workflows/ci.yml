@@ -59,9 +59,20 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          fetch-depth: 0  # need tags + history for `git describe`
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd  # v4.0.0
+
+      - name: Compute image metadata
+        id: meta
+        run: |
+          {
+            echo "git_sha=${GITHUB_SHA}"
+            echo "build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "version=$(git describe --tags --always --dirty)"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Build ${{ matrix.platform }}
         uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f  # v7.1.0
@@ -72,3 +83,7 @@ jobs:
           cache-from: type=gha,scope=docker-${{ matrix.platform }}
           cache-to: type=gha,mode=max,scope=docker-${{ matrix.platform }}
           tags: doc-scanner:ci
+          build-args: |
+            GIT_SHA=${{ steps.meta.outputs.git_sha }}
+            BUILD_DATE=${{ steps.meta.outputs.build_date }}
+            VERSION=${{ steps.meta.outputs.version }}

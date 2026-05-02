@@ -20,6 +20,14 @@ RUN npm --workspace @doc-scanner/pwa run build
 FROM node:24.15.0-alpine3.23@sha256:d1b3b4da11eefd5941e7f0b9cf17783fc99d9c6fc34884a665f40a06dbdfc94f AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
+
+# Static OCI labels — cached across builds since they never change
+LABEL org.opencontainers.image.title="doc-scanner" \
+      org.opencontainers.image.description="Self-hosted PWA for scanning paper documents to Proton Drive" \
+      org.opencontainers.image.source="https://github.com/owine/doc-scanner" \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.vendor="owine"
+
 RUN apk add --no-cache tini
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=build /app/server/dist ./server/dist
@@ -32,3 +40,12 @@ VOLUME ["/data"]
 ENV DB_PATH=/data/app.db
 ENTRYPOINT ["/sbin/tini", "--"]
 CMD ["node", "server/dist/index.js"]
+
+# Volatile OCI labels — placed last so they don't bust earlier layer cache.
+# CI passes real values via --build-arg; standalone builds get the defaults.
+ARG GIT_SHA=dev
+ARG BUILD_DATE=unknown
+ARG VERSION=dev
+LABEL org.opencontainers.image.revision="${GIT_SHA}" \
+      org.opencontainers.image.created="${BUILD_DATE}" \
+      org.opencontainers.image.version="${VERSION}"
