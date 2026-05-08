@@ -44,6 +44,155 @@ These run **before** Slice 1 begins. None block plan-writing, but all must compl
 
 ---
 
+## Slice 0 — Folder Cache (Phase 2 gap)
+
+The parent design assumed a folder-tree provider would exist by Phase 5, but Phase 2 only built `POST /api/drive/test-upload`; there is no `folder-cache` module and no `GET /api/folders` route in the codebase. Slice 1 depends on a folder list to suggest a destination, so we build it first as Slice 0. Three tasks.
+
+The Drive SDK exposes `iterateFolderChildren(folderUid)` (verified at `server/src/drive/client.ts:115`). The cache walks recursively from `getMyFilesRootFolder()` and keeps **only folders** (not files), flattened into `{ linkId: string; path: string }[]`.
+
+### Task 0.1: `server/src/drive/folder-cache.ts`
+
+**Files:**
+- Create: `server/src/drive/folder-cache.ts`
+- Test: `server/src/drive/folder-cache.test.ts`
+
+- [ ] **Step 0.1.1** — Write failing test for empty Drive (only root, no children):
+
+```ts
+// server/src/drive/folder-cache.test.ts
+import { describe, it, expect, vi } from 'vitest';
+import { FolderCache } from './folder-cache.js';
+
+function fakeSdk(tree: Record<string, Array<{ uid: string; name: string; type: string }>>) {
+  async function* iter(uid: string) {
+    for (const child of tree[uid] ?? []) yield { ok: true, value: child };
+  }
+  return {
+    getMyFilesRootFolder: vi.fn().mockResolvedValue({ ok: true, value: { uid: 'root', name: 'My Files' } }),
+    iterateFolderChildren: iter,
+  };
+}
+
+describe('FolderCache', () => {
+  it('returns just the root path when no subfolders exist', async () => {
+    const cache = new FolderCache(fakeSdk({}) as never);
+    await cache.refresh();
+    expect(cache.getTree()).toEqual([{ linkId: 'root', path: '/' }]);
+  });
+});
+```
+
+- [ ] **Step 0.1.2** — Run: FAIL.
+
+- [ ] **Step 0.1.3** — Implement minimal:
+
+```ts
+// server/src/drive/folder-cache.ts
+import type { ProtonDriveClient } from '@protontech/drive-sdk';
+
+interface FolderEntry { linkId: string; path: string; }
+
+function unwrap<T>(maybe: { ok: true; value: T } | { ok: false }): T {
+  if (!maybe.ok) throw new Error('SDK returned non-ok result');
+  return maybe.value;
+}
+
+export class FolderCache {
+  private tree: FolderEntry[] = [];
+
+  constructor(private readonly sdk: Pick<ProtonDriveClient, 'getMyFilesRootFolder' | 'iterateFolderChildren'>) {}
+
+  getTree(): FolderEntry[] { return this.tree; }
+
+  async refresh(): Promise<void> {
+    const root = unwrap(await this.sdk.getMyFilesRootFolder());
+    const out: FolderEntry[] = [{ linkId: root.uid, path: '/' }];
+    await this.walk(root.uid, '/', out);
+    this.tree = out;
+  }
+
+  private async walk(folderUid: string, parentPath: string, out: FolderEntry[]): Promise<void> {
+    for await (const childMaybe of this.sdk.iterateFolderChildren(folderUid)) {
+      if (!childMaybe.ok) continue;
+      const child = childMaybe.value;
+      if (String(child.type) !== 'folder') continue;     // skip files
+      const path = parentPath === '/' ? `/${child.name}` : `${parentPath}/${child.name}`;
+      out.push({ linkId: child.uid, path });
+      await this.walk(child.uid, path, out);
+    }
+  }
+}
+```
+
+- [ ] **Step 0.1.4** — Run: PASS.
+
+- [ ] **Step 0.1.5** — Add tests one at a time:
+  - Two top-level folders → returns 3 entries (root + 2). Order is walk-order.
+  - Nested 2 levels → all paths returned with correct slashes.
+  - Skips files (type ≠ 'folder').
+  - `refresh()` replaces (not appends) on second call.
+
+- [ ] **Step 0.1.6** — All 5 tests green. Commit: `feat(drive): folder-cache walks Drive tree, exposes flattened path list`.
+
+### Task 0.2: `GET /api/folders` route
+
+**Files:**
+- Modify: `server/src/http/routes-drive.ts` (add route alongside existing `test-upload`)
+- Test: `server/src/http/routes-drive.test.ts` (create if absent, else extend)
+
+- [ ] **Step 0.2.1** — Write failing route test (FolderCache mocked):
+
+```ts
+it('GET /api/drive/folders returns the cached tree', async () => {
+  const cache = { getTree: vi.fn().mockReturnValue([{ linkId: 'root', path: '/' }, { linkId: 'f1', path: '/Tax' }]) };
+  // ... wire route into a Hono test app ...
+  const res = await app.request('/api/drive/folders');
+  expect(res.status).toBe(200);
+  expect(await res.json()).toEqual({ folders: [{ linkId: 'root', path: '/' }, { linkId: 'f1', path: '/Tax' }] });
+});
+```
+
+- [ ] **Step 0.2.2** — Add the route to `driveRoutes(deps)`:
+
+```ts
+r.get('/folders', async (c) => {
+  const auth = c.get('auth');
+  if (!auth?.liveSession) return c.json({ error: 'not_authenticated' }, 401);
+  return c.json({ folders: deps.folderCache.getTree() });
+});
+```
+
+Update `driveRoutes` `deps` to include `folderCache: FolderCache`.
+
+- [ ] **Step 0.2.3** — Add an optional `?refresh=1` query param that triggers `await deps.folderCache.refresh()` before returning. Test it.
+
+- [ ] **Step 0.2.4** — Wire `FolderCache` instantiation in `server.ts`'s `createApp` — instance per live session, or singleton bound to a session? **Pattern decision**: instantiate once `liveSession` is available (auth middleware sets it); attach to the live session object so it lives for the session's lifetime. If that's awkward, hold it in a `Map<sessionId, FolderCache>` keyed off the SessionStore's session id.
+
+- [ ] **Step 0.2.5** — Three tests green (happy path, refresh, unauth). Commit: `feat(server): GET /api/drive/folders returns walked Drive tree`.
+
+### Task 0.3: PWA `api.getFolders()` + folder cache hydration
+
+**Files:**
+- Modify: `pwa/src/api.ts`
+- Test: `pwa/src/api.test.ts` (additions)
+
+- [ ] **Step 0.3.1** — TDD `getFolders()`:
+
+```ts
+export async function getFolders(refresh = false): Promise<{ folders: { linkId: string; path: string }[] }> {
+  const url = refresh ? '/api/drive/folders?refresh=1' : '/api/drive/folders';
+  const res = await fetch(url, { credentials: 'same-origin' });
+  if (!res.ok) throw new Error(`getFolders failed: ${res.status}`);
+  return res.json();
+}
+```
+
+- [ ] **Step 0.3.2** — Tests: happy path, refresh path, 401 throws.
+
+- [ ] **Step 0.3.3** — Commit: `feat(pwa): api.getFolders() hits new server route`.
+
+---
+
 ## Slice 1 — Classify Online
 
 End state: scan → AI suggests name + folder → user edits + confirms → toast "would upload" (no real upload yet). 9 tasks.
@@ -416,13 +565,13 @@ export function classifyRoutes(deps: Deps): Hono {
   - `classify` returns null → 200 with `{ suggestion: null }` (not 500).
   - Undecodable image → 422.
 
-- [ ] **Step 4.7** — Wire route into `server.ts`:
+- [ ] **Step 4.7** — Wire route into `server.ts`. The `folderCache` instance built in Task 0.2.4 is the same one passed here (singleton or per-session — match the decision made there):
 
 ```ts
 // server/src/http/server.ts (additions in createApp)
 import { classifyRoutes } from './routes-classify.js';
 import { classify } from '../classify/haiku.js';
-import { folderCache } from '../drive/folder-cache.js';   // adjust to actual export
+// folderCache is already bound to liveSession from Task 0.2.4
 // ...
 app.route('/api', classifyRoutes({ classify, folderCache, history: undefined }));
 ```
@@ -503,7 +652,24 @@ Throws on illegal transitions; persists patch atomically.
   - Concurrent transitions on same id serialised (use IDB transaction).
   - `findPending()` returns `pending_classify` + `pending_upload` ordered by `updatedAt`.
 
-- [ ] **Step 5.8** — All 6 tests green. Commit: `feat(pwa): scans-store uploadStatus axis (slice 1 states)`.
+- [ ] **Step 5.8** — Add helper methods used by Tasks 8 / 15 / 23 (the existing API has `getPages(scanId)` and `getPdf(pdfKey)`, but no scan-id-keyed convenience getters):
+
+```ts
+async getPdfBlob(scanId: string): Promise<Blob | null> {
+  const scan = await this.get(scanId);
+  if (!scan?.pdfKey) return null;
+  return this.getPdf(scan.pdfKey);
+}
+
+async getCombinedOcrText(scanId: string): Promise<string> {
+  const pages = await this.getPages(scanId);
+  return pages.map((p) => p.ocrText ?? '').filter((t) => t.length > 0).join('\n\n');
+}
+```
+
+Add tests for each (1 test per helper).
+
+- [ ] **Step 5.9** — All 8 tests green. Commit: `feat(pwa): scans-store uploadStatus axis + slice-1 getter helpers`.
 
 ### Task 6: PWA `api.ts::classify()`
 
@@ -849,8 +1015,8 @@ export function uploadRoutes(deps: Deps): Hono {
 ```ts
 async function onSave(name: string, folderLinkId: string) {
   await scansStore.setUploadStatus(scanId, 'pending_upload', { finalName: name, finalFolderLinkId: folderLinkId });
-  const pdfBlob = await scansStore.getPdfBlob(scanId);   // adjust to actual API
-  const ocrText = await scansStore.getOcrText(scanId);
+  const pdfBlob = await scansStore.getPdfBlob(scanId)   /* added in Task 5.8 */;   // adjust to actual API
+  const ocrText = await scansStore.getCombinedOcrText(scanId)   /* added in Task 5.8 */;
   try {
     const res = await api.upload(pdfBlob, name, folderLinkId, ocrText);
     await scansStore.setUploadStatus(scanId, 'done', { driveNodeUid: res.driveNodeUid, driveWebUrl: res.driveWebUrl, finalName: res.finalName });
@@ -1130,5 +1296,5 @@ Boot stack via docker compose + ngrok.
 - **Image normalization is server-side** (sharp). PWA still produces a 512px thumbnail best-effort, but the server is the source of truth.
 - **Trust boundary** (parent spec line 73): the phone owns raw page images and the Proton password; the server owns the long-lived Proton session and Anthropic key. Don't accidentally cross this line.
 - **Drive SDK collision behaviour** is not assumed — Task 10 verifies it empirically before Task 11 codes against a specific error shape.
-- **For "Refresh folders" call**: the route exists at `GET /api/folders` (Phase 2). PWA's `api.ts` likely already has it; if not, add a thin wrapper.
+- **For "Refresh folders" call**: the route is **built in Slice 0** (`GET /api/drive/folders?refresh=1`). It does not exist before this plan starts — Phase 2 only built `POST /api/drive/test-upload`.
 - **Anthropic model id** is `claude-haiku-4-5`. Pin the exact id in code; do not parameterise via env (single-user app, deliberate model choice).
