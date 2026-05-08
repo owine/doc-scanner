@@ -8,9 +8,6 @@ import { ScanViewerScreen } from './ScanViewerScreen.js';
 import { ResumePrompt } from './ResumePrompt.js';
 import { ScansStore } from '../scanner/scans-store.js';
 import type { Scan } from '../scanner/types.js';
-import { OcrQueue } from '../ocr/queue.js';
-import { WorkerClient } from '../ocr/worker-client.js';
-import { buildSearchablePdf } from '../pdf/build.js';
 
 type Route =
   | { kind: 'status' }
@@ -23,16 +20,13 @@ export function App() {
   const [loaded, setLoaded] = useState(false);
   const [route, setRoute] = useState<Route>({ kind: 'status' });
   const [store] = useState(() => new ScansStore());
-  const [queue] = useState(() => new OcrQueue(store, new WorkerClient(), buildSearchablePdf));
   const [resume, setResume] = useState<Scan | null>(null);
 
   useEffect(() => {
     api.status().then((s) => setEmail(s.email))
       .catch((e) => { if (!(e instanceof ApiError && e.status === 401)) console.error(e); })
       .finally(() => setLoaded(true));
-    store.open()
-      .then(() => queue.start())
-      .catch((e) => console.error('open store', e));
+    store.open().catch((e) => console.error('open store', e));
   }, []);
 
   useEffect(() => {
@@ -64,7 +58,6 @@ export function App() {
     case 'scanner':
       return <ScannerScreen
         store={store}
-        queue={queue}
         {...(route.resumeScanId !== undefined ? { resumeScanId: route.resumeScanId } : {})}
         onBack={() => setRoute({ kind: 'status' })}
         onDone={() => setRoute({ kind: 'saved' })}
@@ -72,7 +65,6 @@ export function App() {
     case 'saved':
       return <SavedScansScreen
         store={store}
-        queue={queue}
         onBack={() => setRoute({ kind: 'status' })}
         onNewScan={() => setRoute({ kind: 'scanner' })}
         onView={(scanId) => setRoute({ kind: 'viewer', scanId })}
@@ -80,7 +72,6 @@ export function App() {
     case 'viewer':
       return <ScanViewerScreen
         store={store}
-        queue={queue}
         scanId={route.scanId}
         onBack={() => setRoute({ kind: 'saved' })}
       />;

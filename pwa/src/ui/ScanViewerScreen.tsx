@@ -1,17 +1,15 @@
 import { useEffect, useState } from 'preact/hooks';
 import { ScansStore } from '../scanner/scans-store.js';
 import type { Page, Scan } from '../scanner/types.js';
-import { OcrQueue } from '../ocr/queue.js';
 import { downloadPdf } from './download.js';
 
 export interface ScanViewerScreenProps {
   store: ScansStore;
-  queue: OcrQueue;
   scanId: string;
   onBack: () => void;
 }
 
-export function ScanViewerScreen({ store, queue, scanId, onBack }: ScanViewerScreenProps) {
+export function ScanViewerScreen({ store, scanId, onBack }: ScanViewerScreenProps) {
   const [pages, setPages] = useState<Page[]>([]);
   const [urls, setUrls] = useState<string[]>([]);
   const [idx, setIdx] = useState(0);
@@ -46,7 +44,7 @@ export function ScanViewerScreen({ store, queue, scanId, onBack }: ScanViewerScr
         <button class="btn btn-secondary" onClick={onBack}>← Back</button>
         <strong>{idx + 1} / {pages.length}</strong>
         <span style={{ display: 'flex', gap: 8 }}>
-          {(scanRow?.pdfStatus === 'done' || scanRow?.pdfStatus === 'partial') && (
+          {scanRow?.pdfKey && (
             <button class="btn" onClick={() => downloadPdf(scanRow, store)}>Download</button>
           )}
           <button class="btn btn-danger" aria-label="Delete scan" onClick={deleteScan}>🗑</button>

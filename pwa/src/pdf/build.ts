@@ -1,8 +1,19 @@
 import { PDFDocument, rgb } from '@cantoo/pdf-lib';
-import type { OcrWord } from '../scanner/types.js';
 
 const PDF_PAGE_DPI = 144;
 const PT_PER_PX = 72 / PDF_PAGE_DPI;
+
+// Slice 2 will revisit this shape for normalised (0-1) coords from Haiku
+// and fix the two bugs flagged in PR-8 (embedFont API + Blob bytes).
+// For now we keep the existing pixel-coord interface so the file compiles.
+export interface OcrWord {
+  text: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  confidence: number;
+}
 
 export interface PageInput {
   blob: Blob;

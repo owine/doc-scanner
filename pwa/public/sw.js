@@ -1,14 +1,14 @@
 // doc-scanner Service Worker.
-// Caches the scanner chunk (split out by Vite as a dynamic-import chunk) and
-// the jscanify wasm so subsequent opens work fully offline.
+// Caches the scanner chunk (split out by Vite as a dynamic-import chunk),
+// the jscanify wasm + opencv so subsequent opens work fully offline, and
+// the pdf-core chunk for searchable-PDF assembly.
 
-const CACHE_NAME = 'docscanner-scanner-v4';
+const CACHE_NAME = 'docscanner-scanner-v7';
 const RUNTIME_CACHE_PATTERNS = [
   /\/assets\/scanner-core-.*\.js$/,
-  /\/assets\/ocr-core-.*\.js$/,
+  /\/assets\/pdf-core-.*\.js$/,
   /\/scanner\//,
   /\/opencv\//,
-  /\/ocr\//,
 ];
 
 self.addEventListener('install', () => self.skipWaiting());
