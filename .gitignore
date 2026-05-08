@@ -10,3 +10,11 @@ coverage/
 playwright-report/
 test-results/
 .superpowers/
+
+# Vendored at build time by pwa/scripts/copy-tesseract-assets.mjs
+pwa/public/ocr/worker.min.js
+pwa/public/ocr/tesseract-core-*.wasm
+pwa/public/ocr/tesseract-core-*.wasm.js
+
+# Local Claude Code scheduler state
+.claude/

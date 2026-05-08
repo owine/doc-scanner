@@ -14,10 +14,15 @@ function post(msg: WorkerOutput): void {
 async function init(): Promise<void> {
   if (tess) return;
   tess = await createWorker(OCR_LANGUAGE, undefined, {
-    // Vite copies tesseract.js wasm into /assets/; tesseract.js auto-discovers it.
-    // langPath points at our vendored eng.traineddata.gz directory.
+    // Tesseract.js's defaults point at cdn.jsdelivr.net for the inner worker
+    // script and core wasm — that path hangs on iOS Safari behind our Service
+    // Worker (cross-origin importScripts in a Worker is restricted, and the
+    // SW also doesn't have a fetch handler for the CDN host). pwa/scripts/
+    // copy-tesseract-assets.mjs vendors the files to /ocr/ at build time.
     langPath: '/ocr',
     gzip: true,
+    workerPath: '/ocr/worker.min.js',
+    corePath: '/ocr',
   });
 }
 
