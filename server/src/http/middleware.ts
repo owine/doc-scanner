@@ -53,3 +53,9 @@ export function revokeSession(c: Context<Env>): void {
 
 // For tests: reset the in-memory sid set
 export function _resetSids(): void { liveSids.clear(); }
+
+// For tests: seed a sid into the in-memory set without going through the
+// full login flow (which requires SRP + Proton API). Pair with
+// SessionStore.save() and registerLiveSession() to construct a fully
+// authenticated state in unit tests.
+export function _seedSid(sid: string): void { liveSids.add(sid); }

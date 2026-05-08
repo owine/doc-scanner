@@ -2,6 +2,7 @@ import type { ProtonSession } from './srp.js';
 import type { MailboxSecret } from './secrets/mailbox-password.js';
 import type { DecryptedUserKey } from './keys.js';
 import type { DriveClient } from '../drive/client.js';
+import type { FolderCache } from '../drive/folder-cache.js';
 
 export interface LiveSession {
   sid: string;
@@ -9,6 +10,7 @@ export interface LiveSession {
   mailboxSecret: MailboxSecret;
   decryptedKeys: DecryptedUserKey;
   driveClient: DriveClient;
+  folderCache: FolderCache;
 }
 
 const sessions = new Map<string, LiveSession>();

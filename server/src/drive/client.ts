@@ -17,6 +17,7 @@ import { EntitiesCache } from './entities-cache.js';
 import { CryptoCache } from './crypto-cache.js';
 import { EventIdStore } from './event-id-store.js';
 import { getOpenPGPModule } from './crypto-module.js';
+import { FolderCache } from './folder-cache.js';
 
 export interface DriveClientConfig {
   db: DB;
@@ -105,6 +106,15 @@ export class DriveClient {
       latestEventIdProvider: new EventIdStore(cfg.db),
       telemetry: NULL_TELEMETRY,
     });
+  }
+
+  /**
+   * Construct a per-session folder-tree cache. The cache holds a reference
+   * to this client's SDK and walks `iterateFolderChildren` recursively when
+   * `refresh()` is called. Per-session lifetime keeps account boundaries.
+   */
+  createFolderCache(): FolderCache {
+    return new FolderCache(this.sdk);
   }
 
   async listRoot(): Promise<ListRootResult> {

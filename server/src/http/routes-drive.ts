@@ -13,6 +13,23 @@ export function driveRoutes(deps: { db: DB; store: SessionStore }) {
   const r = new Hono<Env>();
   r.use('*', sessionMiddleware(deps.store));
 
+  r.get('/folders', async (c) => {
+    const auth = c.get('auth');
+    if (!auth?.liveSession) return c.json({ error: 'not_authenticated' }, 401);
+    const cache = auth.liveSession.folderCache;
+    const refreshRequested = c.req.query('refresh') === '1';
+    const treeIsEmpty = cache.getTree().length === 0;
+    if (refreshRequested || treeIsEmpty) {
+      try {
+        await cache.refresh();
+      } catch (err) {
+        logger.warn({ err: (err as Error).message }, 'folder cache refresh failed');
+        return c.json({ error: 'refresh_failed' }, 502);
+      }
+    }
+    return c.json({ folders: cache.getTree() });
+  });
+
   r.post('/test-upload', async (c) => {
     const auth = c.get('auth');
     if (!auth?.liveSession) return c.json({ error: 'not_authenticated' }, 401);

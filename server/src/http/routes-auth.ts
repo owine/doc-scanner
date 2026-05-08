@@ -53,6 +53,7 @@ export function authRoutes(deps: {
         mailboxSecret: result.mailboxSecret,
         decryptedKeys: result.decryptedKeys,
         driveClient,
+        folderCache: driveClient.createFolderCache(),
       });
 
       logger.info({ email, remoteUser }, 'login succeeded');
