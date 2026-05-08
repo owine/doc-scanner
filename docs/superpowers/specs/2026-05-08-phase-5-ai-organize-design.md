@@ -354,7 +354,7 @@ Both perform pre-flight blob size checks (1 MB for thumbnail, 50 MB for PDF) and
 
 ### `pwa/scanner/scans-store.ts` extensions (slices 1, 2, 4)
 
-**Slicing**: the `uploadStatus` field and the four states `'idle' | 'pending_classify' | 'awaiting_confirm' | 'pending_upload' | 'done'` are added in **slice 1** (so the confirm-card flow has its state machine). Slice 2 wires the `'done'` transition to a real Drive node. **Slice 4** adds the `'needs_attention'` state and the background-drain triggers.
+**Slicing**: the `uploadStatus` field and the five states `'idle' | 'pending_classify' | 'awaiting_confirm' | 'pending_upload' | 'done'` are added in **slice 1** (so the confirm-card flow has its state machine). Slice 2 wires the `'done'` transition to a real Drive node. **Slice 4** adds the `'needs_attention'` state and the background-drain triggers.
 
 Add to `Scan` interface:
 
