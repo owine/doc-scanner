@@ -46,7 +46,7 @@ This phase realises the components designed in the parent spec (`classify/haiku.
 | Confidence gating | Show as small badge when low; never auto-skip confirmation | Matches parent spec's "always confirm" rule; preserves user trust. |
 | Telemetry persistence | Logs only (latency, tokens, success/fail) | YAGNI for dashboard; sqlite3 + grep is sufficient diagnosis. |
 | `drive/client.uploadFile` extension | Add `parentFolderUid: string` parameter; return resolved `finalName` alongside `nodeUid` and `driveUrl` | Phase 2's wrapper hard-codes root upload — Phase 5 needs folder targeting. Returning the resolved name lets the route surface collision-suffixed names back to the PWA. |
-| Name collision strategy | Wrapper-side: catch SDK conflict error, retry with `" (2)"`, `" (3)"`, ` (4)"` suffixes (max 3 retries) | SDK collision behaviour is unverified. Wrapping the retry loop guarantees deterministic semantics regardless of SDK version. Slice 2 includes an empirical SDK-behaviour test before locking the strategy. |
+| Name collision strategy | Wrapper-side: catch SDK conflict error, retry with `" (2)"`, `" (3)"`, `" (4)"` suffixes (max 3 retries) | SDK collision behaviour is unverified. Wrapping the retry loop guarantees deterministic semantics regardless of SDK version. Slice 2 includes an empirical SDK-behaviour test before locking the strategy. |
 | Service Worker location | Extend existing `pwa/public/sw.js` (hand-written, 41 lines) with a `sync` event handler for `outbox-drain` | Project already chose hand-written SW over a build plugin; consistent with Phase 4's `/ocr/*` caching addition (commit `ee4d419`). Drain logic lives in plain JS inside the SW. |
 | PWA suggestion field naming | `Scan.suggestion` mirrors `ClassifyResult` shape: `{ suggestedName, suggestedFolderLinkId, confidence, rationale }`; `Scan.finalName` / `Scan.finalFolderLinkId` are post-edit values | Avoids ambiguity at the server↔PWA seam; rename was an explicit reviewer recommendation. |
 
@@ -72,7 +72,7 @@ The first real round-trip into Drive.
 
 Server-only quality bump. Each save trains the next suggestion.
 
-- **Server**: New migration `0008_classification_history.sql` (table + FTS5 virtual table + sync triggers). `classify/history.ts` (`recordSave`, `findSimilar`). `routes-upload.ts` calls `recordSave` on success. `routes-classify.ts` calls `findSimilar` and passes results to `classify()`.
+- **Server**: New migration `003_classification_history.sql` (table + FTS5 virtual table + sync triggers). `classify/history.ts` (`recordSave`, `findSimilar`). `routes-upload.ts` calls `recordSave` on success. `routes-classify.ts` calls `findSimilar` and passes results to `classify()`.
 - **PWA**: No changes.
 - **End state**: After 3+ saves, the prompt shown to Haiku contains an `<examples>` block with prior filings.
 
@@ -80,7 +80,7 @@ Server-only quality bump. Each save trains the next suggestion.
 
 Offline resilience. Phase 5 complete after this.
 
-- **PWA only**: Extend `pwa/scanner/scans-store.ts` with `uploadStatus` axis. `pwa/sw-sync.ts` registers `outbox-drain` background sync. iOS Safari fallback: drain on `visibilitychange → visible` plus a "Retry all" button on a small outbox panel.
+- **PWA only**: Add `'needs_attention'` state to `uploadStatus` (other states arrive in slice 1). Extend `pwa/public/sw.js` with sync + message listeners; new `pwa/src/outbox-drain.ts` (TypeScript) holds drain logic; new `pwa/src/sw-register.ts` registers `outbox-drain` background sync and posts message on visibility change. iOS Safari fallback: drain on `visibilitychange → visible` plus a "Retry all" button on a small outbox panel.
 - **End state**: Airplane-mode scan → resume online → automatic suggest+upload without user interaction. Manual smoke (combined Phase 4 + Phase 5 cases) before tagging `phase-5-complete`.
 
 ## Components — Server
@@ -235,7 +235,7 @@ Tests (`classify/history.test.ts`, in-memory SQLite with migration applied):
 4. OCR contains FTS5 reserved words (`AND`, `NEAR`) → quoting prevents syntax errors.
 5. After insert + delete, FTS index in sync.
 
-### Migration `0008_classification_history.sql` (new, slice 3)
+### Migration `003_classification_history.sql` (new, slice 3)
 
 ```sql
 CREATE TABLE classification_history (
@@ -353,6 +353,8 @@ export async function upload(pdf: Blob, name: string, folderLinkId: string, ocrT
 Both perform pre-flight blob size checks (1 MB for thumbnail, 50 MB for PDF) and throw before fetch on violation. Tests verify pre-flight + multipart shape.
 
 ### `pwa/scanner/scans-store.ts` extensions (slices 1, 2, 4)
+
+**Slicing**: the `uploadStatus` field and the four states `'idle' | 'pending_classify' | 'awaiting_confirm' | 'pending_upload' | 'done'` are added in **slice 1** (so the confirm-card flow has its state machine). Slice 2 wires the `'done'` transition to a real Drive node. **Slice 4** adds the `'needs_attention'` state and the background-drain triggers.
 
 Add to `Scan` interface:
 
@@ -482,7 +484,7 @@ Service Worker registers `outbox-drain`. Browser fires it on connectivity restor
 | Multipart body > 50 MB on `/api/upload` | 2 | 413; user surfaced error; scan stays `pending_upload`. |
 | Drive upload 5xx | 2 | SDK retries internally (1 backoff retry); second failure → route 502 → PWA marks `needs_attention` + logs. |
 | Drive token expired during upload | 2 | Route attempts `client.refresh()` once; on refresh failure returns 401 `reauth_required: true`; PWA bounces to login; scan stays `pending_upload`. |
-| Drive name collision | 2 | SDK appends ` (2)`, ` (3)` and retries internally; final name surfaces in 200 response. |
+| Drive name collision | 2 | `drive/client.ts` wrapper retries with `" (2)"` / `" (3)"` / `" (4)"` suffix (max 3); resolved `finalName` returned to PWA. After 3 collisions, route returns 409 with `collision_exhausted: true`; PWA prompts user to edit name + retry. |
 | FTS5 query throws (corrupt index) | 3 | `findSimilar` catches, returns `[]`, logs; classify proceeds zero-shot. |
 | `history.recordSave` disk-full / write fail | 3 | Logged; upload route still returns 200 (history is best-effort). |
 | Background sync fires while reachable but auth lost | 4 | Affected scans → `needs_attention`; outbox panel banner. |
