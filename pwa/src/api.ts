@@ -3,6 +3,8 @@ import { captureRequestFailure } from './observability/sentry.js';
 export interface LoginRequest { email: string; password: string; totp?: string }
 export interface LoginResponse { ok: true; email: string }
 export interface StatusResponse { email: string }
+export interface FolderEntry { linkId: string; path: string }
+export interface FoldersResponse { folders: FolderEntry[] }
 
 class ApiError extends Error {
   constructor(message: string, public readonly status: number, public readonly code?: string) {
@@ -61,6 +63,8 @@ export const api = {
   login: (body: LoginRequest) => request<LoginResponse>('/api/auth/login', { method: 'POST', body: JSON.stringify(body) }),
   logout: () => request<{ ok: true }>('/api/auth/logout', { method: 'POST' }),
   status: () => request<StatusResponse>('/api/auth/status'),
+  getFolders: (refresh = false) =>
+    request<FoldersResponse>(refresh ? '/api/drive/folders?refresh=1' : '/api/drive/folders'),
 };
 
 export { ApiError };
