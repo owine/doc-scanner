@@ -583,6 +583,8 @@ const ALLOWED: Record<UploadStatus, UploadStatus[]> = {
 
 - [ ] **Step 5.4** — Tests (one at a time): legal idle → pending_classify, illegal done → pending_upload throws, awaiting_confirm → pending_upload writes `finalName`, pending_upload → done writes `driveNodeUid`/`driveWebUrl`, concurrent transitions serialised, `findPending()` returns pending rows ordered by `updatedAt`.
 - [ ] **Step 5.5** — Add helper methods: `getPageBlobs(scanId)` (read all page blobs from store), `setSuggestionAndOcr(scanId, suggestion, pageOcr)` (atomic patch on classify response). 2 more tests.
+
+  **Note (sourcery-ai PR-8 finding #2)**: when adding `setPdfBlob(scanId, blob)` later (Task 15), do **not** insert into the `pdfs` blob store before confirming the scan row exists. Either: (a) load the scan first, fail fast if missing, then do PDF insert + scan update in a *single* IDB transaction; or (b) wrap with explicit cleanup that deletes the orphaned PDF row on scan-update failure. Pattern (a) is preferred — applies to *all* blob-store inserts logically tied to scan rows.
 - [ ] **Step 5.6** — All 8 tests green. Commit: `feat(pwa): scans-store uploadStatus axis + slice-1 helpers`.
 
 ### Task 6: PWA `api.classify()`
@@ -737,9 +739,15 @@ End state: scan → AI → user confirms → real PDF lands in Drive. Tag-worthy
 (a) is cleaner — the build module already does the coord math; just adjust its input shape.
 
 - [ ] **Step 12.1** — Read existing `pdf/build.ts` to understand current input shape and coord math.
-- [ ] **Step 12.2** — TDD: a new test that passes normalised coords + an image of known dimensions; assert PDF text positions align with the (image-dimension × normalised-coord) products.
-- [ ] **Step 12.3** — Update `build.ts` to accept normalised coords (+ optional image dimensions for the conversion). Old tests should still pass with a small adapter or be updated.
-- [ ] **Step 12.4** — Commit: `feat(pwa): pdf/build accepts normalised word coordinates from Haiku`.
+- [ ] **Step 12.2** — **Fix two pre-existing bugs flagged in PR-8 sourcery-ai review** while we're in this file:
+  - **(4a)** `embedFont('Helvetica')` may be the wrong `@cantoo/pdf-lib` API — built-in fonts typically use `embedStandardFont` (or pass `StandardFonts.Helvetica`). Verify the actual API by reading the @cantoo/pdf-lib types and switch to the correct call. Failure mode: silently embedding wrong font / runtime error.
+  - **(4b)** `new Blob([out.buffer], ...)` includes the entire ArrayBuffer extent, which can be larger than `out.byteLength`. Switch to `new Blob([out], { type: 'application/pdf' })` or `new Blob([out.slice()], ...)`. Failure mode: malformed PDFs with trailing garbage bytes; iOS Safari or Drive SDK may reject.
+- [ ] **Step 12.3** — TDD: new test passes normalised coords + image of known dimensions; assert PDF text positions align with `(image-dimension × normalised-coord)` products.
+- [ ] **Step 12.4** — Update `build.ts` to accept normalised coords (+ image dimensions). Old tests still pass via adapter or updated.
+- [ ] **Step 12.5** — **Add the test-coverage gaps from PR-8 sourcery-ai #5**:
+  - Empty `pages` array → returns valid 0-page PDF (must not throw).
+  - OCR words containing non-ASCII characters (accented + CJK) → PDF still loads via `PDFDocument`. Guards encoding/font regressions.
+- [ ] **Step 12.6** — Commit: `fix(pwa): pdf/build — correct font embedding + Blob bytes; accept normalised coords`.
 
 ### Task 13: `routes-upload.ts`
 
@@ -872,3 +880,6 @@ Boot stack via docker compose + ngrok. Run all 7 cases from spec section "Manual
 - **Trust boundary** (parent spec line 73): page images go to server (and Anthropic). The parent spec didn't anticipate this in v1, but it's the same boundary the existing thumbnail-to-Anthropic call would have crossed; we're sending more of it now.
 - **Renovate `rangeStrategy: pin`** is in effect across all package.json.
 - **iOS Safari testing is non-negotiable for any worker/SW change.** Automated tests run in happy-dom; they cannot catch the class of failures that retired Tesseract.js.
+- **PR-8 sourcery-ai lessons not directly addressed by this plan but worth keeping in mind:**
+  - **Listener cleanup on unmount**: any component that subscribes to event-emitter-style sources (e.g., the slice-4 outbox-drain progress events) MUST return a cleanup function that unregisters its handlers. The retired `OcrQueue` integration leaked listeners across remounts; don't repeat the pattern.
+  - **Async-init-with-cache poisoning**: if a class lazily initialises (e.g., the haiku.ts SDK client below) and caches a `Promise`, do **not** keep a rejected promise cached. On rejection, null the cache so callers can retry on the next call. (The retired `WorkerClient.init()` had this bug.)
