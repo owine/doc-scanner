@@ -2,12 +2,10 @@ import { useEffect, useState } from 'preact/hooks';
 import type { JSX } from 'preact';
 import { ScansStore } from '../scanner/scans-store.js';
 import { ESTIMATED_PAGE_BYTES, type Scan } from '../scanner/types.js';
-import { OcrQueue, type ProgressEvent, type DoneEvent, type FailedEvent } from '../ocr/queue.js';
 import { downloadPdf } from './download.js';
 
 export interface SavedScansScreenProps {
   store: ScansStore;
-  queue: OcrQueue;
   onBack: () => void;
   onNewScan: () => void;
   onView: (scanId: string) => void;
@@ -26,23 +24,15 @@ function formatTime(ms: number): string {
   return d.toLocaleString();
 }
 
-function renderRowStatus(s: Scan, prog: { doneCount: number; totalCount: number } | undefined): JSX.Element {
-  switch (s.pdfStatus) {
-    case 'done':
-    case 'partial':
-      return <span class="muted">PDF ready{s.pdfStatus === 'partial' ? ' (partial)' : ''}</span>;
-    case 'failed':
-      return <span class="error-text">Failed: {s.ocrError ?? 'unknown'}</span>;
-    case 'running':
-      return <span class="muted">OCR'ing {prog?.doneCount ?? 0}/{prog?.totalCount ?? s.pageCount}</span>;
-    case 'pending':
-    default:
-      return <span class="muted">OCR queued</span>;
-  }
+function renderRowStatus(s: Scan): JSX.Element {
+  // Phase 5 will populate uploadStatus to drive richer labels here. For now,
+  // a scan that has reached the saved screen is just "Saved."
+  if (s.pdfKey) return <span class="muted">PDF ready</span>;
+  return <span class="muted">Saved</span>;
 }
 
-function rowAction(s: Scan, queue: OcrQueue, store: ScansStore): JSX.Element | null {
-  if (s.pdfStatus === 'done' || s.pdfStatus === 'partial') {
+function rowAction(s: Scan, store: ScansStore): JSX.Element | null {
+  if (s.pdfKey) {
     return (
       <button
         class="btn"
@@ -52,23 +42,12 @@ function rowAction(s: Scan, queue: OcrQueue, store: ScansStore): JSX.Element | n
       </button>
     );
   }
-  if (s.pdfStatus === 'failed') {
-    return (
-      <button
-        class="btn btn-secondary"
-        onClick={(e) => { e.stopPropagation(); void queue.retry(s.id); }}
-      >
-        Retry
-      </button>
-    );
-  }
   return null;
 }
 
-export function SavedScansScreen({ store, queue, onBack, onNewScan, onView }: SavedScansScreenProps) {
+export function SavedScansScreen({ store, onBack, onNewScan, onView }: SavedScansScreenProps) {
   const [scans, setScans] = useState<Scan[] | null>(null);
   const [thumbs, setThumbs] = useState<Record<string, string>>({});
-  const [progress, setProgress] = useState<Record<string, { doneCount: number; totalCount: number }>>({});
 
   async function reload() {
     const list = await store.listCompleted();
@@ -87,19 +66,8 @@ export function SavedScansScreen({ store, queue, onBack, onNewScan, onView }: Sa
     return () => Object.values(thumbs).forEach(URL.revokeObjectURL);
   }, []);
 
-  useEffect(() => {
-    const onProg = (e: ProgressEvent) => setProgress((p) => ({ ...p, [e.scanId]: { doneCount: e.doneCount, totalCount: e.totalCount } }));
-    const onDone = (_: DoneEvent) => { void reload(); };
-    const onFail = (_: FailedEvent) => { void reload(); };
-    queue.on('progress', onProg);
-    queue.on('done', onDone);
-    queue.on('failed', onFail);
-    // No detach — OcrQueue is app-lifetime; minor leak fine for SPA
-  }, []);
-
   async function del(scanId: string) {
     if (!window.confirm('Delete this scan?')) return;
-    queue.cancel(scanId);
     await store.delete(scanId);
     await reload();
   }
@@ -130,10 +98,10 @@ export function SavedScansScreen({ store, queue, onBack, onNewScan, onView }: Sa
                 <div style={{ flex: 1 }}>
                   <div style={{ fontWeight: 600 }}>Scan · {s.pageCount} {s.pageCount === 1 ? 'page' : 'pages'}</div>
                   <div class="muted" style={{ fontSize: 12 }}>{formatTime(s.updatedAt)} · {formatBytes(s.pageCount * ESTIMATED_PAGE_BYTES)}</div>
-                  <div style={{ fontSize: 12 }}>{renderRowStatus(s, progress[s.id])}</div>
+                  <div style={{ fontSize: 12 }}>{renderRowStatus(s)}</div>
                 </div>
               </button>
-              {rowAction(s, queue, store)}
+              {rowAction(s, store)}
               <button class="btn btn-danger" aria-label="Delete" onClick={() => del(s.id)}>🗑</button>
             </li>
           ))}

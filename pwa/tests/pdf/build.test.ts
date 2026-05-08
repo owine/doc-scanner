@@ -2,8 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { PDFDocument } from '@cantoo/pdf-lib';
-import { buildSearchablePdf } from '../../src/pdf/build.js';
-import type { OcrWord } from '../../src/scanner/types.js';
+import { buildSearchablePdf, type OcrWord } from '../../src/pdf/build.js';
 
 // happy-dom doesn't provide createImageBitmap; we use a small fixture JPEG
 // stored as bytes in the test, then build a Blob.

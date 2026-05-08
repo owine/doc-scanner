@@ -114,7 +114,6 @@ export class ScannerSession {
   async finish(): Promise<void> {
     this.stop();
     await this.store.finish(this.scanId);
-    await this.store.setPdfStatus(this.scanId, 'pending');
   }
 
   async discard(): Promise<void> {
