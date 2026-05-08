@@ -26,7 +26,7 @@ This phase realises the components designed in the parent spec (`classify/haiku.
 
 - **Anthropic Claude Haiku 4.5** (model id pinned in code): vision-capable, 5 MB max image, ≤1568 long-edge recommended for cost. ~$1/M input, ~$5/M output. Server-held API key (`ANTHROPIC_API_KEY`, already wired in `server/src/config.ts`).
 - **Trust boundary** (parent spec line 73): the phone owns raw page images; the server owns the long-lived Proton session and the Anthropic API key. Phase 5 preserves this — only the 512px thumbnail and OCR text leave the phone for classification; the full PDF stays on the phone until upload.
-- **Proton Drive SDK boundary** (`server/src/drive/client.ts`): exposes `uploadFile(parentLinkId, name, bytes, mimeType)` already (Phase 2). Phase 5 calls only this method plus the existing folder-tree cache.
+- **Proton Drive SDK boundary** (`server/src/drive/client.ts`): currently exposes `uploadFile(name, bytes, mimeType)` from Phase 2 — **uploads only to MyFilesRootFolder, no parent param**. Phase 5 must extend the client to accept a destination folder uid and to surface the resolved final name. See "Server Component — `drive/client.ts` extension" below for the contract change.
 - **Volume**: light, batched (few documents/week). All design decisions assume single-user operation.
 - **Deployment**: Docker on `node:24.15.0-alpine3.23`. Sharp's prebuilt Alpine binaries are available for `linux-musl-x64` and `linux-musl-arm64`; no extra apk packages required.
 - **Atomic commits preferred** (per author preference): each slice produces 1–3 commits that are independently meaningful in `git log`.
@@ -45,6 +45,10 @@ This phase realises the components designed in the parent spec (`classify/haiku.
 | State machine | Three orthogonal axes: `ScanStatus` × `PdfStatus` × `UploadStatus` | Avoids N×M state explosion; each axis maps to its subsystem; future phases add axes without remodelling. |
 | Confidence gating | Show as small badge when low; never auto-skip confirmation | Matches parent spec's "always confirm" rule; preserves user trust. |
 | Telemetry persistence | Logs only (latency, tokens, success/fail) | YAGNI for dashboard; sqlite3 + grep is sufficient diagnosis. |
+| `drive/client.uploadFile` extension | Add `parentFolderUid: string` parameter; return resolved `finalName` alongside `nodeUid` and `driveUrl` | Phase 2's wrapper hard-codes root upload — Phase 5 needs folder targeting. Returning the resolved name lets the route surface collision-suffixed names back to the PWA. |
+| Name collision strategy | Wrapper-side: catch SDK conflict error, retry with `" (2)"`, `" (3)"`, ` (4)"` suffixes (max 3 retries) | SDK collision behaviour is unverified. Wrapping the retry loop guarantees deterministic semantics regardless of SDK version. Slice 2 includes an empirical SDK-behaviour test before locking the strategy. |
+| Service Worker location | Extend existing `pwa/public/sw.js` (hand-written, 41 lines) with a `sync` event handler for `outbox-drain` | Project already chose hand-written SW over a build plugin; consistent with Phase 4's `/ocr/*` caching addition (commit `ee4d419`). Drain logic lives in plain JS inside the SW. |
+| PWA suggestion field naming | `Scan.suggestion` mirrors `ClassifyResult` shape: `{ suggestedName, suggestedFolderLinkId, confidence, rationale }`; `Scan.finalName` / `Scan.finalFolderLinkId` are post-edit values | Avoids ambiguity at the server↔PWA seam; rename was an explicit reviewer recommendation. |
 
 ## Architecture Overview
 
@@ -80,6 +84,45 @@ Offline resilience. Phase 5 complete after this.
 - **End state**: Airplane-mode scan → resume online → automatic suggest+upload without user interaction. Manual smoke (combined Phase 4 + Phase 5 cases) before tagging `phase-5-complete`.
 
 ## Components — Server
+
+### `server/src/drive/client.ts` extension (modified, slice 2)
+
+Phase 2's wrapper currently hard-codes upload to MyFilesRootFolder. Phase 5 extends it without breaking existing callers:
+
+```ts
+// Before (Phase 2):
+async uploadFile(name: string, bytes: Uint8Array, mimeType: string): Promise<UploadResult>;
+
+// After (Phase 5):
+interface UploadOptions {
+  parentFolderUid?: string;   // omit → MyFilesRootFolder (back-compat for existing callers / Phase 2 test endpoint)
+}
+async uploadFile(
+  name: string,
+  bytes: Uint8Array,
+  mimeType: string,
+  opts?: UploadOptions,
+): Promise<UploadResult>;
+// UploadResult gains: finalName: string  (the resolved name after collision-suffix, if any)
+```
+
+**Collision handling** lives inside this wrapper, not the route:
+1. Try upload with `name`.
+2. On SDK collision error, retry with `name + " (2)"`, `" (3)"`, `" (4)"`.
+3. After 4th attempt fails (3 collisions), surface a typed `UploadCollisionExhausted` error.
+4. Return `UploadResult` with `finalName` set to whichever name actually succeeded.
+
+**Empirical SDK-behaviour test** (one-time, slice 2 first task):
+- Manually upload two files with the same name to a known folder via the existing `POST /api/drive/test-upload` endpoint or a small one-off harness.
+- Document SDK error shape (HTTP code, error class, message) in code comments and in the wrapper's error mapping.
+- This finding determines what the wrapper catches in step 2 above. The retry loop is implementation-agnostic; the catch shape is SDK-specific.
+
+Tests (`drive/client.test.ts` additions, SDK mocked):
+1. Upload with no `parentFolderUid` → uses MyFilesRootFolder (back-compat unchanged).
+2. Upload with `parentFolderUid` → uses provided folder.
+3. SDK throws collision on first call, succeeds on second → `finalName` ends in `" (2)"`.
+4. SDK throws collision four times → `UploadCollisionExhausted`.
+5. Non-collision SDK error → propagates (no retry).
 
 ### `server/src/classify/image.ts` (new, slice 1)
 
@@ -254,19 +297,21 @@ Tests (`routes-classify.test.ts`):
 Hono route:
 1. Body limit 50 MB (PDFs can be larger than thumbnails).
 2. Parse multipart; validate name regex; validate folderLinkId exists in folder cache.
-3. Call `drive/client.uploadFile(folderLinkId, finalName, pdfBytes, "application/pdf")`. Handles name collisions internally by appending ` (2)`, ` (3)`.
+3. Call `drive/client.uploadFile(name, pdfBytes, "application/pdf", { parentFolderUid: folderLinkId })`. Wrapper handles name collisions internally (see `drive/client.ts` extension above) and returns `finalName`.
 4. On 401 from SDK: try `drive/client.refresh()` once. If refresh fails, return 401 with `reauth_required: true`.
-5. (Slice 3+) `history.recordSave({ ocrText, finalName, folderLinkId, folderPath, driveNodeUid })`. History write failures are logged but **do not** fail the upload (history is best-effort).
-6. Write `audit_log` row.
-7. Return `{ driveNodeUid, driveWebUrl, finalName }` (finalName reflects any collision-suffix applied).
+5. On `UploadCollisionExhausted`: return 409 with `collision_exhausted: true`; PWA shows error and lets user edit name + retry.
+6. (Slice 3+) `history.recordSave({ ocrText, finalName, folderLinkId, folderPath, driveNodeUid })`. History write failures are logged but **do not** fail the upload (history is best-effort).
+7. Write `audit_log` row.
+8. Return `{ driveNodeUid, driveWebUrl, finalName }` (finalName may differ from requested name if collision-suffixed).
 
-Tests (`routes-upload.test.ts`, Drive client mocked):
-1. Happy path: upload → audit row → history row → response.
-2. Name collision: SDK returns conflict twice, third try succeeds with `(3)` suffix.
+Tests (`routes-upload.test.ts`, Drive client mocked at `drive/client.ts` boundary):
+1. Happy path: upload → audit row → history row → response includes resolved `finalName`.
+2. Wrapper returns `finalName` ending in `" (2)"` → response surfaces it; PWA can update its stored `finalName` accordingly.
 3. 401 → refresh → retry → success.
 4. 401 → refresh fails → response has `reauth_required: true`.
 5. Body > 50 MB → 413.
-6. History write throws → upload still returns 200 (history failure swallowed + logged).
+6. `UploadCollisionExhausted` from wrapper → 409 with `collision_exhausted: true`.
+7. History write throws → upload still returns 200 (history failure swallowed + logged).
 
 ## Components — PWA
 
@@ -286,16 +331,17 @@ interface Props {
 
 Layout (top to bottom):
 1. Filename input — pre-filled with `suggestion?.suggestedName ?? ""`. Validates against same regex as server. Save button disabled if invalid.
-2. Folder picker — collapsible tree-view of cached Drive folders. Pre-expanded to suggested folder's path. User can browse to override.
+2. Folder picker — collapsible tree-view of cached Drive folders. Pre-expanded to suggested folder's path. User can browse to override. Small "↻ Refresh folders" link triggers `GET /api/folders` re-fetch (handles the case of folders added in Drive between PWA load and confirm — folder cache is event-sync'd every 5 minutes so without this, a freshly-created folder wouldn't appear).
 3. Rationale + confidence — small italic text. Low-confidence (<0.6) shown with subtle "Low confidence" badge.
 4. Save / Dismiss buttons.
 
 Tests (`ConfirmCard.test.tsx`):
-1. Render with full suggestion → fields pre-filled.
+1. Render with full suggestion → fields pre-filled (`suggestedName`, `suggestedFolderLinkId`).
 2. Render with `suggestion: null` → empty fields, Save disabled until name entered.
 3. Name input with illegal chars → Save disabled, hint text shown.
 4. Folder picker selection updates state.
 5. Low-confidence (0.4) → badge visible; high-confidence (0.95) → no badge.
+6. Refresh folders link → triggers folder re-fetch callback.
 
 ### `pwa/api.ts` additions (slices 1–2)
 
@@ -314,12 +360,19 @@ Add to `Scan` interface:
 uploadStatus: 'idle' | 'pending_classify' | 'awaiting_confirm'
             | 'pending_upload' | 'done' | 'needs_attention';
 uploadError: string | null;
-suggestion?: { name: string; folderLinkId: string; confidence: number; rationale: string };
-finalName?: string;
-finalFolderLinkId?: string;
+suggestion?: {       // server response shape, before user edits
+  suggestedName: string;
+  suggestedFolderLinkId: string;
+  confidence: number;
+  rationale: string;
+};
+finalName?: string;             // post-edit, post-collision-suffix; populated on save
+finalFolderLinkId?: string;     // post-edit
 driveNodeUid?: string;
 driveWebUrl?: string;
 ```
+
+**Field-naming rule**: `suggestion.*` mirrors the server's `ClassifyResult` shape verbatim — never copy a "post-edit" name into `suggestion`. The post-edit values live in `finalName` / `finalFolderLinkId` only and are written when the user taps Save. Avoids the very subtle bug of "wait, is this the suggestion or the user's edit?"
 
 State transitions enforced by a single mutator function (validates legal transitions, throws on illegal):
 
@@ -341,21 +394,41 @@ Tests (`scans-store.test.ts` additions):
 5. Concurrent transitions on same scanId serialised.
 6. `findPending` returns `pending_classify` + `pending_upload` rows ordered by `updatedAt`.
 
-### `pwa/sw-sync.ts` (slice 4)
+### `pwa/public/sw.js` extensions + `pwa/src/outbox-drain.ts` (slice 4)
 
-Service Worker registers a `outbox-drain` background sync tag. Drain handler:
+The existing 41-line hand-written `pwa/public/sw.js` (Phase 4's commit `ee4d419` added `/ocr/*` caching) gets two additions and one new sibling module. Splitting drain logic out of the SW file keeps it testable in TypeScript:
 
-1. Read scans where `uploadStatus IN ('pending_classify', 'pending_upload')`.
-2. For each, call `/api/classify` or `/api/upload`. Update store on success/failure.
-3. iOS Safari fallback: same drain runs on `visibilitychange → visible`.
+**`pwa/public/sw.js`** (extend in place):
+- Add `sync` event listener for tag `outbox-drain`. Handler: dynamically import `/outbox-drain.js` (built artefact of `pwa/src/outbox-drain.ts`) and invoke its `drain()` function.
+- Add `message` event listener for `{ type: 'request-drain' }` postMessages from the page (used by visibility-change fallback when Background Sync isn't supported, e.g., iOS Safari).
 
-Outbox panel UI (small, on `SavedScansScreen`): banner showing count of `pending_*` and `needs_attention` rows; "Retry all" button forces a drain ignoring stuck-state checks.
+**`pwa/src/outbox-drain.ts`** (new TypeScript module, built into the SW bundle):
+```ts
+export async function drain(): Promise<DrainResult>;
+//   Read scans-store rows where uploadStatus ∈ {'pending_classify','pending_upload'}
+//   ordered by updatedAt. For each:
+//     - 'pending_classify' → POST /api/classify; on success → 'awaiting_confirm';
+//       on failure → 'awaiting_confirm' with empty suggestion (user fills manually).
+//     - 'pending_upload'   → POST /api/upload; on success → 'done';
+//       on retry-able failure → leave as 'pending_upload';
+//       on hard failure (>3 attempts within 24h) → 'needs_attention'.
+```
 
-Tests (`sw-sync.test.ts`):
+**`pwa/src/sw-register.ts`** (new, called from `main.tsx`):
+- Existing `navigator.serviceWorker.register('/sw.js')` call moves here.
+- Adds `registration.sync.register('outbox-drain')` after register (no-op if SyncManager unsupported).
+- Adds `document.addEventListener('visibilitychange', …)` → posts `{ type: 'request-drain' }` to active SW when becoming visible (iOS Safari fallback).
+
+**Outbox panel UI** (small, on `SavedScansScreen`): banner showing count of `pending_*` and `needs_attention` rows; "Retry all" button posts `{ type: 'request-drain' }` to SW and additionally clears retry-counter for `needs_attention` rows so they get one more chance.
+
+Tests (`outbox-drain.test.ts`, run in vitest with mocked `fetch` + scans-store):
 1. Drain with 2 `pending_classify` + 1 `pending_upload` → all called in order.
 2. Classify fails → state moves to `awaiting_confirm` (not `needs_attention`; user can fill manually).
-3. Upload fails after retry → state moves to `needs_attention`.
-4. Retry-all button drains `needs_attention` rows.
+3. Upload fails 3× in 24 h → state moves to `needs_attention`.
+4. Upload succeeds on 2nd attempt → state moves to `done`.
+5. Empty queue → no-op, no fetch calls.
+
+Note: `pwa/public/sw.js` itself remains plain JS and is exercised only via manual smoke (the dynamic-import seam is the only logic in sw.js — drain logic is fully covered in `outbox-drain.test.ts`).
 
 ## Data Flow
 
@@ -432,10 +505,10 @@ Service Worker registers `outbox-drain`. Browser fires it on connectivity restor
 
 - `pwa/api.test.ts` additions — 4 tests (classify pre-flight, upload pre-flight, multipart shape, error mapping)
 - `pwa/scanner/scans-store.test.ts` additions — 6 tests (state transitions, findPending)
-- `pwa/ui/ConfirmCard.test.tsx` — 5 tests
-- `pwa/sw-sync.test.ts` — 3 tests (or extension of an existing file if one exists)
+- `pwa/ui/ConfirmCard.test.tsx` — 6 tests (now includes Refresh-folders test)
+- `pwa/outbox-drain.test.ts` — 5 tests
 
-**Total new PWA tests: 18.**
+**Total new PWA tests: 21.** `pwa/public/sw.js` plain-JS additions (sync + message listeners) are validated only via manual smoke; logic complexity lives in the TS-tested `outbox-drain.ts`.
 
 ### Manual smoke (combined with deferred Phase 4 cases) — gates `phase-5-complete`
 
@@ -465,12 +538,14 @@ Service Worker registers `outbox-drain`. Browser fires it on connectivity restor
 | Hallucinated folder linkIds become a stealth UX issue | Low | Hard-validation against folder cache; degraded to manual pick. |
 | Background sync iOS Safari bugs | Medium | Visibility-change fallback + manual retry button; documented in spec. |
 | Cost runaway from a stuck retry loop | Low | Single-user, few/week; no exponential retries; failed classify → manual not retry. |
+| **Proton SDK collision-error shape unknown** | **Medium** | **Slice 2's first task is an empirical SDK-behaviour test (manual two-file same-name upload via existing `/api/drive/test-upload` or one-off harness). Findings documented in `drive/client.ts` and used to lock the wrapper's catch shape. Until then, the wrapper assumes "any SDK error during a freshly-renamed retry is treated as collision" — overly broad but safe.** |
+| **`drive/client.ts` extension regresses Phase 2 callers** | **Low** | **Default `parentFolderUid` to MyFilesRootFolder when `opts` omitted — preserves the existing `/api/drive/test-upload` behaviour. Phase 2 tests re-run to confirm.** |
 
 ## Open Questions
 
 - **Confidence-badge threshold** is set to `<0.6`. Is that calibrated to your data, or should we observe a few real saves and adjust? — Recommend: ship at 0.6, revisit after 10 saves.
 - **History recordSave on `awaiting_confirm` dismissal**: currently we only record on successful upload. Should we also record dismissals as negative signal? — Recommend: no for Phase 5; FTS5 only handles positive examples; revisit if quality plateaus.
-- **Folder cache staleness during classify**: if the user adds a Drive folder *and* expects Haiku to suggest it within the same session, the 5-minute event-sync interval may be a UX gotcha. — Recommend: out of scope; user can refresh manually if needed.
+- **Empirical SDK collision behaviour**: must be resolved during slice 2's first task (manual harness). Findings update `drive/client.ts` collision-catch logic. If SDK auto-suffixes, our wrapper's retry loop becomes a no-op safety net; if SDK throws a typed error, the wrapper catches that exact error class.
 
 ## Implementation Plan Hand-off
 
