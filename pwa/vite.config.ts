@@ -13,6 +13,7 @@ export default defineConfig({
         manualChunks(id) {
           // jscanify is loaded via <script> tag from /scanner/jscanify.js, not bundled.
           if (id.includes('/scanner/edge-detect') || id.includes('/scanner/scanner-session')) return 'scanner-core';
+          if (id.includes('/ocr/queue') || id.includes('/ocr/worker-client') || id.includes('/pdf/build')) return 'ocr-core';
         },
       },
     },

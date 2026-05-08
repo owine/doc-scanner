@@ -1,17 +1,21 @@
 import { useEffect, useState } from 'preact/hooks';
 import { ScansStore } from '../scanner/scans-store.js';
-import type { Page } from '../scanner/types.js';
+import type { Page, Scan } from '../scanner/types.js';
+import { OcrQueue } from '../ocr/queue.js';
+import { downloadPdf } from './download.js';
 
 export interface ScanViewerScreenProps {
   store: ScansStore;
+  queue: OcrQueue;
   scanId: string;
   onBack: () => void;
 }
 
-export function ScanViewerScreen({ store, scanId, onBack }: ScanViewerScreenProps) {
+export function ScanViewerScreen({ store, queue, scanId, onBack }: ScanViewerScreenProps) {
   const [pages, setPages] = useState<Page[]>([]);
   const [urls, setUrls] = useState<string[]>([]);
   const [idx, setIdx] = useState(0);
+  const [scanRow, setScanRow] = useState<Scan | null>(null);
 
   useEffect(() => {
     let revoke: string[] = [];
@@ -23,6 +27,10 @@ export function ScanViewerScreen({ store, scanId, onBack }: ScanViewerScreenProp
     });
     return () => revoke.forEach(URL.revokeObjectURL);
   }, [scanId]);
+
+  useEffect(() => {
+    store.listCompleted().then((all) => setScanRow(all.find((s) => s.id === scanId) ?? null));
+  }, [scanId, store]);
 
   async function deleteScan() {
     if (!window.confirm('Delete this scan?')) return;
@@ -37,7 +45,12 @@ export function ScanViewerScreen({ store, scanId, onBack }: ScanViewerScreenProp
       <header style={{ display: 'flex', justifyContent: 'space-between', padding: 12, background: 'var(--bg-elev)', borderBottom: '1px solid var(--border)' }}>
         <button class="btn btn-secondary" onClick={onBack}>← Back</button>
         <strong>{idx + 1} / {pages.length}</strong>
-        <button class="btn btn-danger" aria-label="Delete scan" onClick={deleteScan}>🗑</button>
+        <span style={{ display: 'flex', gap: 8 }}>
+          {(scanRow?.pdfStatus === 'done' || scanRow?.pdfStatus === 'partial') && (
+            <button class="btn" onClick={() => downloadPdf(scanRow, store)}>Download</button>
+          )}
+          <button class="btn btn-danger" aria-label="Delete scan" onClick={deleteScan}>🗑</button>
+        </span>
       </header>
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, overflow: 'hidden' }}>
         <img src={urls[idx]} alt={`Page ${idx + 1}`} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />

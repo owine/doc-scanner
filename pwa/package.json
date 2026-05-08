@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "predev": "node scripts/copy-tesseract-assets.mjs",
     "dev": "vite",
+    "prebuild": "node scripts/copy-tesseract-assets.mjs",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
@@ -13,7 +15,9 @@
   "dependencies": {
     "preact": "10.29.1",
     "idb": "8.0.3",
-    "ulid": "3.0.2"
+    "ulid": "3.0.2",
+    "tesseract.js": "7.0.0",
+    "@cantoo/pdf-lib": "2.6.5"
   },
   "devDependencies": {
     "@preact/preset-vite": "2.10.5",
