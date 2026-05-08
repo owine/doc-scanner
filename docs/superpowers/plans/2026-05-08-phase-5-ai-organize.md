@@ -126,9 +126,9 @@ export class FolderCache {
 
 - [ ] **Step 0.1.4** — Run: PASS.
 
-- [ ] **Step 0.1.5** — Add tests one at a time:
-  - Two top-level folders → returns 3 entries (root + 2). Order is walk-order.
-  - Nested 2 levels → all paths returned with correct slashes.
+- [ ] **Step 0.1.5** — Add tests one at a time. Order is **depth-first, parent-before-children** (the test assertion should rely on this exact order):
+  - Two top-level folders → returns 3 entries (root + 2). Depth-first order.
+  - Nested 2 levels → all paths returned with correct slashes; parent appears before its children.
   - Skips files (type ≠ 'folder').
   - `refresh()` replaces (not appends) on second call.
 
@@ -166,7 +166,7 @@ Update `driveRoutes` `deps` to include `folderCache: FolderCache`.
 
 - [ ] **Step 0.2.3** — Add an optional `?refresh=1` query param that triggers `await deps.folderCache.refresh()` before returning. Test it.
 
-- [ ] **Step 0.2.4** — Wire `FolderCache` instantiation in `server.ts`'s `createApp` — instance per live session, or singleton bound to a session? **Pattern decision**: instantiate once `liveSession` is available (auth middleware sets it); attach to the live session object so it lives for the session's lifetime. If that's awkward, hold it in a `Map<sessionId, FolderCache>` keyed off the SessionStore's session id.
+- [ ] **Step 0.2.4** — Wire `FolderCache` instantiation in `server.ts`'s `createApp` as **per-session** (not a process singleton): folder UIDs differ per Proton account, so a singleton would leak state across accounts. Concretely: extend the `liveSession` object (set by `sessionMiddleware`) with a lazily-initialised `folderCache: FolderCache` field. First call to `/api/drive/folders` triggers `await folderCache.refresh()` if the cache is empty.
 
 - [ ] **Step 0.2.5** — Three tests green (happy path, refresh, unauth). Commit: `feat(server): GET /api/drive/folders returns walked Drive tree`.
 
@@ -1297,4 +1297,5 @@ Boot stack via docker compose + ngrok.
 - **Trust boundary** (parent spec line 73): the phone owns raw page images and the Proton password; the server owns the long-lived Proton session and Anthropic key. Don't accidentally cross this line.
 - **Drive SDK collision behaviour** is not assumed — Task 10 verifies it empirically before Task 11 codes against a specific error shape.
 - **For "Refresh folders" call**: the route is **built in Slice 0** (`GET /api/drive/folders?refresh=1`). It does not exist before this plan starts — Phase 2 only built `POST /api/drive/test-upload`.
+- **PWA folder caching**: `api.getFolders()` is intentionally **uncached** on the PWA — the server holds the cache (`FolderCache` per live session). Don't memoize on the PWA; it would only mask staleness without adding value. The "Refresh" button just hits `?refresh=1`.
 - **Anthropic model id** is `claude-haiku-4-5`. Pin the exact id in code; do not parameterise via env (single-user app, deliberate model choice).
