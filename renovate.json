@@ -78,6 +78,12 @@
       "description": "Never auto-update vendored Proton SRP code (manual re-vendor only)",
       "matchFileNames": ["server/src/vendor/**"],
       "enabled": false
+    },
+    {
+      "description": "Hold @protontech/drive-sdk minor/major updates pending upstream packaging fix. 0.15.0 introduced @protontech/crypto 2.0.1 as a peer dep, but @protontech/crypto ships only .ts source (TS5097) and has compile errors in its own source. See PR #9 for the investigation. Revisit when upstream ships a buildable @protontech/crypto or hits 1.0.",
+      "matchPackageNames": ["@protontech/drive-sdk"],
+      "matchUpdateTypes": ["minor", "major"],
+      "dependencyDashboardApproval": true
     }
   ],
   "vulnerabilityAlerts": { "labels": ["security"], "automerge": false },
