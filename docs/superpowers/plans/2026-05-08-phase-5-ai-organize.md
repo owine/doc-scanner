@@ -1,54 +1,69 @@
-# Phase 5 — AI Upload/Organize Implementation Plan
+# Phase 5 — AI Vision Organize Implementation Plan (v2)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Take a Phase 4 searchable PDF on the phone, classify it with Claude Haiku 4.5 (filename + Drive folder suggestion), let the user confirm, and upload to Proton Drive — with offline-resilient outbox + background sync.
+**Goal:** Phone captures pages → server-side Haiku 4.5 vision OCRs + suggests filename + folder in one call → PWA assembles searchable PDF locally → user confirms → PDF lands in Proton Drive. Offline-resilient via outbox + background sync. **No client-side Tesseract** (retired after iOS Safari incompatibilities surfaced).
 
-**Architecture:** Vertical slices: (1) classify online → (2) upload → (3) FTS5 few-shot history → (4) outbox + background sync. Trust boundary preserved: phone owns raw PDF, server owns Anthropic key + Proton session. Three orthogonal state axes on `Scan`: scan / pdf / upload. Server modules `classify/{image,haiku,history}.ts` + new routes; PWA modules `ConfirmCard.tsx`, `outbox-drain.ts`, `sw-register.ts` + `pwa/public/sw.js` extensions.
+**Architecture:** Vertical slices: (0) folder cache → (1) vision classify → (2) PDF + upload → (3) FTS5 few-shot history → (4) outbox + background sync. Phase 4's `pdf/build.ts` and `scans-store` v2 schema are retained; everything under `pwa/src/ocr/` and the vendored tesseract assets are deleted.
 
-**Tech Stack:** Server — Node 24 / Hono / TypeScript / better-sqlite3 (FTS5) / `@anthropic-ai/sdk` (vision tool-use) / `sharp` (libvips, prebuilt Alpine binaries) / vendored Proton Drive SDK. PWA — Preact / Vite / IndexedDB (`idb`) / hand-written Service Worker.
+**Tech Stack:** Server — Node 24 / Hono / TypeScript / better-sqlite3 (FTS5) / `@anthropic-ai/sdk` (multi-image vision tool-use) / `sharp` / vendored Proton Drive SDK. PWA — Preact / Vite / IndexedDB (`idb`) / `@cantoo/pdf-lib` / hand-written Service Worker.
 
-**Spec:** `docs/superpowers/specs/2026-05-08-phase-5-ai-organize-design.md` — read this first.
+**Spec:** `docs/superpowers/specs/2026-05-08-phase-5-ai-organize-design.md` — read first; v2 supersedes the v1 client-OCR design.
 
 ---
 
 ## Pre-Phase-5 Prerequisites
 
-These run **before** Slice 1 begins. None block plan-writing, but all must complete before implementation work starts.
+### Pre-Task A: Merge `phase-4-ocr-pdf` to main as-is
 
-### Pre-Task A: Quick golden-path smoke of Phase 4
+The branch contains both the now-defunct client-OCR code and the still-useful pieces (`pdf/build.ts`, `scans-store` v2, `ScanViewerScreen` download, the spec/plan docs themselves). Rather than cherry-pick selectively, merge as-is and let Phase 5's first task delete what's no longer needed. CI passes (broken iOS-Safari path is silent on desktop test environments). Phase 5's first task immediately removes the dead code, so main is only briefly carrying it.
 
-**Files:** none (manual smoke on phone via ngrok-exposed dev server).
+- [ ] **Step A.1** — From `phase-4-ocr-pdf`: `git rebase main` (resolve any lockfile conflicts with `--theirs` then `npm install`).
+- [ ] **Step A.2** — Push: `git push origin phase-4-ocr-pdf`.
+- [ ] **Step A.3** — `gh pr create --base main --title "Phase 4: OCR + searchable PDF (client OCR retired in Phase 5)" --body "..."`. PR description notes that client-side Tesseract did not work on iOS Safari and Phase 5 retires it in favour of Haiku vision.
+- [ ] **Step A.4** — Wait for CI green. Merge.
 
-- [ ] **Step A.1** — Start stack locally: `docker compose up --build` from repo root after creating `.env` with `SESSION_ENCRYPTION_KEY` + `ANTHROPIC_API_KEY`.
-- [ ] **Step A.2** — Expose via ngrok: `ngrok http 3000`. Open the https URL on your iPhone, install as PWA.
-- [ ] **Step A.3** — Run the golden path: scan one document → wait for OCR → tap Download PDF → verify the PDF on phone has a searchable text layer (open in Files, search for a word).
-- [ ] **Step A.4** — If smoke passes: proceed to Pre-Task B. If anything regresses: stop and fix on `phase-4-ocr-pdf` before moving on.
+### Pre-Task B: Branch `phase-5-ai-organize`
 
-### Pre-Task B: Merge Phase 4 to main
-
-- [ ] **Step B.1** — From `phase-4-ocr-pdf`: `git rebase main` (resolve any lockfile conflicts with `--theirs` then `npm install` — same flow as session history).
-- [ ] **Step B.2** — Push: `git push origin phase-4-ocr-pdf`.
-- [ ] **Step B.3** — Open PR `gh pr create --base main`. Wait for CI green.
-- [ ] **Step B.4** — Merge. **Do not tag `phase-4-complete` yet** — full smoke is deferred to combined Phase 5 smoke; tag both phases together at the end.
-
-### Pre-Task C: Dep-sync window
-
-- [ ] **Step C.1** — On main: `git pull && eval "$(fnm env)" && fnm use 24.15.0 && npm install`. Verify `package-lock.json` diff is empty or trivial.
-- [ ] **Step C.2** — `git diff` lockfile, commit with `chore(deps): post-phase-4 lockfile sync` if there are changes.
-
-### Pre-Task D: Branch Phase 5
-
-- [ ] **Step D.1** — `git checkout -b phase-5-ai-organize` off freshly-merged main.
-- [ ] **Step D.2** — `git push -u origin phase-5-ai-organize`.
+- [ ] **Step B.1** — On a clean main: `git pull && eval "$(fnm env)" && fnm use 24.15.0 && npm install`. Verify lockfile diff is empty.
+- [ ] **Step B.2** — `git checkout -b phase-5-ai-organize`.
+- [ ] **Step B.3** — `git push -u origin phase-5-ai-organize`.
 
 ---
 
-## Slice 0 — Folder Cache (Phase 2 gap)
+## Slice 0 — Phase 4 Retirement + Folder Cache
 
-The parent design assumed a folder-tree provider would exist by Phase 5, but Phase 2 only built `POST /api/drive/test-upload`; there is no `folder-cache` module and no `GET /api/folders` route in the codebase. Slice 1 depends on a folder list to suggest a destination, so we build it first as Slice 0. Three tasks.
+### Task 0.0: Retire Phase 4 client OCR
 
-The Drive SDK exposes `iterateFolderChildren(folderUid)` (verified at `server/src/drive/client.ts:115`). The cache walks recursively from `getMyFilesRootFolder()` and keeps **only folders** (not files), flattened into `{ linkId: string; path: string }[]`.
+**Files (deletions / modifications):**
+- Delete: `pwa/src/ocr/` (entire directory: types.ts, tesseract-worker.ts, worker-client.ts, queue.ts + tests)
+- Delete: `pwa/public/ocr/eng.traineddata.gz`
+- Delete: `pwa/public/ocr/README.md` (or update if generic)
+- Delete: `pwa/scripts/copy-tesseract-assets.mjs`
+- Modify: `pwa/package.json` — remove `predev` + `prebuild` scripts; remove `tesseract.js` dep
+- Modify: `pwa/public/sw.js` — remove `/ocr/*` and `/assets/ocr-core-*` cache patterns; bump CACHE_NAME
+- Modify: `pwa/vite.config.ts` — remove `ocr/queue`/`ocr/worker-client` mention from `manualChunks`
+- Modify: `pwa/src/scanner/types.ts` — remove `PdfStatus`, `ocrText`/`ocrWords` fields on Page (kept later, but renamed to come from server)
+- Modify: `pwa/src/scanner/scans-store.ts` — remove OCR queue integration, drop `pdfStatus`/`ocrError`-related methods. Keep page blob storage + PDF blob storage.
+- Modify: `pwa/src/ui/SavedScansScreen.tsx` — replace OCR progress labels with simple upload-status labels (slice 1 will fully populate these).
+- Modify: `pwa/src/ui/App.tsx` — remove `OcrQueue` instantiation
+- Modify: `pwa/src/ui/ScannerScreen.tsx` — `done()` no longer enqueues OCR; sets `uploadStatus='pending_classify'` (slice 1 wires this).
+- Modify: `.gitignore` — remove tesseract vendored-asset entries
+- Modify: `package.json` (root) — remove `tesseract.js` dep if it's at root
+
+- [ ] **Step 0.0.1** — Run the deletions: `rm -rf pwa/src/ocr pwa/public/ocr/eng.traineddata.gz pwa/public/ocr/README.md pwa/scripts/copy-tesseract-assets.mjs`.
+- [ ] **Step 0.0.2** — Update `pwa/package.json` (delete predev/prebuild + tesseract.js dep).
+- [ ] **Step 0.0.3** — Update root `package.json` if tesseract.js is hoisted.
+- [ ] **Step 0.0.4** — `npm install` to update lockfile.
+- [ ] **Step 0.0.5** — Update `pwa/public/sw.js` (drop OCR cache patterns; bump `CACHE_NAME` to `docscanner-scanner-v7`).
+- [ ] **Step 0.0.6** — Update `pwa/vite.config.ts` (drop OCR chunk routing).
+- [ ] **Step 0.0.7** — Update `pwa/src/scanner/types.ts`: drop `PdfStatus`. The `Page` interface keeps `blob` but drops `ocrText`/`ocrWords` (these will come from server in slice 1; new fields on `Scan` will hold them).
+- [ ] **Step 0.0.8** — Update `pwa/src/scanner/scans-store.ts`: drop `setPdfStatus`, `findPendingPdf`, `clearScanOcr`. Drop the `pdfs` blob-store usage for storing in-progress PDF (we'll re-add as `pdfBlob` field on Scan in slice 2). Run remaining tests; expect failures, fix or delete obsolete tests.
+- [ ] **Step 0.0.9** — Update `pwa/src/ui/SavedScansScreen.tsx`: replace `pdfStatus` labels with placeholder `uploadStatus` labels (`Idle` / `Processing...` / `Ready` etc.). Slice 1 will wire actual states.
+- [ ] **Step 0.0.10** — Update `pwa/src/ui/App.tsx` + `ScannerScreen.tsx` to remove `OcrQueue` references.
+- [ ] **Step 0.0.11** — Run `npm test` from root. Fix any compile errors / dropped tests.
+- [ ] **Step 0.0.12** — Run `npm --workspaces run typecheck` and `npm --workspaces run build`. Both should pass.
+- [ ] **Step 0.0.13** — Commit: `chore(pwa): retire client-side Tesseract OCR (replaced by Haiku vision in Phase 5)`. The commit message should explicitly note that Phase 5 v2 spec replaces this functionality.
 
 ### Task 0.1: `server/src/drive/folder-cache.ts`
 
@@ -59,7 +74,6 @@ The Drive SDK exposes `iterateFolderChildren(folderUid)` (verified at `server/sr
 - [ ] **Step 0.1.1** — Write failing test for empty Drive (only root, no children):
 
 ```ts
-// server/src/drive/folder-cache.test.ts
 import { describe, it, expect, vi } from 'vitest';
 import { FolderCache } from './folder-cache.js';
 
@@ -82,7 +96,7 @@ describe('FolderCache', () => {
 });
 ```
 
-- [ ] **Step 0.1.2** — Run: FAIL.
+- [ ] **Step 0.1.2** — Run: FAIL (module not found).
 
 - [ ] **Step 0.1.3** — Implement minimal:
 
@@ -115,7 +129,7 @@ export class FolderCache {
     for await (const childMaybe of this.sdk.iterateFolderChildren(folderUid)) {
       if (!childMaybe.ok) continue;
       const child = childMaybe.value;
-      if (String(child.type) !== 'folder') continue;     // skip files
+      if (String(child.type) !== 'folder') continue;
       const path = parentPath === '/' ? `/${child.name}` : `${parentPath}/${child.name}`;
       out.push({ linkId: child.uid, path });
       await this.walk(child.uid, path, out);
@@ -126,57 +140,44 @@ export class FolderCache {
 
 - [ ] **Step 0.1.4** — Run: PASS.
 
-- [ ] **Step 0.1.5** — Add tests one at a time. Order is **depth-first, parent-before-children** (the test assertion should rely on this exact order):
-  - Two top-level folders → returns 3 entries (root + 2). Depth-first order.
-  - Nested 2 levels → all paths returned with correct slashes; parent appears before its children.
+- [ ] **Step 0.1.5** — Add tests one at a time. Order is **depth-first, parent-before-children**:
+  - Two top-level folders → root + 2.
+  - Nested 2 levels → all paths returned.
   - Skips files (type ≠ 'folder').
-  - `refresh()` replaces (not appends) on second call.
+  - `refresh()` replaces (not appends).
 
-- [ ] **Step 0.1.6** — All 5 tests green. Commit: `feat(drive): folder-cache walks Drive tree, exposes flattened path list`.
+- [ ] **Step 0.1.6** — Commit: `feat(drive): folder-cache walks Drive tree, exposes flattened path list`.
 
-### Task 0.2: `GET /api/folders` route
+### Task 0.2: `GET /api/drive/folders` route
 
 **Files:**
-- Modify: `server/src/http/routes-drive.ts` (add route alongside existing `test-upload`)
-- Test: `server/src/http/routes-drive.test.ts` (create if absent, else extend)
+- Modify: `server/src/http/routes-drive.ts`
+- Test: `server/src/http/routes-drive.test.ts` (create or extend)
 
-- [ ] **Step 0.2.1** — Write failing route test (FolderCache mocked):
-
-```ts
-it('GET /api/drive/folders returns the cached tree', async () => {
-  const cache = { getTree: vi.fn().mockReturnValue([{ linkId: 'root', path: '/' }, { linkId: 'f1', path: '/Tax' }]) };
-  // ... wire route into a Hono test app ...
-  const res = await app.request('/api/drive/folders');
-  expect(res.status).toBe(200);
-  expect(await res.json()).toEqual({ folders: [{ linkId: 'root', path: '/' }, { linkId: 'f1', path: '/Tax' }] });
-});
-```
-
-- [ ] **Step 0.2.2** — Add the route to `driveRoutes(deps)`:
+- [ ] **Step 0.2.1** — Write happy-path test (FolderCache mocked).
+- [ ] **Step 0.2.2** — Add route to `driveRoutes(deps)`:
 
 ```ts
 r.get('/folders', async (c) => {
   const auth = c.get('auth');
   if (!auth?.liveSession) return c.json({ error: 'not_authenticated' }, 401);
-  return c.json({ folders: deps.folderCache.getTree() });
+  if (c.req.query('refresh') === '1') await auth.liveSession.folderCache.refresh();
+  return c.json({ folders: auth.liveSession.folderCache.getTree() });
 });
 ```
 
-Update `driveRoutes` `deps` to include `folderCache: FolderCache`.
+- [ ] **Step 0.2.3** — Wire `FolderCache` instantiation: extend `liveSession` to include a lazily-initialised `folderCache: FolderCache`. Per-session lifetime (folder UIDs differ per Proton account; singleton would leak state).
+- [ ] **Step 0.2.4** — Three tests green (happy path, refresh, unauth).
+- [ ] **Step 0.2.5** — Commit: `feat(server): GET /api/drive/folders returns walked Drive tree`.
 
-- [ ] **Step 0.2.3** — Add an optional `?refresh=1` query param that triggers `await deps.folderCache.refresh()` before returning. Test it.
-
-- [ ] **Step 0.2.4** — Wire `FolderCache` instantiation in `server.ts`'s `createApp` as **per-session** (not a process singleton): folder UIDs differ per Proton account, so a singleton would leak state across accounts. Concretely: extend the `liveSession` object (set by `sessionMiddleware`) with a lazily-initialised `folderCache: FolderCache` field. First call to `/api/drive/folders` triggers `await folderCache.refresh()` if the cache is empty.
-
-- [ ] **Step 0.2.5** — Three tests green (happy path, refresh, unauth). Commit: `feat(server): GET /api/drive/folders returns walked Drive tree`.
-
-### Task 0.3: PWA `api.getFolders()` + folder cache hydration
+### Task 0.3: PWA `api.getFolders()`
 
 **Files:**
 - Modify: `pwa/src/api.ts`
 - Test: `pwa/src/api.test.ts` (additions)
 
-- [ ] **Step 0.3.1** — TDD `getFolders()`:
+- [ ] **Step 0.3.1** — TDD `getFolders()`: happy + refresh + 401 throws (3 tests).
+- [ ] **Step 0.3.2** — Implement:
 
 ```ts
 export async function getFolders(refresh = false): Promise<{ folders: { linkId: string; path: string }[] }> {
@@ -187,59 +188,29 @@ export async function getFolders(refresh = false): Promise<{ folders: { linkId: 
 }
 ```
 
-- [ ] **Step 0.3.2** — Tests: happy path, refresh path, 401 throws.
-
 - [ ] **Step 0.3.3** — Commit: `feat(pwa): api.getFolders() hits new server route`.
 
 ---
 
-## Slice 1 — Classify Online
+## Slice 1 — Vision Classify
 
-End state: scan → AI suggests name + folder → user edits + confirms → toast "would upload" (no real upload yet). 9 tasks.
+End state: scan multi-page → server returns OCR + suggestion → ConfirmCard renders. No PDF assembly or upload yet.
 
-### Task 1: Install slice-1 dependencies
+### Task 1: Install slice-1 server deps
 
-**Files:**
-- Modify: `package.json` (root and / or `server/package.json`)
-- Modify: `package-lock.json`
+- [ ] **Step 1.1** — `npm --workspace @doc-scanner/server install @anthropic-ai/sdk sharp`.
+- [ ] **Step 1.2** — Verify pinned versions; `npm ls sharp` shows correct prebuild for dev arch.
+- [ ] **Step 1.3** — Commit: `feat(deps): add @anthropic-ai/sdk and sharp for Phase 5 vision classify`.
 
-- [ ] **Step 1.1** — Add server deps: `npm --workspace @doc-scanner/server install @anthropic-ai/sdk sharp`.
-- [ ] **Step 1.2** — Verify pinned versions (no `^`/`~`) — Renovate's `rangeStrategy: pin` should enforce this; check the diff.
-- [ ] **Step 1.3** — `npm ls sharp` to confirm it resolved a `linux-musl-arm64` and `darwin-arm64` (or matching) prebuild on dev machine.
-- [ ] **Step 1.4** — Commit: `git add package.json package-lock.json server/package.json && git commit -m "feat(deps): add @anthropic-ai/sdk and sharp for Phase 5 classify"`.
-
-### Task 2: `classify/image.ts` — image normalisation
+### Task 2: `server/src/classify/image.ts`
 
 **Files:**
 - Create: `server/src/classify/image.ts`
 - Test: `server/src/classify/image.test.ts`
 
-- [ ] **Step 2.1** — Write failing test: 200×200 PNG ≤600 KB → pass-through (output bytes equal input bytes).
-
-```ts
-// server/src/classify/image.test.ts
-import { describe, it, expect } from 'vitest';
-import sharp from 'sharp';
-import { normaliseForClassify, UndecodableImageError } from './image.js';
-
-async function tinyPng(): Promise<Uint8Array> {
-  const buf = await sharp({ create: { width: 200, height: 200, channels: 3, background: { r: 255, g: 255, b: 255 } } })
-    .png().toBuffer();
-  return new Uint8Array(buf);
-}
-
-describe('normaliseForClassify', () => {
-  it('passes through small PNGs unchanged', async () => {
-    const input = await tinyPng();
-    const out = await normaliseForClassify(input);
-    expect(Buffer.compare(Buffer.from(out), Buffer.from(input))).toBe(0);
-  });
-});
-```
-
-- [ ] **Step 2.2** — Run: `npm --workspace @doc-scanner/server test classify/image -- --run`. Expected: FAIL (module not found).
-
-- [ ] **Step 2.3** — Implement minimal:
+- [ ] **Step 2.1** — Write failing test for small PNG pass-through.
+- [ ] **Step 2.2** — Run: FAIL.
+- [ ] **Step 2.3** — Implement:
 
 ```ts
 // server/src/classify/image.ts
@@ -247,53 +218,51 @@ import sharp from 'sharp';
 
 export class UndecodableImageError extends Error {}
 
-const MAX_LONG_EDGE = 512;
-const MAX_BYTES = 600 * 1024;
+const MAX_LONG_EDGE = 1024;
+const MAX_BYTES = 1.5 * 1024 * 1024;
 
 export async function normaliseForClassify(input: Uint8Array): Promise<Uint8Array> {
   let meta;
-  try {
-    meta = await sharp(input).metadata();
-  } catch {
-    throw new UndecodableImageError('sharp could not decode input bytes');
-  }
+  try { meta = await sharp(input).metadata(); }
+  catch { throw new UndecodableImageError('sharp could not decode input bytes'); }
   if (!meta.format) throw new UndecodableImageError('unrecognised format');
 
   const longEdge = Math.max(meta.width ?? 0, meta.height ?? 0);
-  const isPng = meta.format === 'png';
-  if (isPng && longEdge <= MAX_LONG_EDGE && input.byteLength <= MAX_BYTES) {
+  const formatOk = meta.format === 'jpeg' || meta.format === 'png';
+  if (formatOk && longEdge <= MAX_LONG_EDGE && input.byteLength <= MAX_BYTES) {
     return input;
   }
+  // Re-encode as JPEG q=85 — smaller payload than PNG for photos; OCR
+  // quality unchanged at 1024px since text is a tiny fraction of the byte
+  // budget. Document scans encode well as JPEG without visible artifacts.
   const buf = await sharp(input)
     .resize({ width: MAX_LONG_EDGE, height: MAX_LONG_EDGE, fit: 'inside', withoutEnlargement: true })
-    .png({ compressionLevel: 9 })
+    .jpeg({ quality: 85, mozjpeg: true })
     .toBuffer();
   return new Uint8Array(buf);
 }
 ```
 
-- [ ] **Step 2.4** — Run: PASS expected.
+- [ ] **Step 2.4** — Run: PASS.
+- [ ] **Step 2.5** — Add 3 more tests one at a time:
+  - 4000×3000 PNG → JPEG, ≤1024 long-edge, ≤1.5 MB.
+  - Corrupt header → throws `UndecodableImageError`.
+  - Performance: 4000×3000 normalises in <200 ms.
+- [ ] **Step 2.6** — Commit: `feat(classify): image.ts normalises to ≤1024px JPEG for vision input`.
 
-- [ ] **Step 2.5** — Add remaining tests (one at a time, each: write → fail → pass → next):
-  - 4000×3000 JPEG → 512×384 PNG, ≤600 KB.
-  - Corrupt header bytes → throws `UndecodableImageError`.
-  - Performance: 4000×3000 normalises in <200 ms (use `performance.now()` around the call).
-
-- [ ] **Step 2.6** — All 4 tests green. Commit: `feat(classify): image.ts normalises bitmaps for Anthropic vision input`.
-
-### Task 3: `classify/haiku.ts` — Anthropic SDK wrapper
+### Task 3: `server/src/classify/haiku.ts` — multi-image vision tool-use
 
 **Files:**
 - Create: `server/src/classify/haiku.ts`
 - Create: `server/src/classify/types.ts`
 - Test: `server/src/classify/haiku.test.ts`
 
-- [ ] **Step 3.1** — Define types in `classify/types.ts`:
+- [ ] **Step 3.1** — Define types:
 
 ```ts
+// server/src/classify/types.ts
 export interface ClassifyInput {
-  ocrText: string;
-  thumbnailPng: Uint8Array;
+  pages: Uint8Array[];
   folders: { linkId: string; path: string }[];
   examples?: PastExample[];
 }
@@ -307,58 +276,40 @@ export interface ClassifyResult {
   suggestedFolderLinkId: string;
   confidence: number;
   rationale: string;
+  pageOcr: PageOcr[];
+}
+export interface PageOcr {
+  text: string;
+  words: { text: string; x: number; y: number; w: number; h: number }[];
 }
 ```
 
-- [ ] **Step 3.2** — Write failing happy-path test (mock `@anthropic-ai/sdk` at module boundary using `vi.mock`):
+- [ ] **Step 3.2** — Write failing single-page happy-path test (Anthropic SDK mocked).
 
 ```ts
-// server/src/classify/haiku.test.ts
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-
-const mockCreate = vi.fn();
-vi.mock('@anthropic-ai/sdk', () => ({
-  default: vi.fn().mockImplementation(() => ({
-    messages: { create: mockCreate },
-  })),
-}));
-
-import { classify } from './haiku.js';
-
-describe('classify (haiku)', () => {
-  beforeEach(() => mockCreate.mockReset());
-
-  it('returns parsed ClassifyResult on tool-use happy path', async () => {
-    mockCreate.mockResolvedValue({
-      content: [{
-        type: 'tool_use',
-        name: 'suggest_filing',
-        input: {
-          suggestedName: 'Tax Receipt 2026',
-          suggestedFolderLinkId: 'folder-tax',
-          confidence: 0.9,
-          rationale: 'OCR mentions IRS form',
-        },
-      }],
-    });
-    const result = await classify({
-      ocrText: 'IRS Form 1040',
-      thumbnailPng: new Uint8Array([0x89, 0x50, 0x4e, 0x47]),
-      folders: [{ linkId: 'folder-tax', path: '/Documents/Tax' }],
-    });
-    expect(result).toEqual({
+// classify/haiku.test.ts (sketch)
+mockCreate.mockResolvedValue({
+  content: [{
+    type: 'tool_use', name: 'extract_and_suggest',
+    input: {
       suggestedName: 'Tax Receipt 2026',
       suggestedFolderLinkId: 'folder-tax',
       confidence: 0.9,
-      rationale: 'OCR mentions IRS form',
-    });
-  });
+      rationale: 'IRS Form 1040',
+      pageOcr: [{ text: 'IRS Form 1040', words: [{ text: 'IRS', x: 0.1, y: 0.1, w: 0.1, h: 0.05 }] }],
+    },
+  }],
+  usage: { input_tokens: 1500, output_tokens: 200 },
 });
+const result = await classify({
+  pages: [new Uint8Array([0xff, 0xd8])],   // JPEG magic bytes
+  folders: [{ linkId: 'folder-tax', path: '/Tax' }],
+});
+expect(result?.pageOcr.length).toBe(1);
+expect(result?.suggestedName).toBe('Tax Receipt 2026');
 ```
 
-- [ ] **Step 3.3** — Run: FAIL (module not found).
-
-- [ ] **Step 3.4** — Implement minimal `haiku.ts` (force tool-use, base64 encode image, single-turn message):
+- [ ] **Step 3.3** — Implement (force tool-use, multi-image content blocks):
 
 ```ts
 // server/src/classify/haiku.ts
@@ -369,21 +320,46 @@ import { logger } from '../logger.js';
 export class ImageTooLargeError extends Error {}
 
 const MODEL = 'claude-haiku-4-5';
-const TIMEOUT_MS = 10_000;
+const TIMEOUT_MS = 15_000;
 const MAX_IMAGE_BYTES = 3 * 1024 * 1024;
 const NAME_REGEX = /^[a-zA-Z0-9 .,'_-]{1,80}$/;
 
 const FILING_TOOL = {
-  name: 'suggest_filing',
-  description: 'Propose a filename and destination folder for the scanned document.',
+  name: 'extract_and_suggest',
+  description: 'Extract OCR text from each page and propose a filename and destination folder.',
   input_schema: {
     type: 'object' as const,
-    required: ['suggestedName', 'suggestedFolderLinkId', 'confidence', 'rationale'],
+    required: ['suggestedName', 'suggestedFolderLinkId', 'confidence', 'rationale', 'pageOcr'],
     properties: {
       suggestedName: { type: 'string' as const, description: 'Filename without extension. ASCII, no slashes, ≤80 chars.' },
       suggestedFolderLinkId: { type: 'string' as const, description: 'Must be one of the linkIds from the provided folders list.' },
       confidence: { type: 'number' as const, minimum: 0, maximum: 1 },
       rationale: { type: 'string' as const, maxLength: 200 },
+      pageOcr: {
+        type: 'array' as const,
+        description: 'Per-page OCR results, in input page order.',
+        items: {
+          type: 'object' as const,
+          required: ['text', 'words'],
+          properties: {
+            text: { type: 'string' as const },
+            words: {
+              type: 'array' as const,
+              items: {
+                type: 'object' as const,
+                required: ['text', 'x', 'y', 'w', 'h'],
+                properties: {
+                  text: { type: 'string' as const },
+                  x: { type: 'number' as const, minimum: 0, maximum: 1 },
+                  y: { type: 'number' as const, minimum: 0, maximum: 1 },
+                  w: { type: 'number' as const, minimum: 0, maximum: 1 },
+                  h: { type: 'number' as const, minimum: 0, maximum: 1 },
+                },
+              },
+            },
+          },
+        },
+      },
     },
   },
 };
@@ -399,26 +375,30 @@ function sanitiseName(raw: string): string {
   return cleaned.length > 0 ? cleaned : 'Document';
 }
 
+function clamp01(n: number): number { return Math.max(0, Math.min(1, n)); }
+
 function formatExamples(examples: PastExample[] | undefined): string {
   if (!examples?.length) return '';
   return ['<examples>', ...examples.map((e) => `OCR: ${e.ocrSnippet}  →  filed as "${e.finalName}" in ${e.folderPath}`), '</examples>'].join('\n');
 }
 
 export async function classify(input: ClassifyInput): Promise<ClassifyResult | null> {
-  if (input.thumbnailPng.byteLength > MAX_IMAGE_BYTES) {
-    throw new ImageTooLargeError(`image ${input.thumbnailPng.byteLength} > ${MAX_IMAGE_BYTES}`);
+  for (const page of input.pages) {
+    if (page.byteLength > MAX_IMAGE_BYTES) throw new ImageTooLargeError(`page ${page.byteLength} > ${MAX_IMAGE_BYTES}`);
   }
   const folderLines = input.folders.map((f) => `${f.linkId}: ${f.path}`).join('\n');
-  const ocrExcerpt = input.ocrText.slice(0, 2000);
-  const base64 = Buffer.from(input.thumbnailPng).toString('base64');
   const examplesBlock = formatExamples(input.examples);
+  const imageBlocks = input.pages.map((page) => ({
+    type: 'image' as const,
+    source: { type: 'base64' as const, media_type: 'image/jpeg' as const, data: Buffer.from(page).toString('base64') },
+  }));
 
   const start = performance.now();
   let response;
   try {
     response = await getClient().messages.create({
       model: MODEL,
-      max_tokens: 400,
+      max_tokens: 4000,    // larger budget than v1: per-page OCR for multi-page docs
       tool_choice: { type: 'tool', name: FILING_TOOL.name },
       tools: [FILING_TOOL],
       messages: [{
@@ -426,11 +406,10 @@ export async function classify(input: ClassifyInput): Promise<ClassifyResult | n
         content: [
           {
             type: 'text',
-            text: `Suggest a filename and destination folder for this scanned document.\n\nAvailable folders:\n${folderLines}`,
+            text: `For each page image below, extract OCR text (full reading order) and word bounding boxes (normalised 0-1). Then suggest a filename and destination folder for the entire document.\n\nAvailable folders:\n${folderLines}`,
             cache_control: { type: 'ephemeral' },
           },
-          { type: 'image', source: { type: 'base64', media_type: 'image/png', data: base64 } },
-          { type: 'text', text: `OCR text:\n${ocrExcerpt}` },
+          ...imageBlocks,
           ...(examplesBlock ? [{ type: 'text' as const, text: examplesBlock }] : []),
         ],
       }],
@@ -447,9 +426,10 @@ export async function classify(input: ClassifyInput): Promise<ClassifyResult | n
     return null;
   }
   const raw = block.input as Partial<ClassifyResult>;
-  if (typeof raw.suggestedName !== 'string' || typeof raw.suggestedFolderLinkId !== 'string'
-      || typeof raw.confidence !== 'number' || typeof raw.rationale !== 'string') {
-    logger.warn({ raw }, 'classify: tool_use input missing required fields');
+  if (!raw.suggestedName || !raw.suggestedFolderLinkId
+      || typeof raw.confidence !== 'number' || typeof raw.rationale !== 'string'
+      || !Array.isArray(raw.pageOcr) || raw.pageOcr.length !== input.pages.length) {
+    logger.warn({ raw, expectedPages: input.pages.length }, 'classify: tool_use input malformed');
     return null;
   }
 
@@ -457,63 +437,51 @@ export async function classify(input: ClassifyInput): Promise<ClassifyResult | n
   const folderOk = input.folders.some((f) => f.linkId === raw.suggestedFolderLinkId);
   const finalLinkId = folderOk ? raw.suggestedFolderLinkId : '';
 
+  const pageOcr = raw.pageOcr.map((p) => ({
+    text: typeof p.text === 'string' ? p.text : '',
+    words: Array.isArray(p.words) ? p.words.map((w) => ({
+      text: String(w.text ?? ''),
+      x: clamp01(Number(w.x) || 0),
+      y: clamp01(Number(w.y) || 0),
+      w: clamp01(Number(w.w) || 0),
+      h: clamp01(Number(w.h) || 0),
+    })) : [],
+  }));
+
   const elapsed = Math.round(performance.now() - start);
-  logger.info({ elapsed, model: MODEL, inputTokens: response.usage?.input_tokens, outputTokens: response.usage?.output_tokens }, 'classify: ok');
-  return { suggestedName: sanitisedName, suggestedFolderLinkId: finalLinkId, confidence: raw.confidence, rationale: raw.rationale };
+  logger.info({ elapsed, pages: input.pages.length, model: MODEL,
+    inputTokens: response.usage?.input_tokens, outputTokens: response.usage?.output_tokens }, 'classify: ok');
+  return { suggestedName: sanitisedName, suggestedFolderLinkId: finalLinkId, confidence: raw.confidence, rationale: raw.rationale, pageOcr };
 }
 ```
 
-- [ ] **Step 3.5** — Run: PASS expected on happy-path test.
+- [ ] **Step 3.4** — Run: PASS on happy path.
+- [ ] **Step 3.5** — Add 5 more tests one at a time:
+  - Multi-page (3 pages in, 3 OCR out).
+  - Page-count mismatch → null.
+  - Hallucinated folder linkId → empty `suggestedFolderLinkId`.
+  - SDK throws → null.
+  - Page >3 MB raw → throws `ImageTooLargeError` (no API call).
+- [ ] **Step 3.6** — All 6 tests green. Commit: `feat(classify): haiku.ts vision multi-image OCR + filing tool-use`.
 
-- [ ] **Step 3.6** — Add remaining tests one at a time (write → fail → fix → pass):
-  - Hallucinated folder linkId → result has `suggestedFolderLinkId: ''`.
-  - Name with illegal chars (e.g., `'Tax/Receipt ✨'`) → sanitised to `'TaxReceipt'`.
-  - SDK throws → `classify` returns `null`.
-  - Tool response missing required fields → returns `null`.
-  - Image >3 MB raw → throws `ImageTooLargeError` (no API call).
-
-- [ ] **Step 3.7** — All 6 tests green. Commit: `feat(classify): haiku.ts wraps Anthropic vision tool-use`.
-
-### Task 4: `routes-classify.ts` — HTTP endpoint
+### Task 4: `routes-classify.ts`
 
 **Files:**
 - Create: `server/src/http/routes-classify.ts`
-- Modify: `server/src/http/server.ts` (register route)
+- Modify: `server/src/http/server.ts`
 - Test: `server/src/http/routes-classify.test.ts`
 
-- [ ] **Step 4.1** — Inspect existing route file for conventions: `cat server/src/http/routes-drive.ts | head -50`. Match its style (deps injection via factory, error handling, logging).
-
-- [ ] **Step 4.2** — Write failing happy-path test:
+- [ ] **Step 4.1** — Inspect existing route conventions.
+- [ ] **Step 4.2** — Write failing happy-path test (multi-page multipart):
 
 ```ts
-// server/src/http/routes-classify.test.ts
-import { describe, it, expect, vi } from 'vitest';
-import { Hono } from 'hono';
-import { classifyRoutes } from './routes-classify.js';
-
-describe('POST /api/classify', () => {
-  it('returns suggestion JSON on valid multipart', async () => {
-    const fakeClassify = vi.fn().mockResolvedValue({
-      suggestedName: 'Test', suggestedFolderLinkId: 'f1', confidence: 0.8, rationale: 'OCR matches'
-    });
-    const fakeFolderCache = { getTree: vi.fn().mockResolvedValue([{ linkId: 'f1', path: '/Tax' }]) };
-    const app = new Hono().route('/api', classifyRoutes({ classify: fakeClassify, folderCache: fakeFolderCache as never, history: undefined }));
-
-    const fd = new FormData();
-    fd.set('thumbnail', new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47])]), 'thumb.png');
-    fd.set('ocrText', 'IRS form text');
-    const res = await app.request('/api/classify', { method: 'POST', body: fd });
-
-    expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ suggestion: { suggestedName: 'Test', suggestedFolderLinkId: 'f1', confidence: 0.8, rationale: 'OCR matches' } });
-    expect(fakeClassify).toHaveBeenCalledOnce();
-  });
-});
+const fd = new FormData();
+fd.set('page_0', new Blob([new Uint8Array([0xff, 0xd8])], { type: 'image/jpeg' }), 'p0.jpg');
+fd.set('page_1', new Blob([new Uint8Array([0xff, 0xd8])], { type: 'image/jpeg' }), 'p1.jpg');
+const res = await app.request('/api/classify', { method: 'POST', body: fd });
 ```
 
-- [ ] **Step 4.3** — Run: FAIL.
-
-- [ ] **Step 4.4** — Implement:
+- [ ] **Step 4.3** — Implement:
 
 ```ts
 // server/src/http/routes-classify.ts
@@ -521,89 +489,78 @@ import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import type { ClassifyResult, PastExample } from '../classify/types.js';
 import { normaliseForClassify, UndecodableImageError } from '../classify/image.js';
-import { logger } from '../logger.js';
 
-interface FolderCache { getTree(): Promise<{ linkId: string; path: string }[]>; }
-interface History { findSimilar(ocrText: string, limit: number): PastExample[]; }
+interface FolderCache { getTree(): { linkId: string; path: string }[]; }
+interface History { findRecent(limit: number): PastExample[]; }
 
 interface Deps {
-  classify: (input: { ocrText: string; thumbnailPng: Uint8Array; folders: { linkId: string; path: string }[]; examples?: PastExample[] }) => Promise<ClassifyResult | null>;
+  classify: (input: { pages: Uint8Array[]; folders: { linkId: string; path: string }[]; examples?: PastExample[] }) => Promise<ClassifyResult | null>;
   folderCache: FolderCache;
   history?: History;
 }
 
-export function classifyRoutes(deps: Deps): Hono {
+export function classifyRoutes(deps: Deps) {
   const app = new Hono();
-  app.post('/classify', bodyLimit({ maxSize: 4 * 1024 * 1024, onError: (c) => c.json({ error: 'payload_too_large' }, 413) }), async (c) => {
+  app.post('/classify', bodyLimit({ maxSize: 20 * 1024 * 1024, onError: (c) => c.json({ error: 'payload_too_large' }, 413) }), async (c) => {
     const form = await c.req.formData();
-    const thumb = form.get('thumbnail');
-    const ocrText = form.get('ocrText');
-    if (!(thumb instanceof Blob) || typeof ocrText !== 'string') return c.json({ error: 'missing_fields' }, 400);
-
-    const raw = new Uint8Array(await thumb.arrayBuffer());
-    let normalised: Uint8Array;
-    try { normalised = await normaliseForClassify(raw); }
-    catch (err) {
-      if (err instanceof UndecodableImageError) return c.json({ error: 'undecodable_image' }, 422);
-      throw err;
+    const pages: Uint8Array[] = [];
+    for (let i = 0; ; i++) {
+      const part = form.get(`page_${i}`);
+      if (!(part instanceof Blob)) break;
+      try { pages.push(await normaliseForClassify(new Uint8Array(await part.arrayBuffer()))); }
+      catch (err) {
+        if (err instanceof UndecodableImageError) return c.json({ error: 'undecodable_image', page: i }, 422);
+        throw err;
+      }
     }
+    if (pages.length === 0) return c.json({ error: 'no_pages' }, 400);
 
-    const folders = await deps.folderCache.getTree();
-    const examples = deps.history?.findSimilar(ocrText, 3) ?? [];
-    const suggestion = await deps.classify({ ocrText, thumbnailPng: normalised, folders, examples });
+    const folders = deps.folderCache.getTree();
+    const examples = deps.history?.findRecent(3) ?? [];
+    const suggestion = await deps.classify({ pages, folders, examples });
     return c.json({ suggestion });
   });
   return app;
 }
 ```
 
-- [ ] **Step 4.5** — Run: PASS.
+- [ ] **Step 4.4** — Add tests:
+  - 21 MB body → 413.
+  - Zero pages → 400.
+  - Non-contiguous indices (page_0, page_2 but no page_1) → only page_0 considered (loop breaks).
+  - Undecodable page → 422.
+  - Classify returns null → 200 with `{ suggestion: null }`.
+- [ ] **Step 4.5** — Wire into `server.ts`. Pass `auth.liveSession.folderCache`. Inject `history: undefined` for slice 1.
+- [ ] **Step 4.6** — Commit: `feat(server): POST /api/classify wires multi-image vision pipeline`.
 
-- [ ] **Step 4.6** — Add tests one at a time:
-  - 2.5 MB body → 413.
-  - Missing thumbnail or ocrText → 400.
-  - `classify` returns null → 200 with `{ suggestion: null }` (not 500).
-  - Undecodable image → 422.
-
-- [ ] **Step 4.7** — Wire route into `server.ts`. The `folderCache` instance built in Task 0.2.4 is the same one passed here (singleton or per-session — match the decision made there):
-
-```ts
-// server/src/http/server.ts (additions in createApp)
-import { classifyRoutes } from './routes-classify.js';
-import { classify } from '../classify/haiku.js';
-// folderCache is already bound to liveSession from Task 0.2.4
-// ...
-app.route('/api', classifyRoutes({ classify, folderCache, history: undefined }));
-```
-
-- [ ] **Step 4.8** — All 5 tests green. Commit: `feat(server): POST /api/classify wires Haiku suggestions`.
-
-### Task 5: PWA `scans-store` — uploadStatus axis (slice 1 portion)
+### Task 5: PWA scans-store — uploadStatus axis (slice 1 portion)
 
 **Files:**
-- Modify: `pwa/src/scanner/types.ts` (add UploadStatus + Scan extensions)
-- Modify: `pwa/src/scanner/scans-store.ts` (mutator + transition validator)
-- Test: `pwa/src/scanner/scans-store.test.ts` (additions)
+- Modify: `pwa/src/scanner/types.ts`
+- Modify: `pwa/src/scanner/scans-store.ts`
+- Test: `pwa/src/scanner/scans-store.test.ts`
 
 - [ ] **Step 5.1** — Extend types:
 
 ```ts
-// pwa/src/scanner/types.ts (add)
 export type UploadStatus = 'idle' | 'pending_classify' | 'awaiting_confirm' | 'pending_upload' | 'done';
-// (slice 4 will add 'needs_attention' as a discriminated union extension)
-
 export interface UploadSuggestion {
   suggestedName: string;
   suggestedFolderLinkId: string;
   confidence: number;
   rationale: string;
 }
-
+export interface PageOcr {
+  text: string;
+  words: { text: string; x: number; y: number; w: number; h: number }[];
+}
 export interface Scan {
-  // ...existing fields...
+  // ... existing capture fields ...
   uploadStatus: UploadStatus;
   uploadError: string | null;
   suggestion?: UploadSuggestion;
+  pageOcr?: PageOcr[];
+  pdfBlob?: Blob;          // populated in slice 2 after assembly
   finalName?: string;
   finalFolderLinkId?: string;
   driveNodeUid?: string;
@@ -611,25 +568,8 @@ export interface Scan {
 }
 ```
 
-- [ ] **Step 5.2** — Add migration to `scans-store.ts` `upgrade` block (bump DB version, default `uploadStatus='idle'`, `uploadError=null` for existing rows).
-
-- [ ] **Step 5.3** — Write failing transition test:
-
-```ts
-// pwa/src/scanner/scans-store.test.ts (additions)
-it('transitions idle → pending_classify when pdfStatus becomes done', async () => {
-  const store = await ScansStore.open('test-db-1');
-  const id = await store.create();
-  await store.setPdfStatus(id, 'done');
-  await store.setUploadStatus(id, 'pending_classify');
-  const scan = await store.get(id);
-  expect(scan.uploadStatus).toBe('pending_classify');
-});
-```
-
-- [ ] **Step 5.4** — Run: FAIL (no `setUploadStatus`).
-
-- [ ] **Step 5.5** — Implement `setUploadStatus(id, next, patch?)` with a transition map:
+- [ ] **Step 5.2** — Migrate scans-store to v3 schema (bump db version, default `uploadStatus='idle'`, `uploadError=null`).
+- [ ] **Step 5.3** — TDD `setUploadStatus(scanId, next, patch?)` with transition map:
 
 ```ts
 const ALLOWED: Record<UploadStatus, UploadStatus[]> = {
@@ -641,61 +581,30 @@ const ALLOWED: Record<UploadStatus, UploadStatus[]> = {
 };
 ```
 
-Throws on illegal transitions; persists patch atomically.
+- [ ] **Step 5.4** — Tests (one at a time): legal idle → pending_classify, illegal done → pending_upload throws, awaiting_confirm → pending_upload writes `finalName`, pending_upload → done writes `driveNodeUid`/`driveWebUrl`, concurrent transitions serialised, `findPending()` returns pending rows ordered by `updatedAt`.
+- [ ] **Step 5.5** — Add helper methods: `getPageBlobs(scanId)` (read all page blobs from store), `setSuggestionAndOcr(scanId, suggestion, pageOcr)` (atomic patch on classify response). 2 more tests.
+- [ ] **Step 5.6** — All 8 tests green. Commit: `feat(pwa): scans-store uploadStatus axis + slice-1 helpers`.
 
-- [ ] **Step 5.6** — Run: PASS.
-
-- [ ] **Step 5.7** — Add remaining tests (one at a time):
-  - Illegal transition (`done → pending_upload`) throws.
-  - `awaiting_confirm` → `pending_upload` writes `finalName` + `finalFolderLinkId` patch.
-  - `pending_upload` → `done` writes `driveNodeUid` + `driveWebUrl`.
-  - Concurrent transitions on same id serialised (use IDB transaction).
-  - `findPending()` returns `pending_classify` + `pending_upload` ordered by `updatedAt`.
-
-- [ ] **Step 5.8** — Add helper methods used by Tasks 8 / 15 / 23 (the existing API has `getPages(scanId)` and `getPdf(pdfKey)`, but no scan-id-keyed convenience getters):
-
-```ts
-async getPdfBlob(scanId: string): Promise<Blob | null> {
-  const scan = await this.get(scanId);
-  if (!scan?.pdfKey) return null;
-  return this.getPdf(scan.pdfKey);
-}
-
-async getCombinedOcrText(scanId: string): Promise<string> {
-  const pages = await this.getPages(scanId);
-  return pages.map((p) => p.ocrText ?? '').filter((t) => t.length > 0).join('\n\n');
-}
-```
-
-Add tests for each (1 test per helper).
-
-- [ ] **Step 5.9** — All 8 tests green. Commit: `feat(pwa): scans-store uploadStatus axis + slice-1 getter helpers`.
-
-### Task 6: PWA `api.ts::classify()`
+### Task 6: PWA `api.classify()`
 
 **Files:**
 - Modify: `pwa/src/api.ts`
-- Test: `pwa/src/api.test.ts` (create if absent, else extend)
+- Test: `pwa/src/api.test.ts`
 
-- [ ] **Step 6.1** — Write failing pre-flight test:
-
-```ts
-it('classify() throws if thumbnail blob > 1 MB before fetch', async () => {
-  const big = new Blob([new Uint8Array(1024 * 1024 + 1)], { type: 'image/png' });
-  await expect(api.classify(big, 'ocr text')).rejects.toThrow(/thumbnail too large/i);
-});
-```
-
-- [ ] **Step 6.2** — Run: FAIL.
-
-- [ ] **Step 6.3** — Implement:
+- [ ] **Step 6.1** — TDD pre-flight size checks (per-page ≤ 2 MB, total ≤ 18 MB).
+- [ ] **Step 6.2** — Implement:
 
 ```ts
-export async function classify(thumbnail: Blob, ocrText: string): Promise<{ suggestion: ClassifyResult | null }> {
-  if (thumbnail.size > 1024 * 1024) throw new Error('thumbnail too large (PWA pre-flight)');
+export async function classify(pages: Blob[]): Promise<{ suggestion: ClassifyResult | null }> {
+  if (pages.length === 0) throw new Error('no pages');
+  let total = 0;
+  for (const p of pages) {
+    if (p.size > 2 * 1024 * 1024) throw new Error('page too large (PWA pre-flight)');
+    total += p.size;
+  }
+  if (total > 18 * 1024 * 1024) throw new Error('total payload too large (PWA pre-flight)');
   const fd = new FormData();
-  fd.set('thumbnail', thumbnail, 'thumb.png');
-  fd.set('ocrText', ocrText);
+  pages.forEach((p, i) => fd.set(`page_${i}`, p, `page_${i}.jpg`));
   const res = await fetch('/api/classify', { method: 'POST', body: fd, credentials: 'same-origin' });
   if (!res.ok) {
     if (res.status === 413 || res.status === 422) return { suggestion: null };
@@ -705,9 +614,8 @@ export async function classify(thumbnail: Blob, ocrText: string): Promise<{ sugg
 }
 ```
 
-- [ ] **Step 6.4** — Run: PASS. Add tests for happy-path multipart shape + 413/422 mapping (3 more tests).
-
-- [ ] **Step 6.5** — Commit: `feat(pwa): api.classify() with pre-flight size guard`.
+- [ ] **Step 6.3** — Tests: happy multipart shape, 413/422 mapping, total-too-large pre-flight (4 tests).
+- [ ] **Step 6.4** — Commit: `feat(pwa): api.classify() multi-page upload with pre-flight guards`.
 
 ### Task 7: PWA `ConfirmCard.tsx`
 
@@ -715,31 +623,9 @@ export async function classify(thumbnail: Blob, ocrText: string): Promise<{ sugg
 - Create: `pwa/src/ui/ConfirmCard.tsx`
 - Test: `pwa/src/ui/ConfirmCard.test.tsx`
 
-- [ ] **Step 7.1** — Inspect existing UI patterns: `cat pwa/src/ui/SavedScansScreen.tsx | head -80` for styling/import style.
-
-- [ ] **Step 7.2** — Write failing render test (use `@testing-library/preact` if already in deps; otherwise vitest jsdom):
-
-```tsx
-// pwa/src/ui/ConfirmCard.test.tsx
-import { render, screen } from '@testing-library/preact';
-import { ConfirmCard } from './ConfirmCard';
-
-it('pre-fills name and folder from suggestion', () => {
-  render(<ConfirmCard
-    scanId="s1"
-    suggestion={{ suggestedName: 'Tax 2026', suggestedFolderLinkId: 'f1', confidence: 0.9, rationale: 'IRS' }}
-    folders={[{ linkId: 'f1', path: '/Tax' }]}
-    onSave={async () => {}}
-    onDismiss={() => {}}
-    onRefreshFolders={async () => {}}
-  />);
-  expect((screen.getByLabelText(/filename/i) as HTMLInputElement).value).toBe('Tax 2026');
-});
-```
-
-- [ ] **Step 7.3** — Run: FAIL.
-
-- [ ] **Step 7.4** — Implement minimal `ConfirmCard`:
+- [ ] **Step 7.1** — Inspect existing UI patterns (`SavedScansScreen.tsx` for style).
+- [ ] **Step 7.2** — TDD render with full suggestion → fields pre-filled.
+- [ ] **Step 7.3** — Implement (filename input with regex validation, folder picker, rationale + confidence badge, Save/Dismiss, Refresh-folders link):
 
 ```tsx
 // pwa/src/ui/ConfirmCard.tsx
@@ -764,7 +650,7 @@ export function ConfirmCard({ suggestion, folders, onSave, onDismiss, onRefreshF
   const valid = NAME_REGEX.test(name) && folderId.length > 0;
 
   return (
-    <div className="confirm-card">
+    <div class="confirm-card">
       <label>Filename<input aria-label="filename" value={name} onInput={(e) => setName((e.target as HTMLInputElement).value)} /></label>
       <label>Folder
         <select value={folderId} onChange={(e) => setFolderId((e.target as HTMLSelectElement).value)}>
@@ -774,12 +660,12 @@ export function ConfirmCard({ suggestion, folders, onSave, onDismiss, onRefreshF
       </label>
       <button type="button" onClick={() => onRefreshFolders()}>↻ Refresh folders</button>
       {suggestion && (
-        <p className="rationale">
+        <p class="rationale">
           <em>{suggestion.rationale}</em>
-          {suggestion.confidence < 0.6 && <span className="badge">Low confidence</span>}
+          {suggestion.confidence < 0.6 && <span class="badge">Low confidence</span>}
         </p>
       )}
-      <div className="actions">
+      <div class="actions">
         <button disabled={!valid || busy} onClick={async () => { setBusy(true); try { await onSave(name, folderId); } finally { setBusy(false); } }}>Save</button>
         <button onClick={onDismiss}>Dismiss</button>
       </div>
@@ -788,14 +674,8 @@ export function ConfirmCard({ suggestion, folders, onSave, onDismiss, onRefreshF
 }
 ```
 
-- [ ] **Step 7.5** — Run: PASS. Add 5 more tests one at a time:
-  - `suggestion: null` → empty fields, Save disabled until name+folder filled.
-  - Illegal chars in name → Save disabled.
-  - Folder picker selection updates state.
-  - Low-confidence badge visible at 0.4; absent at 0.95.
-  - Refresh-folders button calls `onRefreshFolders` callback.
-
-- [ ] **Step 7.6** — Commit: `feat(pwa): ConfirmCard component for AI suggestions`.
+- [ ] **Step 7.4** — Add 5 more tests one at a time.
+- [ ] **Step 7.5** — Commit: `feat(pwa): ConfirmCard for AI suggestions`.
 
 ### Task 8: Wire scanner-session + App.tsx (slice 1 integration)
 
@@ -803,499 +683,192 @@ export function ConfirmCard({ suggestion, folders, onSave, onDismiss, onRefreshF
 - Modify: `pwa/src/scanner/scanner-session.ts`
 - Modify: `pwa/src/ui/App.tsx`
 
-- [ ] **Step 8.1** — Inspect: how does scanner-session currently transition pdfStatus to 'done'? Find the call site (`grep -n "setPdfStatus.*done" pwa/src/scanner/scanner-session.ts`).
-
-- [ ] **Step 8.2** — At that call site, also call `setUploadStatus(scanId, 'pending_classify')` so the UI knows to show the confirm card next.
-
-- [ ] **Step 8.3** — In `App.tsx`, when current scan becomes `pending_classify`:
-  - Generate 512px PNG thumbnail from the stored page-1 image (use sharp's job is server-side; on PWA, use existing canvas-resize utility — check `pwa/src/scanner/` for an existing helper, else inline a small one using `OffscreenCanvas`).
-  - Call `api.classify(thumb, ocrText)`.
-  - On success: `setUploadStatus(scanId, 'awaiting_confirm', { suggestion })`.
-  - On error: `setUploadStatus(scanId, 'awaiting_confirm', { suggestion: undefined })` (empty card).
-  - Render `<ConfirmCard>` with current scan state. `onSave` for slice 1: just `setUploadStatus('idle')` and toast "would upload here" (no real upload yet).
-
-- [ ] **Step 8.4** — Run PWA dev server: `npm --workspace @doc-scanner/pwa run dev`. Manual smoke in browser: scan one document via existing flow → verify confirm card appears with a (possibly mocked-out) suggestion.
-
-- [ ] **Step 8.5** — If you don't have an Anthropic key wired locally yet, set `ANTHROPIC_API_KEY=...` in `.env` for compose. Or add a dev-mode mock in `routes-classify.ts` behind `NODE_ENV === 'development'` (then remove before slice 1 commit).
-
-- [ ] **Step 8.6** — Commit: `feat(pwa): wire scanner-session → classify → ConfirmCard end-to-end`.
+- [ ] **Step 8.1** — When scan transitions to `completed` (existing capture flow), set `uploadStatus='pending_classify'`.
+- [ ] **Step 8.2** — App.tsx watches for `pending_classify` scans:
+  - Read all page blobs via `scansStore.getPageBlobs(scanId)`.
+  - Call `api.classify(pageBlobs)`.
+  - On success: `scansStore.setSuggestionAndOcr(scanId, suggestion, pageOcr)` then `setUploadStatus('awaiting_confirm')`.
+  - On failure / null suggestion: `setUploadStatus('awaiting_confirm', { suggestion: undefined, pageOcr: undefined })` (empty card; PDF won't get OCR layer).
+- [ ] **Step 8.3** — Render `<ConfirmCard>` for `awaiting_confirm` scans. `onSave` for slice 1 stub: `setUploadStatus('idle')` + toast "would upload here".
+- [ ] **Step 8.4** — Manual smoke (browser, not phone): scan → confirm card appears with mock suggestion (use a dev-mode mock if Anthropic key isn't yet active).
+- [ ] **Step 8.5** — Commit: `feat(pwa): wire scan → classify → ConfirmCard end-to-end`.
 
 ### Task 9: Slice 1 acceptance + push
 
-- [ ] **Step 9.1** — Run full test suite: `npm test` from root. Expected: all server + PWA tests pass.
-- [ ] **Step 9.2** — Run typecheck: `npm --workspaces run typecheck` (or whichever script).
-- [ ] **Step 9.3** — Build: `npm --workspaces run build` to catch Vite issues.
-- [ ] **Step 9.4** — Push branch: `git push`.
-- [ ] **Step 9.5** — CI green confirmation. Slice 1 done — no PR yet, more slices to come.
+- [ ] **Step 9.1** — Full test suite, typecheck, build.
+- [ ] **Step 9.2** — Push. CI green.
 
 ---
 
-## Slice 2 — Upload (the demoable milestone)
+## Slice 2 — PDF Assembly + Upload
 
-End state: scan → AI → user confirms → real PDF lands in Drive. 7 tasks.
+End state: scan → AI → user confirms → real PDF lands in Drive. Tag-worthy demoable milestone.
 
 ### Task 10: Empirical SDK collision-behaviour test
 
-**Files:** none (manual + a one-off harness).
+**Files:** none (manual). See spec for procedure.
 
-- [ ] **Step 10.1** — Inspect existing test endpoint: `cat server/src/http/routes-drive.ts | grep -A 30 test-upload`. Use it to upload a file with a known name to MyFilesRootFolder.
-- [ ] **Step 10.2** — Upload **the same name** a second time. Capture the SDK error: HTTP code, error class name, error message text.
-- [ ] **Step 10.3** — Document findings in a comment block at top of `server/src/drive/client.ts` (right above `uploadFile`):
-
-```ts
-// Proton SDK collision behaviour (verified 2026-05-XX):
-//   - On duplicate name: <fill in actual error shape, e.g., "throws DriveError with code='NAME_EXISTS'">
-//   - This shape drives the catch in uploadFile's collision retry loop below.
-```
-
-- [ ] **Step 10.4** — Commit (docs-only): `docs(drive): document Proton SDK name-collision behaviour`.
+- [ ] **Step 10.1** — Use existing `POST /api/drive/test-upload` to upload same name twice.
+- [ ] **Step 10.2** — Capture SDK error shape; document in `server/src/drive/client.ts` comment block.
+- [ ] **Step 10.3** — Commit (docs-only): `docs(drive): document Proton SDK name-collision behaviour`.
 
 ### Task 11: Extend `drive/client.ts::uploadFile`
 
 **Files:**
 - Modify: `server/src/drive/client.ts`
-- Test: `server/src/drive/client.test.ts` (additions)
+- Test: `server/src/drive/client.test.ts`
 
-- [ ] **Step 11.1** — Write failing test for back-compat (no opts → root folder):
+- [ ] **Step 11.1** — TDD back-compat (no opts → root folder).
+- [ ] **Step 11.2** — Refactor signature; preserve behaviour when `opts` omitted. Add `UploadCollisionExhausted` class.
+- [ ] **Step 11.3** — Implement collision retry per spec.
+- [ ] **Step 11.4** — Add 4 more tests (with parentFolderUid, collision once succeeds with `(2)`, four collisions throws, non-collision propagates).
+- [ ] **Step 11.5** — Commit: `feat(drive): uploadFile accepts parentFolderUid + collision retry`.
 
-```ts
-it('uploadFile without opts uploads to MyFilesRootFolder (back-compat)', async () => {
-  const sdk = makeFakeSdk();
-  const client = new DriveClient(sdk);
-  await client.uploadFile('test.pdf', new Uint8Array([1,2,3]), 'application/pdf');
-  expect(sdk.getMyFilesRootFolder).toHaveBeenCalled();
-});
-```
+### Task 12: Adapter for Phase 4 `pdf/build.ts`
 
-- [ ] **Step 11.2** — Run: FAIL (signature mismatch / behaviour assertion fails).
+**Files:**
+- Modify: `pwa/src/pdf/build.ts` (add a normalised-coords input variant, or new wrapper)
+- Test: `pwa/src/pdf/build.test.ts`
 
-- [ ] **Step 11.3** — Refactor `uploadFile` signature; preserve old behaviour when `opts` omitted:
+`pdf/build.ts` was written for Tesseract pixel-coordinate output; Haiku returns 0-1 normalised. Pick one of:
+- (a) Change `build.ts` to accept `{ blob, ocrText, ocrWords: NormalisedWord[] }` and multiply by image dimensions internally.
+- (b) Convert at the call site in App.tsx before calling.
 
-```ts
-interface UploadOptions { parentFolderUid?: string; }
-export interface UploadResult { nodeUid: string; driveUrl: string; finalName: string; }
+(a) is cleaner — the build module already does the coord math; just adjust its input shape.
 
-async uploadFile(name: string, bytes: Uint8Array, mimeType: string, opts?: UploadOptions): Promise<UploadResult> {
-  const parentUid = opts?.parentFolderUid ?? unwrapNode(await this.sdk.getMyFilesRootFolder()).uid;
-  return this.uploadWithCollisionRetry(parentUid, name, bytes, mimeType);
-}
+- [ ] **Step 12.1** — Read existing `pdf/build.ts` to understand current input shape and coord math.
+- [ ] **Step 12.2** — TDD: a new test that passes normalised coords + an image of known dimensions; assert PDF text positions align with the (image-dimension × normalised-coord) products.
+- [ ] **Step 12.3** — Update `build.ts` to accept normalised coords (+ optional image dimensions for the conversion). Old tests should still pass with a small adapter or be updated.
+- [ ] **Step 12.4** — Commit: `feat(pwa): pdf/build accepts normalised word coordinates from Haiku`.
 
-private async uploadWithCollisionRetry(parentUid: string, baseName: string, bytes: Uint8Array, mimeType: string): Promise<UploadResult> {
-  const candidates = [baseName, `${baseName} (2)`, `${baseName} (3)`, `${baseName} (4)`];
-  let lastErr: unknown;
-  for (const candidate of candidates) {
-    try {
-      const result = await this.uploadOnce(parentUid, candidate, bytes, mimeType);
-      return { ...result, finalName: candidate };
-    } catch (err) {
-      if (!isCollisionError(err)) throw err;     // shape from Task 10
-      lastErr = err;
-    }
-  }
-  throw new UploadCollisionExhausted(`name "${baseName}" collided after 4 attempts`, { cause: lastErr });
-}
-```
-
-- [ ] **Step 11.4** — Run: PASS. Add tests one at a time:
-  - With `parentFolderUid` → uses provided folder.
-  - Collision once → succeeds with `(2)` suffix.
-  - Collision four times → `UploadCollisionExhausted`.
-  - Non-collision SDK error → propagates, no retry.
-
-- [ ] **Step 11.5** — All 5 tests green. Commit: `feat(drive): uploadFile accepts parentFolderUid + collision retry`.
-
-### Task 12: `routes-upload.ts`
+### Task 13: `routes-upload.ts`
 
 **Files:**
 - Create: `server/src/http/routes-upload.ts`
 - Modify: `server/src/http/server.ts`
 - Test: `server/src/http/routes-upload.test.ts`
 
-- [ ] **Step 12.1** — Write failing happy-path test (Drive client mocked; `audit_log` insert verified; no `history.recordSave` yet — slice 3 adds that):
+Same as the original plan. Multipart: `pdf`, `name`, `folderLinkId`, `ocrText`. Calls `drive/client.uploadFile` with `parentFolderUid`. Records audit log. Returns `{ driveNodeUid, driveWebUrl, finalName }` or 409/401/413.
 
-```ts
-// 6 tests total — start with happy path
-```
+- [ ] **Step 13.1** — TDD happy path → audit row → 200 with finalName.
+- [ ] **Step 13.2** — Implement.
+- [ ] **Step 13.3** — Tests for 401 refresh path, body limit, collision exhausted.
+- [ ] **Step 13.4** — Commit: `feat(server): POST /api/upload sends PDFs to Drive`.
 
-- [ ] **Step 12.2** — Implement:
+### Task 14: PWA `api.upload()`
 
-```ts
-// server/src/http/routes-upload.ts
-import { Hono } from 'hono';
-import { bodyLimit } from 'hono/body-limit';
-import { UploadCollisionExhausted } from '../drive/client.js';
-import { logger } from '../logger.js';
+- [ ] **Step 14.1** — TDD pre-flight (50 MB cap), multipart shape, response mapping.
+- [ ] **Step 14.2** — Implement: `upload(pdf, name, folderLinkId, ocrText)`.
+- [ ] **Step 14.3** — Commit: `feat(pwa): api.upload() to /api/upload`.
 
-interface DriveClient {
-  uploadFile(name: string, bytes: Uint8Array, mimeType: string, opts?: { parentFolderUid?: string }): Promise<{ nodeUid: string; driveUrl: string; finalName: string }>;
-  refresh(): Promise<void>;
-}
-interface FolderCache { getTree(): Promise<{ linkId: string; path: string }[]>; }
-interface AuditLog { record(event: string, payload: unknown): void; }
+### Task 15: PWA scans-store transitions for slice 2
 
-interface Deps { drive: DriveClient; folderCache: FolderCache; auditLog: AuditLog; }
+- [ ] **Step 15.1** — Add tests for `pending_upload` → `done` with `driveNodeUid`/`driveWebUrl` patch (already in Task 5; confirm pass).
+- [ ] **Step 15.2** — Add helper `setPdfBlob(scanId, blob)` for slice 2's PDF assembly.
+- [ ] **Step 15.3** — Commit: `test(pwa): cover slice-2 upload transitions and pdfBlob helper`.
 
-const NAME_REGEX = /^[a-zA-Z0-9 .,'_-]{1,80}$/;
-
-export function uploadRoutes(deps: Deps): Hono {
-  const app = new Hono();
-  app.post('/upload', bodyLimit({ maxSize: 50 * 1024 * 1024, onError: (c) => c.json({ error: 'payload_too_large' }, 413) }), async (c) => {
-    const form = await c.req.formData();
-    const pdf = form.get('pdf');
-    const name = form.get('name');
-    const folderLinkId = form.get('folderLinkId');
-    if (!(pdf instanceof Blob) || typeof name !== 'string' || typeof folderLinkId !== 'string') return c.json({ error: 'missing_fields' }, 400);
-    if (!NAME_REGEX.test(name)) return c.json({ error: 'invalid_name' }, 400);
-    const folders = await deps.folderCache.getTree();
-    if (!folders.some((f) => f.linkId === folderLinkId)) return c.json({ error: 'unknown_folder' }, 400);
-
-    const bytes = new Uint8Array(await pdf.arrayBuffer());
-    let result;
-    try {
-      result = await deps.drive.uploadFile(name, bytes, 'application/pdf', { parentFolderUid: folderLinkId });
-    } catch (err) {
-      if (err instanceof UploadCollisionExhausted) return c.json({ error: 'collision_exhausted', collision_exhausted: true }, 409);
-      if (isAuth401(err)) {
-        try { await deps.drive.refresh(); } catch {
-          return c.json({ error: 'reauth_required', reauth_required: true }, 401);
-        }
-        result = await deps.drive.uploadFile(name, bytes, 'application/pdf', { parentFolderUid: folderLinkId });
-      } else {
-        logger.error({ err }, 'upload failed');
-        return c.json({ error: 'upload_failed' }, 502);
-      }
-    }
-    const folderPath = folders.find((f) => f.linkId === folderLinkId)!.path;
-    deps.auditLog.record('drive_upload', { folderLinkId, folderPath, finalName: result.finalName, driveNodeUid: result.nodeUid });
-    return c.json({ driveNodeUid: result.nodeUid, driveWebUrl: result.driveUrl, finalName: result.finalName });
-  });
-  return app;
-}
-```
-
-- [ ] **Step 12.3** — Wire into `server.ts`. Run all 6 tests:
-  - Happy path → audit row → 200 response with finalName.
-  - Wrapper returns `(2)`-suffixed name → response surfaces it.
-  - 401 → refresh → retry → success.
-  - 401 → refresh fails → 401 with `reauth_required: true`.
-  - Body > 50 MB → 413.
-  - `UploadCollisionExhausted` → 409 with `collision_exhausted: true`.
-
-- [ ] **Step 12.4** — Commit: `feat(server): POST /api/upload sends PDFs to Drive`.
-
-### Task 13: PWA `api.ts::upload()`
+### Task 16: Wire ConfirmCard Save → PDF assembly → upload → done
 
 **Files:**
-- Modify: `pwa/src/api.ts`
-- Test: `pwa/src/api.test.ts` (additions)
+- Modify: `pwa/src/ui/App.tsx`
 
-- [ ] **Step 13.1** — TDD: pre-flight size check (50 MB), multipart shape, response mapping (3 tests).
-
-- [ ] **Step 13.2** — Implement `upload(pdf, name, folderLinkId, ocrText)`. (`ocrText` accepted now to keep signature stable for slice 3; ignored server-side until slice 3 wires history.)
-
-- [ ] **Step 13.3** — Commit: `feat(pwa): api.upload() to /api/upload`.
-
-### Task 14: PWA scans-store transitions for slice 2 (`pending_upload` → `done`)
-
-**Files:**
-- Modify: `pwa/src/scanner/scans-store.ts`
-- Test: `pwa/src/scanner/scans-store.test.ts`
-
-- [ ] **Step 14.1** — Add tests (already drafted in Task 5.7) that exercise the `pending_upload → done` transition with `driveNodeUid`/`driveWebUrl` patch.
-- [ ] **Step 14.2** — Verify they pass (transitions already coded in Task 5).
-- [ ] **Step 14.3** — Commit if any test additions: `test(pwa): cover slice-2 upload transitions`.
-
-### Task 15: Wire ConfirmCard Save → upload → done
-
-**Files:**
-- Modify: `pwa/src/ui/App.tsx` (the `onSave` handler from Task 8.3)
-
-- [ ] **Step 15.1** — Replace slice-1 stub:
-
-```ts
-async function onSave(name: string, folderLinkId: string) {
-  await scansStore.setUploadStatus(scanId, 'pending_upload', { finalName: name, finalFolderLinkId: folderLinkId });
-  const pdfBlob = await scansStore.getPdfBlob(scanId)   /* added in Task 5.8 */;   // adjust to actual API
-  const ocrText = await scansStore.getCombinedOcrText(scanId)   /* added in Task 5.8 */;
-  try {
-    const res = await api.upload(pdfBlob, name, folderLinkId, ocrText);
+- [ ] **Step 16.1** — When user taps Save in ConfirmCard:
+  ```ts
+  async function onSave(name, folderLinkId) {
+    await scansStore.setUploadStatus(scanId, 'pending_upload', { finalName: name, finalFolderLinkId: folderLinkId });
+    const pages = await scansStore.getPageBlobs(scanId);
+    const scan = await scansStore.get(scanId);
+    const pdf = await buildSearchablePdf(pages.map((blob, i) => ({
+      blob, ocrText: scan.pageOcr?.[i]?.text ?? '', ocrWords: scan.pageOcr?.[i]?.words ?? [],
+    })));
+    await scansStore.setPdfBlob(scanId, pdf);
+    const ocrText = (scan.pageOcr ?? []).map((p) => p.text).join('\n\n');
+    const res = await api.upload(pdf, name, folderLinkId, ocrText);
     await scansStore.setUploadStatus(scanId, 'done', { driveNodeUid: res.driveNodeUid, driveWebUrl: res.driveWebUrl, finalName: res.finalName });
     showToast(`Saved to Drive`, { actionLabel: 'Open', onAction: () => window.open(res.driveWebUrl, '_blank') });
-  } catch (err) {
-    // slice 4 will route this to needs_attention; for slice 2, surface and stay in pending_upload
-    showToast(`Upload failed: ${err}`);
-    throw err;
   }
-}
-```
+  ```
+- [ ] **Step 16.2** — Manual smoke: scan → confirm → real upload → verify in Drive.
+- [ ] **Step 16.3** — Commit: `feat(pwa): ConfirmCard Save assembles PDF and uploads to Drive`.
 
-- [ ] **Step 15.2** — Manual smoke: scan → confirm → real upload → check Drive web app for the PDF.
-- [ ] **Step 15.3** — Commit: `feat(pwa): ConfirmCard Save uploads to Drive`.
+### Task 17: Slice 2 acceptance + push
 
-### Task 16: Slice 2 acceptance + push
-
-- [ ] **Step 16.1** — Full test suite, typecheck, build.
-- [ ] **Step 16.2** — Push. CI green.
-- [ ] **Step 16.3** — Slice 2 done. **This is the demoable milestone** — first end-to-end save into Drive.
+- [ ] **Step 17.1** — Tests, typecheck, build, push. **Demoable milestone reached.**
 
 ---
 
 ## Slice 3 — FTS5 Few-Shot History
 
-End state: each upload records history; subsequent classify calls include up to 3 nearest examples in the prompt. 5 tasks.
-
-### Task 17: Migration `003_classification_history.sql`
+### Task 18: Migration + history module
 
 **Files:**
 - Create: `server/src/migrations/003_classification_history.sql`
-- Modify: `server/src/db.ts` (if migration runner is hard-coded)
-
-- [ ] **Step 17.1** — Create the migration file with exact SQL from spec section "Migration `003_classification_history.sql`".
-- [ ] **Step 17.2** — Run the server in dev once (`npm --workspace @doc-scanner/server run dev`); confirm migration applies cleanly to a fresh sqlite file (delete `data/app.db` first if needed locally).
-- [ ] **Step 17.3** — Commit: `feat(db): migration 003 adds classification_history table + FTS5 index`.
-
-### Task 18: `classify/history.ts`
-
-**Files:**
 - Create: `server/src/classify/history.ts`
 - Test: `server/src/classify/history.test.ts`
 
-- [ ] **Step 18.1** — TDD `recordSave` first: insert one row, assert it's in the table.
-- [ ] **Step 18.2** — TDD `findSimilar` happy path: insert 5 rows with different OCR, query with overlap → top 3 by rank.
-- [ ] **Step 18.3** — Implement `buildFtsQuery` (token extraction + OR-quoting) per spec.
-- [ ] **Step 18.4** — Add tests one at a time:
-  - Empty table → `[]`.
-  - All-stopword OCR → `[]`.
-  - OCR contains FTS5 reserved words (`AND`, `NEAR`) → quoting prevents syntax errors.
-  - After insert + delete, FTS index in sync (re-query returns expected count).
+- [ ] **Step 18.1** — Migration per spec (table + FTS5 + triggers).
+- [ ] **Step 18.2** — TDD `recordSave` then `findRecent(limit)` (most-recent-N strategy per spec). 5 tests.
+- [ ] **Step 18.3** — Commit: `feat(classify): history.ts records saves; findRecent for few-shot`.
 
-- [ ] **Step 18.5** — Use `STOP_WORDS` from a tiny constant set (the 30-50 most common English stopwords; do **not** import a library — overkill).
+### Task 19: Wire into routes
 
-- [ ] **Step 18.6** — All 5 tests green. Commit: `feat(classify): history.ts FTS5 retrieval for in-context examples`.
+- [ ] **Step 19.1** — Add `history.recordSave(...)` after successful upload in `routes-upload.ts`. Best-effort (logged on failure, doesn't fail upload).
+- [ ] **Step 19.2** — Pass `history.findRecent(3)` results into `routes-classify` → `classify(...)`.
+- [ ] **Step 19.3** — Verify `<examples>` block appears in `mockCreate.mock.calls[0][0]` when 3+ saves exist.
+- [ ] **Step 19.4** — Commit: `feat(server): wire FTS5 examples into classify + record on upload`.
 
-### Task 19: Wire history into `routes-upload`
-
-**Files:**
-- Modify: `server/src/http/routes-upload.ts`
-- Modify: `server/src/http/server.ts` (inject history dep)
-- Test: `server/src/http/routes-upload.test.ts` (one new test)
-
-- [ ] **Step 19.1** — Add `history: History` to `Deps`. After successful upload, call `history.recordSave({ ocrText, finalName: result.finalName, folderLinkId, folderPath, driveNodeUid: result.nodeUid })`. Wrap in try/catch — log on failure, do not fail the response.
-- [ ] **Step 19.2** — Add `ocrText` field to multipart parsing (already in Task 13's PWA api signature).
-- [ ] **Step 19.3** — Test: history `recordSave` throws → upload still returns 200 (history failure is best-effort).
-- [ ] **Step 19.4** — Commit: `feat(server): /api/upload records classification_history on success`.
-
-### Task 20: Wire history into `routes-classify`
-
-**Files:**
-- Modify: `server/src/http/routes-classify.ts`
-- Modify: `server/src/http/server.ts` (inject `history` into `classifyRoutes`)
-
-- [ ] **Step 20.1** — Pass `history.findSimilar(ocrText, 3)` results into `deps.classify(...)` as `examples`.
-- [ ] **Step 20.2** — `haiku.ts` already handles the empty case (slice 1 wired the prompt to omit `<examples>` when none). Verify by adding a test that confirms passing 3 examples produces an `<examples>` text block in the SDK call payload (use `mockCreate.mock.calls[0][0]` to inspect).
-- [ ] **Step 20.3** — Commit: `feat(server): /api/classify uses FTS5 examples for few-shot prompting`.
-
-### Task 21: Slice 3 acceptance + push
-
-- [ ] **Step 21.1** — Tests, typecheck, build.
-- [ ] **Step 21.2** — Manual smoke: do 4–5 saves, then scan something similar and observe (in server logs) the prompt includes prior examples.
-- [ ] **Step 21.3** — Push. CI green.
+### Task 20: Slice 3 acceptance + push
 
 ---
 
 ## Slice 4 — Outbox + Background Sync
 
-End state: airplane-mode scan → resume online → automatic suggest+upload. 6 tasks.
+### Task 21: Add `'needs_attention'` state
 
-### Task 22: Add `'needs_attention'` state
+- [ ] **Step 21.1** — Extend `UploadStatus` and `ALLOWED` map. Tests.
+- [ ] **Step 21.2** — Commit: `feat(pwa): scans-store needs_attention state`.
 
-**Files:**
-- Modify: `pwa/src/scanner/types.ts`
-- Modify: `pwa/src/scanner/scans-store.ts` (extend ALLOWED transitions)
-- Test: `pwa/src/scanner/scans-store.test.ts`
+### Task 22: `pwa/src/outbox-drain.ts`
 
-- [ ] **Step 22.1** — Extend `UploadStatus` union: `... | 'needs_attention'`. Update `ALLOWED`:
+- [ ] **Step 22.1** — TDD empty queue, 2 pending classify + 1 pending upload, classify fail → awaiting_confirm, upload fail 3× in 24h → needs_attention, upload succeeds 2nd attempt → done.
+- [ ] **Step 22.2** — Implement. Add `retryCount`/`retryFirstAt` fields to Scan.
+- [ ] **Step 22.3** — Commit: `feat(pwa): outbox-drain.ts background queue worker`.
 
-```ts
-pending_upload: ['done', 'needs_attention'],
-needs_attention: ['pending_upload'],   // user retry path
-```
+### Task 23: `pwa/public/sw.js` extensions + `sw-register.ts`
 
-- [ ] **Step 22.2** — Test: `pending_upload → needs_attention` (legal); `needs_attention → pending_upload` (legal); `needs_attention → done` (illegal, throws).
-- [ ] **Step 22.3** — Commit: `feat(pwa): scans-store needs_attention state`.
+- [ ] **Step 23.1** — Add `sync` + `message` listeners to sw.js. Bump CACHE_NAME.
+- [ ] **Step 23.2** — Create `sw-register.ts`; replace inline register call in `main.tsx`.
+- [ ] **Step 23.3** — Commit: `feat(pwa): SW + register handle outbox-drain sync + visibility`.
 
-### Task 23: `pwa/src/outbox-drain.ts`
+### Task 24: Outbox panel UI
 
-**Files:**
-- Create: `pwa/src/outbox-drain.ts`
-- Test: `pwa/src/outbox-drain.test.ts`
+- [ ] **Step 24.1** — Banner on `SavedScansScreen` showing pending + needs_attention counts; "Retry all" button.
+- [ ] **Step 24.2** — Tests + commit.
 
-- [ ] **Step 23.1** — Write failing test for empty queue → no-op:
-
-```ts
-it('drain() is a no-op when queue is empty', async () => {
-  const fakeFetch = vi.fn();
-  const fakeStore = { findPending: vi.fn().mockResolvedValue([]) /* etc */ };
-  const result = await drain({ fetch: fakeFetch, store: fakeStore as never });
-  expect(result.processed).toBe(0);
-  expect(fakeFetch).not.toHaveBeenCalled();
-});
-```
-
-- [ ] **Step 23.2** — Implement minimal `drain({ fetch, store })`:
-
-```ts
-// pwa/src/outbox-drain.ts
-import type { ScansStore } from './scanner/scans-store.js';
-
-export interface DrainResult { processed: number; errors: number; }
-interface Deps { fetch: typeof fetch; store: ScansStore; }
-
-export async function drain(deps: Deps): Promise<DrainResult> {
-  const pending = await deps.store.findPending();
-  let processed = 0, errors = 0;
-  for (const scan of pending) {
-    try {
-      if (scan.uploadStatus === 'pending_classify') await classifyOne(deps, scan);
-      else if (scan.uploadStatus === 'pending_upload') await uploadOne(deps, scan);
-      processed++;
-    } catch { errors++; }
-  }
-  return { processed, errors };
-}
-
-// classifyOne / uploadOne: build multipart, fetch, on success setUploadStatus(...) via store
-// On upload retry exhaustion (>3 attempts in 24h): setUploadStatus('needs_attention').
-```
-
-- [ ] **Step 23.3** — Add tests one at a time:
-  - 2 `pending_classify` + 1 `pending_upload` → all called in order (assert fetch URL list).
-  - Classify fails → state moves to `awaiting_confirm` (so user can fill manually) — not `needs_attention`.
-  - Upload fails 3× within 24 h (use a `retryCount` field stored on the scan) → `needs_attention`.
-  - Upload succeeds on 2nd attempt → `done`.
-
-- [ ] **Step 23.4** — Add `retryCount` and `retryFirstAt` fields to the `Scan` interface; reset on success.
-- [ ] **Step 23.5** — All 5 tests green. Commit: `feat(pwa): outbox-drain.ts background queue worker`.
-
-### Task 24: `pwa/public/sw.js` extensions
-
-**Files:**
-- Modify: `pwa/public/sw.js`
-
-- [ ] **Step 24.1** — Add `sync` event listener:
-
-```js
-self.addEventListener('sync', (event) => {
-  if (event.tag !== 'outbox-drain') return;
-  event.waitUntil((async () => {
-    const mod = await import('/outbox-drain.js');     // built artefact path; verify with vite build output
-    await mod.drain({ fetch, store: await openStore() });
-  })());
-});
-
-self.addEventListener('message', (event) => {
-  if (event.data?.type !== 'request-drain') return;
-  event.waitUntil((async () => {
-    const mod = await import('/outbox-drain.js');
-    await mod.drain({ fetch, store: await openStore() });
-  })());
-});
-```
-
-- [ ] **Step 24.2** — `openStore()` opens the IndexedDB the same way `scans-store` does (note: SW context, no DOM). Verify path consistency with build output.
-- [ ] **Step 24.3** — Increment `CACHE_NAME` so the new SW activates on update.
-- [ ] **Step 24.4** — Commit: `feat(pwa): SW handles outbox-drain sync + message events`.
-
-### Task 25: `pwa/src/sw-register.ts`
-
-**Files:**
-- Create: `pwa/src/sw-register.ts`
-- Modify: `pwa/src/main.tsx` (move register call)
-
-- [ ] **Step 25.1** — Create:
-
-```ts
-// pwa/src/sw-register.ts
-export function registerSW(): void {
-  if (!('serviceWorker' in navigator)) return;
-  navigator.serviceWorker.register('/sw.js')
-    .then(async (reg) => {
-      if ('sync' in reg) await (reg as ServiceWorkerRegistration & { sync: { register(t: string): Promise<void> } }).sync.register('outbox-drain').catch(() => {});
-      document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState !== 'visible') return;
-        navigator.serviceWorker.controller?.postMessage({ type: 'request-drain' });
-      });
-    })
-    .catch((e) => console.warn('SW register failed', e));
-}
-```
-
-- [ ] **Step 25.2** — Replace inline `navigator.serviceWorker.register('/sw.js')` in `main.tsx` with `registerSW()`.
-- [ ] **Step 25.3** — Commit: `feat(pwa): sw-register.ts handles sync + visibility-change drain`.
-
-### Task 26: Outbox panel UI on `SavedScansScreen`
-
-**Files:**
-- Modify: `pwa/src/ui/SavedScansScreen.tsx`
-
-- [ ] **Step 26.1** — Add a small banner at top of `SavedScansScreen` showing `pending_classify` + `pending_upload` count, plus a "Retry all" button.
-- [ ] **Step 26.2** — "Retry all": for each `needs_attention` scan, reset `retryCount=0` then setUploadStatus(scan.id, 'pending_upload'). Then post `{ type: 'request-drain' }` to SW.
-- [ ] **Step 26.3** — Add 2 tests for the panel: count display, retry-all click handler.
-- [ ] **Step 26.4** — Commit: `feat(pwa): outbox status banner + retry-all on SavedScansScreen`.
-
-### Task 27: Slice 4 acceptance + push
-
-- [ ] **Step 27.1** — Tests, typecheck, build.
-- [ ] **Step 27.2** — Push. CI green.
+### Task 25: Slice 4 acceptance + push
 
 ---
 
 ## Final: Smoke + Tag
 
-### Task 28: Combined manual smoke (Phase 4 deferred + Phase 5)
+### Task 26: Combined manual smoke
 
-**Files:** none (phone-side smoke).
+Boot stack via docker compose + ngrok. Run all 7 cases from spec section "Manual smoke". Append results to plan as a "Smoke Results" section.
 
-Boot stack via docker compose + ngrok.
+### Task 27: PR + merge + tag
 
-- [ ] **Step 28.1** — Phase 4 deferred cases:
-  1. Capture, OCR, PDF, search inside PDF.
-  2. Resume previous scan after tab kill.
-  3. Queue multi-page scan.
-  4. Blur rejection (intentional shake).
-  5. Airplane mode capture, restore online, observe.
-  6. Legacy iOS Safari fallback (if available).
-- [ ] **Step 28.2** — Phase 5 cases:
-  1. End-to-end: scan → classify → confirm → upload → verify in Drive.
-  2. Airplane scan → close PWA → reopen online → background drain auto-uploads.
-  3. Classify timeout (block Anthropic via local DNS or middleware) → manual fill → save → upload.
-  4. Classify suggests folder, user picks different one → upload to chosen folder.
-  5. Two captures back-to-back, both `pending_upload` → drain in order.
-  6. After 5+ saves, observe qualitatively that 6th classify reflects taxonomy (server logs include `<examples>` block).
-  7. Force `needs_attention` (e.g., `iptables` block port 443 mid-upload, or kill server) → "Retry all" recovers.
-
-- [ ] **Step 28.3** — Record results in this plan file (append a "Smoke Results" section with date + pass/fail per case).
-- [ ] **Step 28.4** — Commit: `chore(phase-5): record manual smoke results`.
-
-### Task 29: PR + merge + tag
-
-- [ ] **Step 29.1** — Open PR `gh pr create --base main`. Wait for CI green.
-- [ ] **Step 29.2** — Merge.
-- [ ] **Step 29.3** — Tag both phases together: `git tag phase-4-complete phase-5-complete && git push --tags`.
-- [ ] **Step 29.4** — Update memory: in `/Users/owine/.claude/projects/-Users-owine-Git-doc-scanner/memory/`, mark `project_phase4_resumption.md` as fully complete and add `project_phase5_complete.md` summarising the AI organize work + any non-obvious lessons (e.g., SDK collision shape findings).
-- [ ] **Step 29.5** — Phase 5 done.
+- [ ] **Step 27.1** — Open PR; merge.
+- [ ] **Step 27.2** — Tag `phase-5-complete`. Push tags.
+- [ ] **Step 27.3** — Update memory: mark Phase 4 OCR retired, Phase 5 complete with vision approach.
 
 ---
 
 ## Notes for Implementers
 
-- **Do not skip TDD steps.** Each test → fail → implement → pass cycle is what catches regressions cheaply. The plan deliberately walks through each in order.
-- **Commit at the end of each task,** not at the end of slices. Atomic-commit preference (memory: `feedback_atomic_commits.md`) is real; `git log` should read like a story.
-- **Renovate `rangeStrategy: pin`** is in effect. Don't introduce caret/tilde versions. Pin all new deps.
-- **Anthropic + sharp are new deps.** Verify the pinned exact versions land in lockfile after Task 1.
-- **Image normalization is server-side** (sharp). PWA still produces a 512px thumbnail best-effort, but the server is the source of truth.
-- **Trust boundary** (parent spec line 73): the phone owns raw page images and the Proton password; the server owns the long-lived Proton session and Anthropic key. Don't accidentally cross this line.
-- **Drive SDK collision behaviour** is not assumed — Task 10 verifies it empirically before Task 11 codes against a specific error shape.
-- **For "Refresh folders" call**: the route is **built in Slice 0** (`GET /api/drive/folders?refresh=1`). It does not exist before this plan starts — Phase 2 only built `POST /api/drive/test-upload`.
-- **PWA folder caching**: `api.getFolders()` is intentionally **uncached** on the PWA — the server holds the cache (`FolderCache` per live session). Don't memoize on the PWA; it would only mask staleness without adding value. The "Refresh" button just hits `?refresh=1`.
-- **Anthropic model id** is `claude-haiku-4-5`. Pin the exact id in code; do not parameterise via env (single-user app, deliberate model choice).
+- **No client OCR.** Anything in `pwa/src/ocr/` from Phase 4 is gone. If you find an OCR import path, that's a regression.
+- **Haiku word boxes are normalised 0-1**, not pixels. `pdf/build.ts` was updated in Task 12 to handle this; do not pass pixel coords.
+- **Anthropic SDK + sharp are pinned in lockfile.** Don't introduce ranges.
+- **Multi-page docs are normal.** Test with 1, 3, and 5 page documents to catch off-by-one.
+- **Trust boundary** (parent spec line 73): page images go to server (and Anthropic). The parent spec didn't anticipate this in v1, but it's the same boundary the existing thumbnail-to-Anthropic call would have crossed; we're sending more of it now.
+- **Renovate `rangeStrategy: pin`** is in effect across all package.json.
+- **iOS Safari testing is non-negotiable for any worker/SW change.** Automated tests run in happy-dom; they cannot catch the class of failures that retired Tesseract.js.
