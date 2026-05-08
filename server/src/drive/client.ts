@@ -17,6 +17,7 @@ import { CryptoCache } from './crypto-cache.js';
 import { EventIdStore } from './event-id-store.js';
 import { getOrCreateClientUid } from './client-uid.js';
 import { getOpenPGPModule } from './crypto-module.js';
+import { FolderCache } from './folder-cache.js';
 import { reportingDriveFailure } from '../observability/report.js';
 
 /** Proton's production Drive API host. The SDK config wants a host, not a URL. */
@@ -137,6 +138,15 @@ export class DriveClient {
         clientUid: getOrCreateClientUid(cfg.db),
       },
     });
+  }
+
+  /**
+   * Construct a per-session folder-tree cache. The cache holds a reference
+   * to this client's SDK and walks `iterateFolderChildren` recursively when
+   * `refresh()` is called. Per-session lifetime keeps account boundaries.
+   */
+  createFolderCache(): FolderCache {
+    return new FolderCache(this.sdk);
   }
 
   async listRoot(): Promise<ListRootResult> {
