@@ -4,13 +4,15 @@ export interface Quad { tl: Point; tr: Point; bl: Point; br: Point; }
 export type ScanStatus = 'in_progress' | 'completed';
 
 // Phase 5: orthogonal axis tracking the AI/upload journey for a scan.
-// Slice 4 will extend this with 'needs_attention'.
+// `needs_attention` (slice 4) is set when an upload fails repeatedly in
+// the background drain — surfaces a banner so the user can manually retry.
 export type UploadStatus =
   | 'idle'
   | 'pending_classify'
   | 'awaiting_confirm'
   | 'pending_upload'
-  | 'done';
+  | 'done'
+  | 'needs_attention';
 
 export interface UploadSuggestion {
   suggestedName: string;

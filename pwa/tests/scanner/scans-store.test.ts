@@ -109,6 +109,37 @@ describe('ScansStore', () => {
     await expect(store.setUploadStatus(id, 'done')).rejects.toThrow(/illegal uploadStatus transition/);
   });
 
+  // Slice 4: needs_attention transitions
+  it('pending_upload → needs_attention is legal (drain exhaustion path)', async () => {
+    const id = await store.createInProgress();
+    await store.setUploadStatus(id, 'pending_classify');
+    await store.setUploadStatus(id, 'awaiting_confirm');
+    await store.setUploadStatus(id, 'pending_upload');
+    await store.setUploadStatus(id, 'needs_attention', { uploadError: 'retry exhausted' });
+    const scan = await store.getScan(id);
+    expect(scan?.uploadStatus).toBe('needs_attention');
+    expect(scan?.uploadError).toBe('retry exhausted');
+  });
+
+  it('needs_attention → pending_upload is legal (user-initiated retry)', async () => {
+    const id = await store.createInProgress();
+    await store.setUploadStatus(id, 'pending_classify');
+    await store.setUploadStatus(id, 'awaiting_confirm');
+    await store.setUploadStatus(id, 'pending_upload');
+    await store.setUploadStatus(id, 'needs_attention');
+    await store.setUploadStatus(id, 'pending_upload');
+    expect((await store.getScan(id))?.uploadStatus).toBe('pending_upload');
+  });
+
+  it('needs_attention → done throws (must go through pending_upload retry)', async () => {
+    const id = await store.createInProgress();
+    await store.setUploadStatus(id, 'pending_classify');
+    await store.setUploadStatus(id, 'awaiting_confirm');
+    await store.setUploadStatus(id, 'pending_upload');
+    await store.setUploadStatus(id, 'needs_attention');
+    await expect(store.setUploadStatus(id, 'done')).rejects.toThrow(/illegal uploadStatus transition/);
+  });
+
   it('awaiting_confirm → pending_upload accepts finalName/finalFolderLinkId patch', async () => {
     const id = await store.createInProgress();
     await store.setUploadStatus(id, 'pending_classify');
