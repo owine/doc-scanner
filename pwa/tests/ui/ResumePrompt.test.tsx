@@ -10,6 +10,8 @@ const SCAN: Scan = {
   createdAt: Date.now() - 60_000,
   updatedAt: Date.now() - 60_000,
   thumbnailKey: null,
+  uploadStatus: 'idle',
+  uploadError: null,
 };
 
 beforeEach(() => cleanup());

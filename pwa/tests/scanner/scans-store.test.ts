@@ -89,6 +89,95 @@ describe('ScansStore', () => {
     expect(thumb).toBeInstanceOf(Blob);
   });
 
+  // ---------- Phase 5: uploadStatus axis ----------
+
+  it('new scans default to uploadStatus=idle, uploadError=null', async () => {
+    const id = await store.createInProgress();
+    const scan = await store.getScan(id);
+    expect(scan?.uploadStatus).toBe('idle');
+    expect(scan?.uploadError).toBeNull();
+  });
+
+  it('legal transition idle → pending_classify succeeds', async () => {
+    const id = await store.createInProgress();
+    await store.setUploadStatus(id, 'pending_classify');
+    expect((await store.getScan(id))?.uploadStatus).toBe('pending_classify');
+  });
+
+  it('illegal transition (idle → done) throws', async () => {
+    const id = await store.createInProgress();
+    await expect(store.setUploadStatus(id, 'done')).rejects.toThrow(/illegal uploadStatus transition/);
+  });
+
+  it('awaiting_confirm → pending_upload accepts finalName/finalFolderLinkId patch', async () => {
+    const id = await store.createInProgress();
+    await store.setUploadStatus(id, 'pending_classify');
+    await store.setUploadStatus(id, 'awaiting_confirm');
+    await store.setUploadStatus(id, 'pending_upload', {
+      finalName: 'Tax 2026',
+      finalFolderLinkId: 'f-tax',
+    });
+    const scan = await store.getScan(id);
+    expect(scan?.uploadStatus).toBe('pending_upload');
+    expect(scan?.finalName).toBe('Tax 2026');
+    expect(scan?.finalFolderLinkId).toBe('f-tax');
+  });
+
+  it('pending_upload → done writes driveNodeUid + driveWebUrl', async () => {
+    const id = await store.createInProgress();
+    await store.setUploadStatus(id, 'pending_classify');
+    await store.setUploadStatus(id, 'awaiting_confirm');
+    await store.setUploadStatus(id, 'pending_upload');
+    await store.setUploadStatus(id, 'done', {
+      driveNodeUid: 'node-abc',
+      driveWebUrl: 'https://drive.proton.me/x/abc',
+    });
+    const scan = await store.getScan(id);
+    expect(scan?.uploadStatus).toBe('done');
+    expect(scan?.driveNodeUid).toBe('node-abc');
+    expect(scan?.driveWebUrl).toBe('https://drive.proton.me/x/abc');
+  });
+
+  it('setSuggestionAndOcr atomically transitions to awaiting_confirm with both fields', async () => {
+    const id = await store.createInProgress();
+    await store.setUploadStatus(id, 'pending_classify');
+    await store.setSuggestionAndOcr(
+      id,
+      { suggestedName: 'Tax 2026', suggestedFolderLinkId: 'f-tax', confidence: 0.9, rationale: 'IRS' },
+      [{ text: 'page 1', words: [] }],
+    );
+    const scan = await store.getScan(id);
+    expect(scan?.uploadStatus).toBe('awaiting_confirm');
+    expect(scan?.suggestion?.suggestedName).toBe('Tax 2026');
+    expect(scan?.pageOcr?.length).toBe(1);
+  });
+
+  it('getPageBlobs returns page blobs in ordinal order', async () => {
+    const id = await store.createInProgress();
+    await store.appendPage(id, blobOf('p1'), Q);
+    await store.appendPage(id, blobOf('p2'), Q);
+    await store.appendPage(id, blobOf('p3'), Q);
+    const blobs = await store.getPageBlobs(id);
+    expect(blobs.length).toBe(3);
+    expect(await blobs[0]!.text()).toBe('p1');
+    expect(await blobs[2]!.text()).toBe('p3');
+  });
+
+  it('getCombinedOcrText concatenates non-empty page texts with double newlines', async () => {
+    const id = await store.createInProgress();
+    await store.setUploadStatus(id, 'pending_classify');
+    await store.setSuggestionAndOcr(
+      id,
+      undefined,
+      [
+        { text: 'page 1 text', words: [] },
+        { text: '', words: [] },
+        { text: 'page 3 text', words: [] },
+      ],
+    );
+    expect(await store.getCombinedOcrText(id)).toBe('page 1 text\n\npage 3 text');
+  });
+
   it('appendPage propagates QuotaExceededError from the underlying transaction', async () => {
     const id = await store.createInProgress();
     // Wrap db.transaction so its put rejects with a synthetic quota error.
