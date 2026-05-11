@@ -9,6 +9,12 @@ export interface SavedScansScreenProps {
   onBack: () => void;
   onNewScan: () => void;
   onView: (scanId: string) => void;
+  /**
+   * Slice 4: invoked when the user taps "Retry all". Caller is expected to
+   * trigger a drain (typically by posting {request-drain} to the SW or by
+   * calling outbox-drain.drain directly).
+   */
+  onRetryAll?: () => void | Promise<void>;
 }
 
 function formatBytes(bytes: number): string {
@@ -25,13 +31,31 @@ function formatTime(ms: number): string {
 }
 
 function renderRowStatus(s: Scan): JSX.Element {
-  // Phase 5 will populate uploadStatus to drive richer labels here. For now,
-  // a scan that has reached the saved screen is just "Saved."
-  if (s.pdfKey) return <span class="muted">PDF ready</span>;
-  return <span class="muted">Saved</span>;
+  switch (s.uploadStatus) {
+    case 'pending_classify':
+      return <span class="muted">Processing…</span>;
+    case 'awaiting_confirm':
+      return <span class="muted">Awaiting confirmation</span>;
+    case 'pending_upload':
+      return <span class="muted">Uploading…</span>;
+    case 'needs_attention':
+      return <span class="error-text">Needs attention{s.uploadError ? `: ${s.uploadError}` : ''}</span>;
+    case 'done':
+      return <span class="muted">Saved to Drive</span>;
+    case 'idle':
+    default:
+      return s.pdfKey ? <span class="muted">PDF ready</span> : <span class="muted">Saved</span>;
+  }
 }
 
 function rowAction(s: Scan, store: ScansStore): JSX.Element | null {
+  if (s.driveWebUrl) {
+    return (
+      <a class="btn" href={s.driveWebUrl} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>
+        Open
+      </a>
+    );
+  }
   if (s.pdfKey) {
     return (
       <button
@@ -45,9 +69,10 @@ function rowAction(s: Scan, store: ScansStore): JSX.Element | null {
   return null;
 }
 
-export function SavedScansScreen({ store, onBack, onNewScan, onView }: SavedScansScreenProps) {
+export function SavedScansScreen({ store, onBack, onNewScan, onView, onRetryAll }: SavedScansScreenProps) {
   const [scans, setScans] = useState<Scan[] | null>(null);
   const [thumbs, setThumbs] = useState<Record<string, string>>({});
+  const [retrying, setRetrying] = useState(false);
 
   async function reload() {
     const list = await store.listCompleted();
@@ -72,6 +97,35 @@ export function SavedScansScreen({ store, onBack, onNewScan, onView }: SavedScan
     await reload();
   }
 
+  async function handleRetryAll() {
+    setRetrying(true);
+    try {
+      // Move every needs_attention scan back to pending_upload (resetting
+      // retry counters). The drain triggered by onRetryAll will then
+      // process them.
+      const list = scans ?? [];
+      for (const s of list) {
+        if (s.uploadStatus !== 'needs_attention') continue;
+        try {
+          await store.setUploadStatus(s.id, 'pending_upload', { retryCount: 0, uploadError: null });
+        } catch (err) {
+          console.warn('retry-all: transition failed for', s.id, err);
+        }
+      }
+      await onRetryAll?.();
+      await reload();
+    } finally {
+      setRetrying(false);
+    }
+  }
+
+  const list = scans ?? [];
+  const pendingCount = list.filter((s) =>
+    s.uploadStatus === 'pending_classify' || s.uploadStatus === 'pending_upload',
+  ).length;
+  const needsAttentionCount = list.filter((s) => s.uploadStatus === 'needs_attention').length;
+  const showOutboxBanner = pendingCount > 0 || needsAttentionCount > 0;
+
   return (
     <main style={{ minHeight: '100dvh', background: 'var(--bg)' }}>
       <header style={{ display: 'flex', justifyContent: 'space-between', padding: 12, background: 'var(--bg-elev)', borderBottom: '1px solid var(--border)' }}>
@@ -79,6 +133,28 @@ export function SavedScansScreen({ store, onBack, onNewScan, onView }: SavedScan
         <strong>Saved Scans</strong>
         <span style={{ width: 60 }} />
       </header>
+      {showOutboxBanner && (
+        <div
+          aria-label="outbox status"
+          style={{
+            padding: 10, background: needsAttentionCount > 0 ? '#fff3cd' : '#e2e3e5',
+            color: needsAttentionCount > 0 ? '#856404' : '#383d41',
+            display: 'flex', alignItems: 'center', gap: 12,
+            borderBottom: '1px solid var(--border)', fontSize: 13,
+          }}
+        >
+          <span style={{ flex: 1 }}>
+            {pendingCount > 0 && <>{pendingCount} processing</>}
+            {pendingCount > 0 && needsAttentionCount > 0 && ' · '}
+            {needsAttentionCount > 0 && <>{needsAttentionCount} need attention</>}
+          </span>
+          {needsAttentionCount > 0 && (
+            <button class="btn" disabled={retrying} onClick={handleRetryAll}>
+              {retrying ? 'Retrying…' : 'Retry all'}
+            </button>
+          )}
+        </div>
+      )}
       <button class="btn" style={{ width: '100%', borderRadius: 0 }} onClick={onNewScan}>+ New Scan</button>
       {scans === null ? (
         <p style={{ padding: 16 }} class="muted">Loading…</p>
@@ -96,7 +172,7 @@ export function SavedScansScreen({ store, onBack, onNewScan, onView }: SavedScan
                   {thumbs[s.id] && <img src={thumbs[s.id]} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />}
                 </div>
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 600 }}>Scan · {s.pageCount} {s.pageCount === 1 ? 'page' : 'pages'}</div>
+                  <div style={{ fontWeight: 600 }}>{s.finalName ?? `Scan · ${s.pageCount} ${s.pageCount === 1 ? 'page' : 'pages'}`}</div>
                   <div class="muted" style={{ fontSize: 12 }}>{formatTime(s.updatedAt)} · {formatBytes(s.pageCount * ESTIMATED_PAGE_BYTES)}</div>
                   <div style={{ fontSize: 12 }}>{renderRowStatus(s)}</div>
                 </div>
