@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { api, ApiError, PreflightError, CLASSIFY_MAX_PAGE_BYTES } from '../src/api.js';
+import { api, ApiError, PreflightError, CLASSIFY_MAX_PAGE_BYTES, UPLOAD_MAX_PDF_BYTES } from '../src/api.js';
 
 beforeEach(() => {
   vi.restoreAllMocks();
@@ -112,6 +112,78 @@ describe('api.classify', () => {
     const fetchSpy = vi.fn();
     vi.stubGlobal('fetch', fetchSpy);
     await expect(api.classify([])).rejects.toBeInstanceOf(PreflightError);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('api.upload', () => {
+  function pdfBlob(bytes = 1000): Blob {
+    return new Blob([new Uint8Array(bytes)], { type: 'application/pdf' });
+  }
+
+  it('POSTs multipart with pdf + name + folderLinkId + ocrText on happy path', async () => {
+    const response = {
+      driveNodeUid: 'node-1',
+      driveWebUrl: 'https://drive.example/node-1',
+      finalName: 'Tax 2026',
+    };
+    const fetchSpy = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify(response),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    ));
+    vi.stubGlobal('fetch', fetchSpy);
+
+    const result = await api.upload(pdfBlob(), 'Tax 2026', 'f-tax', 'IRS form text');
+    expect(result).toEqual(response);
+
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    const [url, init] = fetchSpy.mock.calls[0]!;
+    expect(url).toBe('/api/upload');
+    expect(init.method).toBe('POST');
+    const fd = init.body as FormData;
+    expect(fd.get('pdf')).toBeTruthy();
+    expect(fd.get('name')).toBe('Tax 2026');
+    expect(fd.get('folderLinkId')).toBe('f-tax');
+    expect(fd.get('ocrText')).toBe('IRS form text');
+  });
+
+  it('surfaces collision-suffixed finalName from response', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ driveNodeUid: 'n2', driveWebUrl: 'u2', finalName: 'Tax 2026 (2)' }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    ));
+    vi.stubGlobal('fetch', fetchSpy);
+    const result = await api.upload(pdfBlob(), 'Tax 2026', 'f-tax', '');
+    expect(result.finalName).toBe('Tax 2026 (2)');
+  });
+
+  it('throws ApiError with code reauth_required on 401', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ error: 'reauth_required' }),
+      { status: 401, headers: { 'content-type': 'application/json' } },
+    ));
+    vi.stubGlobal('fetch', fetchSpy);
+    await expect(api.upload(pdfBlob(), 'X', 'f', '')).rejects.toMatchObject({
+      status: 401, code: 'reauth_required',
+    });
+  });
+
+  it('throws ApiError with code collision_exhausted on 409', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ error: 'collision_exhausted', collision_exhausted: true }),
+      { status: 409, headers: { 'content-type': 'application/json' } },
+    ));
+    vi.stubGlobal('fetch', fetchSpy);
+    await expect(api.upload(pdfBlob(), 'X', 'f', '')).rejects.toMatchObject({
+      status: 409, code: 'collision_exhausted',
+    });
+  });
+
+  it('throws PreflightError before fetch when pdf exceeds 50MB', async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal('fetch', fetchSpy);
+    const oversized = pdfBlob(UPLOAD_MAX_PDF_BYTES + 1);
+    await expect(api.upload(oversized, 'X', 'f', '')).rejects.toBeInstanceOf(PreflightError);
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 });
