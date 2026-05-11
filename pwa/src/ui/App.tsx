@@ -10,6 +10,7 @@ import { ConfirmCard } from './ConfirmCard.js';
 import { ScansStore } from '../scanner/scans-store.js';
 import type { Scan } from '../scanner/types.js';
 import { buildSearchablePdf } from '../pdf/build.js';
+import { drain } from '../outbox-drain.js';
 
 type Route =
   | { kind: 'status' }
@@ -215,6 +216,7 @@ export function App() {
         onBack={() => setRoute({ kind: 'status' })}
         onNewScan={() => setRoute({ kind: 'scanner' })}
         onView={(scanId) => setRoute({ kind: 'viewer', scanId })}
+        onRetryAll={async () => { await drain({ fetch, store }); refresh(); }}
       />{banner}</>;
     case 'viewer':
       return <><ScanViewerScreen
