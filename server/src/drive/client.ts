@@ -61,6 +61,11 @@ export interface UploadResult {
   name: string;
 }
 
+export interface UploadOptions {
+  /** Drive folder uid to upload into. Defaults to MyFilesRootFolder. */
+  parentFolderUid?: string;
+}
+
 const NOOP_LOGGER: Logger = {
   debug: () => {},
   info: () => {},
@@ -171,21 +176,26 @@ export class DriveClient {
     };
   }
 
-  async uploadFile(name: string, bytes: Uint8Array, mimeType: string): Promise<UploadResult> {
+  async uploadFile(
+    name: string,
+    bytes: Uint8Array,
+    mimeType: string,
+    opts: UploadOptions = {},
+  ): Promise<UploadResult> {
     // Failures are reported by stage (a failed upload is a lost document).
     // The name is passed as sensitive so it is redacted wherever the SDK
     // echoes it; the bytes are never handed to the reporter at all.
-    const { root, availableName } = await reportingDriveFailure('folder-lookup', async () => {
-      const root = await this.sdk.getMyFilesRootFolder();
+    const { parentUid, availableName } = await reportingDriveFailure('folder-lookup', async () => {
+      const parentUid = opts.parentFolderUid ?? (await this.sdk.getMyFilesRootFolder()).uid;
       // `getFileUploader` rejects outright when the name is taken, so resolve
       // a free name first ("scan.pdf" -> "scan (1).pdf") instead of surfacing
       // a collision as an upload failure.
-      const availableName = await this.sdk.getAvailableName(root.uid, name);
-      return { root, availableName };
+      const availableName = await this.sdk.getAvailableName(parentUid, name);
+      return { parentUid, availableName };
     }, [name]);
 
     const { nodeUid } = await reportingDriveFailure('upload', async () => {
-      const uploader = await this.sdk.getFileUploader(root.uid, availableName, {
+      const uploader = await this.sdk.getFileUploader(parentUid, availableName, {
         mediaType: mimeType,
         expectedSize: bytes.byteLength,
         // We hold the whole buffer, so let the SDK verify what it uploaded
