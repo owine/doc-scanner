@@ -1,9 +1,14 @@
 // doc-scanner Service Worker.
-// Caches the scanner chunk (split out by Vite as a dynamic-import chunk),
-// the jscanify wasm + opencv so subsequent opens work fully offline, and
-// the pdf-core chunk for searchable-PDF assembly.
+// - Caches the scanner chunk + opencv + pdf-core so re-opens work offline.
+// - Phase 5 slice 4: handles 'outbox-drain' sync events by posting a
+//   message to every open client. The drain logic itself runs on the page
+//   (TypeScript, in pwa/src/outbox-drain.ts) — this avoids duplicating the
+//   drain implementation in plain JS inside the SW. iOS Safari's
+//   visibilitychange handler in sw-register.ts is the practical fallback
+//   when Background Sync isn't supported or no clients are open at sync
+//   time.
 
-const CACHE_NAME = 'docscanner-scanner-v7';
+const CACHE_NAME = 'docscanner-scanner-v8';
 const RUNTIME_CACHE_PATTERNS = [
   /\/assets\/scanner-core-.*\.js$/,
   /\/assets\/pdf-core-.*\.js$/,
@@ -38,4 +43,22 @@ self.addEventListener('fetch', (event) => {
       return cached ?? Response.error();
     }
   })());
+});
+
+async function notifyClientsToDrain() {
+  const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+  for (const client of clients) client.postMessage({ type: 'outbox-drain' });
+}
+
+self.addEventListener('sync', (event) => {
+  if (event.tag !== 'outbox-drain') return;
+  event.waitUntil(notifyClientsToDrain());
+});
+
+// Manual trigger: pages can post {type:'request-drain'} to ask the SW to
+// fan out the drain message (also lets the visibility fallback piggyback
+// on the same plumbing).
+self.addEventListener('message', (event) => {
+  if (event.data?.type !== 'request-drain') return;
+  event.waitUntil(notifyClientsToDrain());
 });
