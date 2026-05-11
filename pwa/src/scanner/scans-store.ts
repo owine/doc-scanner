@@ -51,6 +51,8 @@ export interface UploadStatusPatch {
   finalFolderLinkId?: string;
   driveNodeUid?: string;
   driveWebUrl?: string;
+  retryCount?: number;
+  retryFirstAt?: number;
 }
 
 export class ScansStore {
@@ -266,6 +268,18 @@ export class ScansStore {
     if (suggestion !== undefined) patch.suggestion = suggestion;
     if (pageOcr !== undefined) patch.pageOcr = pageOcr;
     await this.setUploadStatus(scanId, 'awaiting_confirm', patch);
+  }
+
+  /**
+   * Slice 4: list scans the background drain should act on, in oldest-
+   * first order. Includes 'pending_classify' and 'pending_upload' but
+   * NOT 'needs_attention' — the latter requires user-initiated retry.
+   */
+  async findPending(): Promise<Scan[]> {
+    const all = await this.d.getAllFromIndex('scans', 'by_updatedAt');
+    return all.filter((s) =>
+      s.uploadStatus === 'pending_classify' || s.uploadStatus === 'pending_upload',
+    );
   }
 
   /** Concatenate per-page OCR text (used when uploading PDF in slice 2). */

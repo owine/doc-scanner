@@ -49,6 +49,13 @@ export interface Scan {
   finalFolderLinkId?: string;
   driveNodeUid?: string;
   driveWebUrl?: string;
+
+  // Slice 4 background-drain retry tracking. retryCount is incremented on
+  // each failed drain attempt; retryFirstAt records when the current
+  // failure window started (resets to undefined on success or when 24h
+  // elapses). After 3 failures within 24h, drain marks needs_attention.
+  retryCount?: number;
+  retryFirstAt?: number;
 }
 
 export interface Page {
