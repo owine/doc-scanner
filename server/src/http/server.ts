@@ -9,6 +9,7 @@ import { driveRoutes } from './routes-drive.js';
 import { classifyRoutes } from './routes-classify.js';
 import { classify } from '../classify/haiku.js';
 import { uploadRoutes } from './routes-upload.js';
+import { ClassificationHistory } from '../classify/history.js';
 
 export interface AppDeps {
   db: DB;
@@ -30,8 +31,9 @@ export function createApp(deps: AppDeps): Hono {
   app.get('/api/health', (c) => c.json({ ok: true }));
   app.route('/api/auth', authRoutes({ store, protonAuth, db: deps.db, encryptionKey: deps.encryptionKey, appVersion: deps.appVersion, secureCookie: deps.secureCookie }));
   app.route('/api/drive', driveRoutes({ db: deps.db, store }));
-  app.route('/api', classifyRoutes({ classify, store }));
-  app.route('/api', uploadRoutes({ db: deps.db, store }));
+  const history = new ClassificationHistory(deps.db);
+  app.route('/api', classifyRoutes({ classify, store, history }));
+  app.route('/api', uploadRoutes({ db: deps.db, store, history }));
 
   if (deps.pwaDistPath) {
     const root = deps.pwaDistPath;

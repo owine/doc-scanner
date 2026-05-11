@@ -6,9 +6,21 @@ import type { SessionStore } from '../auth/session-store.js';
 import { UploadCollisionExhausted } from '../drive/client.js';
 import { logger } from '../logger.js';
 
+interface History {
+  recordSave(rec: {
+    ocrText: string;
+    finalName: string;
+    folderLinkId: string;
+    folderPath: string;
+    driveNodeUid: string;
+  }): void;
+}
+
 interface Deps {
   db: DB;
   store: SessionStore;
+  /** Slice 3+ injects ClassificationHistory; absent in earlier slices. */
+  history?: History;
 }
 
 type Env = { Variables: { auth?: AuthContext } };
@@ -79,8 +91,17 @@ export function uploadRoutes(deps: Deps): Hono<Env> {
           }),
           c.req.header('Remote-User') ?? null,
         );
-        // history.recordSave wired in slice 3 — the ocrText field above
-        // is captured here so the API contract stays stable across slices.
+        // Slice 3: best-effort history record so future classify calls can
+        // include this save as an in-context example. recordSave is itself
+        // best-effort (logs on failure, doesn't throw) — the upload's user-
+        // visible success is not gated on history.
+        deps.history?.recordSave({
+          ocrText: ocrTextString,
+          finalName: result.finalName,
+          folderLinkId,
+          folderPath: folder.path,
+          driveNodeUid: result.nodeUid,
+        });
         logger.info(
           { email: auth.email, finalName: result.finalName, driveNodeUid: result.nodeUid },
           'drive upload succeeded',
