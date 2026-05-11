@@ -114,6 +114,9 @@ export class ScannerSession {
   async finish(): Promise<void> {
     this.stop();
     await this.store.finish(this.scanId);
+    // Phase 5: hand off to the upload pipeline. App.tsx watches for
+    // pending_classify rows and runs api.classify() in the background.
+    await this.store.setUploadStatus(this.scanId, 'pending_classify');
   }
 
   async discard(): Promise<void> {

@@ -16,7 +16,7 @@ export interface ScannerScreenProps {
   store: ScansStore;
   resumeScanId?: string;
   onBack: () => void;
-  onDone: () => void;
+  onDone: (scanId: string) => void;
 }
 
 interface PendingEdit {
@@ -115,8 +115,9 @@ export function ScannerScreen({ store, resumeScanId, onBack, onDone }: ScannerSc
     }
     const session = sessionRef.current;
     if (!session) return;
+    const scanId = session.scanId;
     await session.finish();
-    onDone();
+    onDone(scanId);
   }
 
   async function cancel() {
