@@ -23,7 +23,7 @@ describe('openDb', () => {
     cleanupFn = cleanup;
 
     const v = db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number };
-    expect(v.v).toBe(3);
+    expect(v.v).toBe(4);
   });
 
   it('migration 002 creates drive cache tables', () => {
@@ -37,7 +37,7 @@ describe('openDb', () => {
     expect(names).toContain('event_cursors');
 
     const v = db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number };
-    expect(v.v).toBe(3);
+    expect(v.v).toBe(4);
   });
 
   it('migration 003 keys event cursors by scope and adds app_settings', () => {
@@ -51,6 +51,22 @@ describe('openDb', () => {
     const columnNames = columns.map((c) => c.name);
     expect(columnNames).toContain('scope_id');
     expect(columnNames).not.toContain('id');
+  });
+
+  it('migration 004 adds classification history with an FTS5 index kept in sync', () => {
+    const { db, cleanup } = createTestDb();
+    cleanupFn = cleanup;
+
+    db.prepare(
+      'INSERT INTO classification_history (ocr_snippet, final_name, folder_link_id, folder_path, drive_node_uid) VALUES (?, ?, ?, ?, ?)',
+    ).run('Form W-2 wage and tax statement', 'W2 2026', 'f-tax', '/Tax', 'node-1');
+
+    // The insert trigger populates the external-content index; porter stemming
+    // lets "wages" match "wage".
+    const hits = db.prepare(
+      "SELECT rowid FROM classification_history_fts WHERE classification_history_fts MATCH 'wages'",
+    ).all() as { rowid: number }[];
+    expect(hits).toHaveLength(1);
   });
 
   it('does not re-apply migrations on re-open', () => {
@@ -67,7 +83,7 @@ describe('openDb', () => {
     const secondCount = (db2.prepare('SELECT COUNT(*) AS c FROM schema_version').get() as { c: number }).c;
     db2.close();
 
-    expect(secondCount).toBe(3);
+    expect(secondCount).toBe(4);
     expect(secondCount).toBe(firstCount);
     expect(secondApplied).toBe(firstApplied);
   });

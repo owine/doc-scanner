@@ -1,4 +1,4 @@
--- Schema version 3: Phase 5 classification history (FTS5 few-shot retrieval).
+-- Schema version 4: Phase 5 classification history (FTS5 few-shot retrieval).
 --
 -- `classification_history` records every confirmed Drive save so that future
 -- /api/classify calls can include a `<examples>` block of prior filings as
