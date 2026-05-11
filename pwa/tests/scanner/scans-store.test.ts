@@ -163,6 +163,43 @@ describe('ScansStore', () => {
     expect(await blobs[2]!.text()).toBe('p3');
   });
 
+  it('setPdfBlob writes the pdfs row + links it on the scan atomically', async () => {
+    const id = await store.createInProgress();
+    await store.appendPage(id, blobOf('p1'), Q);
+    await store.finish(id);
+
+    const pdfBytes = new Blob(['%PDF-1.4 fake'], { type: 'application/pdf' });
+    const pdfKey = await store.setPdfBlob(id, pdfBytes);
+    expect(pdfKey).toMatch(/^[a-z0-9-]{8,}$/);
+
+    const scan = await store.getScan(id);
+    expect(scan?.pdfKey).toBe(pdfKey);
+    const stored = await store.getPdf(pdfKey);
+    expect(stored).not.toBeNull();
+    expect(await stored!.text()).toBe('%PDF-1.4 fake');
+  });
+
+  it('setPdfBlob throws (and inserts no orphaned pdfs row) if scan does not exist', async () => {
+    const before = await (store as unknown as { d: { count(name: 'pdfs'): Promise<number> } }).d.count('pdfs');
+    await expect(store.setPdfBlob('does-not-exist', new Blob(['%PDF']))).rejects.toThrow(/scan not found/);
+    const after = await (store as unknown as { d: { count(name: 'pdfs'): Promise<number> } }).d.count('pdfs');
+    expect(after).toBe(before);
+  });
+
+  it('setPdfBlob replaces a prior pdfKey (drops the old pdfs row)', async () => {
+    const id = await store.createInProgress();
+    await store.appendPage(id, blobOf('p1'), Q);
+    await store.finish(id);
+
+    const firstKey = await store.setPdfBlob(id, new Blob(['v1'], { type: 'application/pdf' }));
+    const secondKey = await store.setPdfBlob(id, new Blob(['v2'], { type: 'application/pdf' }));
+    expect(secondKey).not.toBe(firstKey);
+
+    expect(await store.getPdf(firstKey)).toBeNull();
+    const v2 = await store.getPdf(secondKey);
+    expect(await v2!.text()).toBe('v2');
+  });
+
   it('getCombinedOcrText concatenates non-empty page texts with double newlines', async () => {
     const id = await store.createInProgress();
     await store.setUploadStatus(id, 'pending_classify');

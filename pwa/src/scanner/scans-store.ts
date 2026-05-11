@@ -173,6 +173,38 @@ export class ScansStore {
     return row?.blob ?? null;
   }
 
+  /**
+   * Persist an assembled searchable PDF and link it to its scan. PR-8 #2
+   * fix: a single IDB transaction over both stores ensures we don't leave
+   * an orphaned `pdfs` row if the scan lookup or update fails. The scan
+   * is loaded *inside* the same transaction so the orphan window is zero.
+   *
+   * Replaces any prior `pdfKey` the scan referenced (deleted in the same
+   * transaction). Returns the new pdfKey.
+   */
+  async setPdfBlob(scanId: string, blob: Blob): Promise<string> {
+    const tx = this.d.transaction(['scans', 'pdfs'], 'readwrite');
+    const scans = tx.objectStore('scans');
+    const pdfs = tx.objectStore('pdfs');
+
+    const scan = await scans.get(scanId);
+    if (!scan) {
+      // Transaction auto-aborts when we return without awaiting tx.done
+      // and the throw bubbles up — no orphaned pdfs row possible because
+      // we haven't called pdfs.put yet.
+      throw new Error(`scan not found: ${scanId}`);
+    }
+
+    if (scan.pdfKey) await pdfs.delete(scan.pdfKey);
+    const id = uuid();
+    await pdfs.put({ id, blob, bytes: blob.size });
+    scan.pdfKey = id;
+    scan.updatedAt = Date.now();
+    await scans.put(scan);
+    await tx.done;
+    return id;
+  }
+
   async listCompleted(): Promise<Scan[]> {
     const all = await this.d.getAllFromIndex('scans', 'by_updatedAt');
     return all.filter((s) => s.status === 'completed').reverse();
