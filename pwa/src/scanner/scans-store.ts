@@ -1,12 +1,12 @@
 import { openDB, type IDBPDatabase, type DBSchema } from 'idb';
 import { ulid } from 'ulid';
-import type { Page, PdfArtifact, Quad, Scan, Thumbnail } from './types.js';
+import type { Page, PageOcr, PdfArtifact, Quad, Scan, Thumbnail, UploadStatus, UploadSuggestion } from './types.js';
 
 interface DocScannerSchema extends DBSchema {
   scans: {
     key: string;
     value: Scan;
-    indexes: { by_status: string; by_updatedAt: number };
+    indexes: { by_status: string; by_updatedAt: number; by_uploadStatus: string };
   };
   pages: {
     key: [string, number];
@@ -24,10 +24,30 @@ interface DocScannerSchema extends DBSchema {
 }
 
 const DB_NAME = 'docscanner';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 function uuid(): string {
   return crypto.randomUUID?.() ?? Math.random().toString(36).slice(2) + Date.now().toString(36);
+}
+
+// Phase 5: legal `uploadStatus` transitions. Slice 4 will append
+// 'needs_attention' here. setUploadStatus throws on illegal transitions.
+const ALLOWED_TRANSITIONS: Record<UploadStatus, UploadStatus[]> = {
+  idle: ['pending_classify'],
+  pending_classify: ['awaiting_confirm'],
+  awaiting_confirm: ['pending_upload', 'idle'],
+  pending_upload: ['done'],
+  done: [],
+};
+
+export interface UploadStatusPatch {
+  uploadError?: string | null;
+  suggestion?: UploadSuggestion;
+  pageOcr?: PageOcr[];
+  finalName?: string;
+  finalFolderLinkId?: string;
+  driveNodeUid?: string;
+  driveWebUrl?: string;
 }
 
 export class ScansStore {
@@ -35,7 +55,7 @@ export class ScansStore {
 
   async open(): Promise<void> {
     this.db = await openDB<DocScannerSchema>(DB_NAME, DB_VERSION, {
-      upgrade(db, oldVersion) {
+      upgrade(db, oldVersion, _newVersion, tx) {
         if (oldVersion < 1) {
           const scans = db.createObjectStore('scans', { keyPath: 'id' });
           scans.createIndex('by_status', 'status');
@@ -48,6 +68,22 @@ export class ScansStore {
         }
         if (oldVersion < 2) {
           db.createObjectStore('pdfs', { keyPath: 'id' });
+        }
+        if (oldVersion < 3) {
+          // Add by_uploadStatus index + default uploadStatus on existing scans.
+          const scans = tx.objectStore('scans');
+          scans.createIndex('by_uploadStatus', 'uploadStatus');
+          // Migrate existing rows.
+          (async () => {
+            const all = await scans.getAll();
+            for (const s of all) {
+              if (s.uploadStatus === undefined) {
+                s.uploadStatus = 'idle';
+                s.uploadError = null;
+                await scans.put(s);
+              }
+            }
+          })();
         }
       },
     });
@@ -64,7 +100,10 @@ export class ScansStore {
 
     const now = Date.now();
     const id = ulid();
-    const scan: Scan = { id, status: 'in_progress', pageCount: 0, createdAt: now, updatedAt: now, thumbnailKey: null };
+    const scan: Scan = {
+      id, status: 'in_progress', pageCount: 0, createdAt: now, updatedAt: now,
+      thumbnailKey: null, uploadStatus: 'idle', uploadError: null,
+    };
     await this.d.put('scans', scan);
     return id;
   }
@@ -142,6 +181,63 @@ export class ScansStore {
   async getThumbnailBlob(thumbId: string): Promise<Blob | null> {
     const t = await this.d.get('thumbs', thumbId);
     return t?.blob ?? null;
+  }
+
+  async getScan(scanId: string): Promise<Scan | null> {
+    const s = await this.d.get('scans', scanId);
+    return s ?? null;
+  }
+
+  /**
+   * Phase 5: drive the upload-state machine for a scan. Validates that
+   * `next` is a legal transition from the scan's current `uploadStatus`
+   * and atomically merges the optional `patch` into the row. Throws on
+   * illegal transitions or missing scan. Single-row IDB transaction —
+   * concurrent calls on the same scanId are serialised by IDB itself.
+   */
+  async setUploadStatus(scanId: string, next: UploadStatus, patch: UploadStatusPatch = {}): Promise<void> {
+    const tx = this.d.transaction('scans', 'readwrite');
+    const scan = await tx.objectStore('scans').get(scanId);
+    if (!scan) throw new Error(`scan not found: ${scanId}`);
+    const legal = ALLOWED_TRANSITIONS[scan.uploadStatus] ?? [];
+    if (!legal.includes(next)) {
+      throw new Error(`illegal uploadStatus transition: ${scan.uploadStatus} → ${next}`);
+    }
+    Object.assign(scan, patch);
+    scan.uploadStatus = next;
+    scan.updatedAt = Date.now();
+    await tx.objectStore('scans').put(scan);
+    await tx.done;
+  }
+
+  /** Read all page blobs for a scan in ordinal order (slice 1: classify input). */
+  async getPageBlobs(scanId: string): Promise<Blob[]> {
+    const pages = await this.getPages(scanId);
+    return pages.map((p) => p.blob);
+  }
+
+  /**
+   * Atomic patch combining `setUploadStatus('awaiting_confirm', ...)` with
+   * the suggestion + pageOcr received from /api/classify. Use this rather
+   * than two sequential setUploadStatus calls so a failure mid-write
+   * doesn't leave a half-populated state.
+   */
+  async setSuggestionAndOcr(
+    scanId: string,
+    suggestion: UploadSuggestion | undefined,
+    pageOcr: PageOcr[] | undefined,
+  ): Promise<void> {
+    const patch: UploadStatusPatch = {};
+    if (suggestion !== undefined) patch.suggestion = suggestion;
+    if (pageOcr !== undefined) patch.pageOcr = pageOcr;
+    await this.setUploadStatus(scanId, 'awaiting_confirm', patch);
+  }
+
+  /** Concatenate per-page OCR text (used when uploading PDF in slice 2). */
+  async getCombinedOcrText(scanId: string): Promise<string> {
+    const scan = await this.getScan(scanId);
+    if (!scan?.pageOcr) return '';
+    return scan.pageOcr.map((p) => p.text).filter((t) => t.length > 0).join('\n\n');
   }
 }
 
