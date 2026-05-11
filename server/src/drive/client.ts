@@ -47,6 +47,68 @@ export interface ListRootResult {
 export interface UploadResult {
   nodeUid: string;
   driveUrl: string;
+  /** The actual filename used after collision-suffix retries, e.g. "Receipt (2)". */
+  finalName: string;
+}
+
+export interface UploadOptions {
+  /** Drive folder uid to upload into. Defaults to MyFilesRootFolder for back-compat. */
+  parentFolderUid?: string;
+}
+
+/**
+ * Thrown when 4 consecutive name collisions (base + 3 suffix attempts) all fail.
+ * Routes should map this to HTTP 409 + a structured error so the PWA can prompt
+ * the user to edit the filename and retry.
+ */
+export class UploadCollisionExhausted extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message);
+    if (options?.cause !== undefined) (this as unknown as { cause: unknown }).cause = options.cause;
+  }
+}
+
+// Heuristic for "is this error a name collision?". The Proton SDK's exact
+// shape for collision errors is unverified (planned: empirical test in
+// slice 2's manual smoke via the existing /api/drive/test-upload endpoint).
+// Until verified, we treat any error message that mentions "exists",
+// "conflict", "duplicate", or HTTP 409/422 as a collision. A non-collision
+// error (e.g. network / auth) propagates immediately on the first attempt.
+export function isCollisionError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const msg = err.message.toLowerCase();
+  return msg.includes('exists') || msg.includes('conflict') || msg.includes('duplicate')
+    || msg.includes('409') || msg.includes('422');
+}
+
+/**
+ * Generic collision-retry runner — exported for testability without going
+ * through the full DriveClient constructor (which requires real PGP keys).
+ *
+ * Calls `attempt(candidate)` for each of `[base, "base (2)", "base (3)",
+ * "base (4)"]`. Returns the first successful result alongside the
+ * `finalName` actually used. Throws `UploadCollisionExhausted` if all four
+ * candidates collide; non-collision errors propagate immediately.
+ */
+export async function uploadWithCollisionRetry<T>(
+  baseName: string,
+  attempt: (candidate: string) => Promise<T>,
+): Promise<{ result: T; finalName: string }> {
+  const candidates = [baseName, `${baseName} (2)`, `${baseName} (3)`, `${baseName} (4)`];
+  let lastErr: unknown;
+  for (const candidate of candidates) {
+    try {
+      const result = await attempt(candidate);
+      return { result, finalName: candidate };
+    } catch (err) {
+      if (!isCollisionError(err)) throw err;
+      lastErr = err;
+    }
+  }
+  throw new UploadCollisionExhausted(
+    `name "${baseName}" collided after ${candidates.length} attempts`,
+    { cause: lastErr },
+  );
 }
 
 const NOOP_LOGGER: Logger = {
@@ -140,11 +202,41 @@ export class DriveClient {
     };
   }
 
-  async uploadFile(name: string, bytes: Uint8Array, mimeType: string): Promise<UploadResult> {
-    const rootMaybe = await this.sdk.getMyFilesRootFolder();
-    const root = unwrapNode(rootMaybe);
+  /**
+   * Upload `bytes` as a new file in Drive.
+   *
+   * `opts.parentFolderUid` selects the destination folder; omit for the
+   * MyFilesRootFolder (back-compat for the Phase 2 test endpoint).
+   *
+   * On a name collision, retries with `name (2)`, `name (3)`, `name (4)`
+   * before throwing `UploadCollisionExhausted`. The returned `finalName`
+   * reflects whichever name actually succeeded — the route surfaces it so
+   * the PWA can persist what Drive actually has.
+   *
+   * Non-collision errors (network, auth, quota) propagate immediately.
+   */
+  async uploadFile(
+    name: string,
+    bytes: Uint8Array,
+    mimeType: string,
+    opts: UploadOptions = {},
+  ): Promise<UploadResult> {
+    const parentUid = opts.parentFolderUid
+      ?? unwrapNode(await this.sdk.getMyFilesRootFolder()).uid;
 
-    const uploader = await this.sdk.getFileUploader(root.uid, name, {
+    const { result } = await uploadWithCollisionRetry(name, (candidate) =>
+      this.uploadOnce(parentUid, candidate, bytes, mimeType),
+    );
+    return result;
+  }
+
+  private async uploadOnce(
+    parentUid: string,
+    name: string,
+    bytes: Uint8Array,
+    mimeType: string,
+  ): Promise<UploadResult> {
+    const uploader = await this.sdk.getFileUploader(parentUid, name, {
       mediaType: mimeType,
       expectedSize: bytes.byteLength,
       modificationTime: new Date(),
@@ -171,6 +263,6 @@ export class DriveClient {
       driveUrl = `https://drive.proton.me/${nodeUid}`;
     }
 
-    return { nodeUid, driveUrl };
+    return { nodeUid, driveUrl, finalName: name };
   }
 }
