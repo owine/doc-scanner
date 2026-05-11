@@ -9,6 +9,7 @@ import { ResumePrompt } from './ResumePrompt.js';
 import { ConfirmCard } from './ConfirmCard.js';
 import { ScansStore } from '../scanner/scans-store.js';
 import type { Scan } from '../scanner/types.js';
+import { buildSearchablePdf } from '../pdf/build.js';
 
 type Route =
   | { kind: 'status' }
@@ -30,6 +31,9 @@ export function App() {
   const [folders, setFolders] = useState<{ linkId: string; path: string }[]>([]);
   const [, setTick] = useState(0);
   const refresh = () => setTick((t) => t + 1);
+  // Slice 2: post-upload success banner. Cleared on dismiss or after the
+  // user navigates somewhere new.
+  const [savedNotice, setSavedNotice] = useState<{ name: string; url: string } | null>(null);
 
   useEffect(() => {
     api.status().then((s) => setEmail(s.email))
@@ -100,15 +104,52 @@ export function App() {
         suggestion={activeScan.suggestion ?? null}
         folders={folders}
         onSave={async (name, folderLinkId) => {
-          // Slice 1 stub: no real upload yet (slice 2 wires this).
-          // Reset to idle so the card dismisses and the scan stays saved.
-          await store.setUploadStatus(activeScan.id, 'pending_upload', { finalName: name, finalFolderLinkId: folderLinkId });
-          // Slice 2 will replace the next two lines with a real /api/upload call.
-          console.info('would upload to Drive', { scanId: activeScan.id, name, folderLinkId });
-          await store.setUploadStatus(activeScan.id, 'done');
-          setActiveScanId(null);
-          setActiveScan(null);
-          setRoute({ kind: 'saved' });
+          // Slice 2: assemble searchable PDF from page blobs + Haiku OCR,
+          // upload to Drive, and transition to 'done' with the resolved
+          // metadata. The PWA pre-flights size; server enforces 50 MB.
+          await store.setUploadStatus(activeScan.id, 'pending_upload', {
+            finalName: name, finalFolderLinkId: folderLinkId,
+          });
+          try {
+            const pages = await store.getPageBlobs(activeScan.id);
+            const ocr = activeScan.pageOcr ?? [];
+            const pdfBlob = await buildSearchablePdf(
+              pages.map((blob, i) => ({
+                blob,
+                ocrText: ocr[i]?.text ?? '',
+                ocrWords: ocr[i]?.words ?? [],
+              })),
+            );
+            await store.setPdfBlob(activeScan.id, pdfBlob);
+            const ocrText = ocr.map((p) => p.text).filter((t) => t.length > 0).join('\n\n');
+            const result = await api.upload(pdfBlob, name, folderLinkId, ocrText);
+            await store.setUploadStatus(activeScan.id, 'done', {
+              driveNodeUid: result.driveNodeUid,
+              driveWebUrl: result.driveWebUrl,
+              finalName: result.finalName,
+            });
+            setSavedNotice({ name: result.finalName, url: result.driveWebUrl });
+            setActiveScanId(null);
+            setActiveScan(null);
+            setRoute({ kind: 'saved' });
+          } catch (err) {
+            console.error('upload failed', err);
+            // Leave scan in pending_upload so a future drain (slice 4) can
+            // retry. Surface a minimal alert for now; slice 4 swaps in the
+            // outbox panel + retry-all UI.
+            if (err instanceof ApiError && err.code === 'reauth_required') {
+              window.alert('Session expired. Please log in again.');
+              setEmail(null);
+            } else if (err instanceof ApiError && err.code === 'collision_exhausted') {
+              window.alert('A file with that name (and 3 suffix variants) already exists in that folder. Please rename and retry.');
+              await store.setUploadStatus(activeScan.id, 'idle').catch(() => {});
+              setActiveScanId(null);
+              setActiveScan(null);
+            } else {
+              window.alert(`Upload failed: ${(err as Error).message ?? 'unknown'}`);
+            }
+            refresh();
+          }
         }}
         onDismiss={async () => {
           await store.setUploadStatus(activeScan.id, 'idle').catch(() => {});
@@ -133,16 +174,33 @@ export function App() {
     );
   }
 
+  // Slice 2: post-save success banner over the active route. Auto-clears
+  // on next route change or when the user taps Dismiss.
+  const banner = savedNotice && (
+    <div
+      role="status"
+      style={{
+        position: 'fixed', bottom: 16, left: 16, right: 16, zIndex: 100,
+        background: '#d4edda', color: '#155724', border: '1px solid #c3e6cb',
+        borderRadius: 6, padding: 12, display: 'flex', gap: 12, alignItems: 'center',
+      }}
+    >
+      <strong style={{ flex: 1 }}>Saved to Drive: {savedNotice.name}</strong>
+      <a href={savedNotice.url} target="_blank" rel="noopener noreferrer" class="btn">Open</a>
+      <button class="btn btn-secondary" onClick={() => setSavedNotice(null)}>Dismiss</button>
+    </div>
+  );
+
   switch (route.kind) {
     case 'status':
-      return <StatusScreen
+      return <><StatusScreen
         email={email}
         onLoggedOut={() => setEmail(null)}
         onNewScan={() => setRoute({ kind: 'scanner' })}
         onViewSavedScans={() => setRoute({ kind: 'saved' })}
-      />;
+      />{banner}</>;
     case 'scanner':
-      return <ScannerScreen
+      return <><ScannerScreen
         store={store}
         {...(route.resumeScanId !== undefined ? { resumeScanId: route.resumeScanId } : {})}
         onBack={() => setRoute({ kind: 'status' })}
@@ -150,19 +208,19 @@ export function App() {
           setActiveScanId(scanId);
           setRoute({ kind: 'saved' });
         }}
-      />;
+      />{banner}</>;
     case 'saved':
-      return <SavedScansScreen
+      return <><SavedScansScreen
         store={store}
         onBack={() => setRoute({ kind: 'status' })}
         onNewScan={() => setRoute({ kind: 'scanner' })}
         onView={(scanId) => setRoute({ kind: 'viewer', scanId })}
-      />;
+      />{banner}</>;
     case 'viewer':
-      return <ScanViewerScreen
+      return <><ScanViewerScreen
         store={store}
         scanId={route.scanId}
         onBack={() => setRoute({ kind: 'saved' })}
-      />;
+      />{banner}</>;
   }
 }
