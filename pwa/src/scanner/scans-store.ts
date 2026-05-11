@@ -30,13 +30,16 @@ function uuid(): string {
   return crypto.randomUUID?.() ?? Math.random().toString(36).slice(2) + Date.now().toString(36);
 }
 
-// Phase 5: legal `uploadStatus` transitions. Slice 4 will append
-// 'needs_attention' here. setUploadStatus throws on illegal transitions.
+// Phase 5: legal `uploadStatus` transitions. setUploadStatus throws on
+// illegal transitions. needs_attention is reachable from pending_upload
+// after the background drain exhausts its retries; user-initiated
+// "Retry all" moves it back to pending_upload for another drain.
 const ALLOWED_TRANSITIONS: Record<UploadStatus, UploadStatus[]> = {
   idle: ['pending_classify'],
   pending_classify: ['awaiting_confirm'],
   awaiting_confirm: ['pending_upload', 'idle'],
-  pending_upload: ['done'],
+  pending_upload: ['done', 'needs_attention'],
+  needs_attention: ['pending_upload'],
   done: [],
 };
 
