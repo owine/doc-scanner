@@ -12,6 +12,11 @@
       "description": "Never auto-update vendored Proton SRP code — manual re-vendor only",
       "matchFileNames": ["server/src/vendor/**"],
       "enabled": false
+    },
+    {
+      "description": "Isolate @protontech/drive-sdk in its own PR — 0.x minors are breaking-eligible and must be reviewed deliberately",
+      "matchPackageNames": ["@protontech/drive-sdk"],
+      "groupName": "@protontech/drive-sdk"
     }
   ]
 }
