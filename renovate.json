@@ -1,86 +1,17 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
-    "config:recommended",
-    ":dependencyDashboard",
-    ":semanticCommits",
-    ":pinDevDependencies",
-    "schedule:earlyMondays",
-    "group:monorepos",
-    "group:recommended"
+    "github>owine/renovate-config",
+    "github>owine/renovate-config:automerge",
+    "github>owine/renovate-config:node",
+    "github>owine/renovate-config:docker"
   ],
-  "rangeStrategy": "pin",
-  "lockFileMaintenance": { "enabled": true, "schedule": ["before 6am on monday"] },
   "pre-commit": { "enabled": true },
   "packageRules": [
     {
-      "description": "Auto-merge devDependency patch + minor updates after CI passes",
-      "matchDepTypes": ["devDependencies"],
-      "matchUpdateTypes": ["patch", "minor"],
-      "automerge": true
-    },
-    {
-      "description": "Auto-merge type definition updates",
-      "automerge": true,
-      "matchPackageNames": [
-        "/^@types//"
-      ]
-    },
-    {
-      "description": "Group all Hono updates together",
-      "groupName": "hono",
-      "matchPackageNames": [
-        "/^hono$/",
-        "/^@hono//"
-      ]
-    },
-    {
-      "description": "Group all Vitest updates",
-      "groupName": "vitest",
-      "matchPackageNames": [
-        "/^vitest$/",
-        "/^@vitest//"
-      ]
-    },
-    {
-      "description": "Group all Preact + Vite tooling",
-      "groupName": "preact-vite",
-      "matchPackageNames": [
-        "/^preact$/",
-        "/^@preact//",
-        "/^vite$/"
-      ]
-    },
-    {
-      "description": "Hold major upgrades for manual review",
-      "matchUpdateTypes": ["major"],
-      "automerge": false,
-      "labels": ["dependencies", "major-upgrade"]
-    },
-    {
-      "description": "Pin Docker base images and GitHub Actions to digest",
-      "matchManagers": ["dockerfile", "github-actions"],
-      "pinDigests": true
-    },
-    {
-      "description": "Auto-merge GitHub Actions patch + minor updates",
-      "matchManagers": ["github-actions"],
-      "matchUpdateTypes": ["patch", "minor", "digest"],
-      "automerge": true
-    },
-    {
-      "description": "Auto-merge pre-commit hook patch + minor updates (e.g., ggshield)",
-      "matchManagers": ["pre-commit"],
-      "matchUpdateTypes": ["patch", "minor", "digest"],
-      "automerge": true
-    },
-    {
-      "description": "Never auto-update vendored Proton SRP code (manual re-vendor only)",
+      "description": "Never auto-update vendored Proton SRP code — manual re-vendor only",
       "matchFileNames": ["server/src/vendor/**"],
       "enabled": false
     }
-  ],
-  "vulnerabilityAlerts": { "labels": ["security"], "automerge": false },
-  "prConcurrentLimit": 5,
-  "prHourlyLimit": 2
+  ]
 }
