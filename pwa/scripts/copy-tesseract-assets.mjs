@@ -3,7 +3,7 @@
 // of tesseract.js's default CDN (cdn.jsdelivr.net). The CDN path fails on
 // iOS Safari behind our Service Worker (and on offline first-loads), so
 // we vendor at build time. Files are gitignored — source of truth is the
-// pinned versions in package-lock.json.
+// pinned versions in pnpm-lock.yaml.
 //
 // Run automatically via `predev` and `prebuild` hooks in pwa/package.json.
 
@@ -13,10 +13,12 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const pwaRoot = resolve(__dirname, '..');
-const repoRoot = resolve(pwaRoot, '..');
 const targetDir = resolve(pwaRoot, 'public/ocr');
 
-// node_modules is hoisted to the repo root in this workspace.
+// Under pnpm workspaces (node-linker: isolated, the default), each
+// workspace has its own node_modules with only its declared deps.
+// tesseract.js + tesseract.js-core are listed in pwa/package.json, so
+// they live at pwa/node_modules/<pkg>/... — not the repo root.
 const FILES = [
   ['node_modules/tesseract.js/dist/worker.min.js', 'worker.min.js'],
   ['node_modules/tesseract.js-core/tesseract-core-lstm.wasm', 'tesseract-core-lstm.wasm'],
@@ -27,6 +29,6 @@ const FILES = [
 
 await mkdir(targetDir, { recursive: true });
 for (const [src, dst] of FILES) {
-  await copyFile(resolve(repoRoot, src), resolve(targetDir, dst));
+  await copyFile(resolve(pwaRoot, src), resolve(targetDir, dst));
   process.stdout.write(`  copied ${dst}\n`);
 }
