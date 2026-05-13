@@ -1,3 +1,7 @@
 packages:
   - server
   - pwa
+
+allowBuilds:
+  esbuild: true
+  tesseract.js: true
