@@ -14,9 +14,11 @@
       "enabled": false
     },
     {
-      "description": "Isolate @protontech/drive-sdk in its own PR — 0.x minors are breaking-eligible and must be reviewed deliberately",
-      "matchPackageNames": ["@protontech/drive-sdk"],
-      "groupName": "@protontech/drive-sdk"
+      "description": "Gate @protontech/drive-sdk bumps behind manual dashboard approval — 0.15.x is blocked upstream by @protontech/crypto shipping bare .ts source (TS5097). See closed PRs #9 and #34. Isolate in its own PR, never automerge.",
+      "matchPackageNames": ["@protontech/drive-sdk", "@protontech/crypto"],
+      "groupName": "@protontech/drive-sdk",
+      "dependencyDashboardApproval": true,
+      "automerge": false
     }
   ]
 }
