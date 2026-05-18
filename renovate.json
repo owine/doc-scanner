@@ -6,7 +6,6 @@
     "github>owine/renovate-config:node",
     "github>owine/renovate-config:docker"
   ],
-  "pre-commit": { "enabled": true },
   "packageRules": [
     {
       "description": "Never auto-update vendored Proton SRP code — manual re-vendor only",
