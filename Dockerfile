@@ -33,7 +33,9 @@ LABEL org.opencontainers.image.title="doc-scanner" \
       org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image.vendor="owine"
 
-RUN apk add --no-cache tini
+# Alpine apk packages pinned to Alpine 3.23 versions; Renovate tracks them via Repology
+RUN apk add --no-cache \
+  tini=0.19.0-r3
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=build /app/server/dist ./server/dist
 COPY --from=build /app/server/src/migrations ./server/dist/migrations
