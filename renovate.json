@@ -4,7 +4,20 @@
     "github>owine/renovate-config",
     "github>owine/renovate-config:automerge",
     "github>owine/renovate-config:node",
-    "github>owine/renovate-config:docker"
+    "github>owine/renovate-config:docker",
+    "github>owine/renovate-config:alpine"
+  ],
+  "customManagers": [
+    {
+      "description": "Track pinned Alpine apk packages via Repology. IMPORTANT: bump alpine version in depNameTemplate when the base image changes (e.g. alpine_3_23 -> alpine_3_24)",
+      "customType": "regex",
+      "managerFilePatterns": ["/Dockerfile$/"],
+      "matchStringsStrategy": "any",
+      "matchStrings": ["\\s\\s(?<package>[a-z0-9][a-z0-9-_]+)=(?<currentValue>[a-z0-9-_.]+)\\s+"],
+      "versioningTemplate": "loose",
+      "datasourceTemplate": "repology",
+      "depNameTemplate": "alpine_3_23/{{package}}"
+    }
   ],
   "packageRules": [
     {
