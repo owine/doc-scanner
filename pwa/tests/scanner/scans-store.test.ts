@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { ScansStore } from '../../src/scanner/scans-store.js';
 import type { Quad } from '../../src/scanner/types.js';
 
@@ -87,6 +87,36 @@ describe('ScansStore', () => {
     const list = await store.listCompleted();
     const thumb = await store.getThumbnailBlob(list[0]!.thumbnailKey!);
     expect(thumb).toBeInstanceOf(Blob);
+  });
+
+  it('finish() falls back to the source blob when createImageBitmap throws', async () => {
+    // Reproduces happy-dom >=20.10.2: OffscreenCanvas becomes defined (so the
+    // makeThumbnail guard no longer short-circuits) but createImageBitmap
+    // rejects the Blob it receives and throws. Thumbnail generation is optional,
+    // so finish() must still succeed and store the source blob as the thumbnail.
+    const g = globalThis as any;
+    const savedOC = g.OffscreenCanvas;
+    const savedCIB = g.createImageBitmap;
+    g.OffscreenCanvas = class {};
+    g.createImageBitmap = () => {
+      throw new TypeError("Failed to execute 'createImageBitmap'");
+    };
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const id = await store.createInProgress();
+      await store.appendPage(id, blobOf('p1'), Q);
+      await store.finish(id);
+
+      const list = await store.listCompleted();
+      expect(list[0]!.thumbnailKey).not.toBeNull();
+      const thumb = await store.getThumbnailBlob(list[0]!.thumbnailKey!);
+      expect(await thumb!.text()).toBe('p1');
+      expect(warn).toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+      g.OffscreenCanvas = savedOC;
+      g.createImageBitmap = savedCIB;
+    }
   });
 
   it('appendPage propagates QuotaExceededError from the underlying transaction', async () => {
