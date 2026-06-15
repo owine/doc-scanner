@@ -193,18 +193,27 @@ export class ScansStore {
 
 /**
  * Decode a JPEG Blob, downscale to ≤256px max edge, return new JPEG Blob.
- * In test environments where OffscreenCanvas is unavailable, return source as-is.
+ * Thumbnail generation is best-effort: when the canvas/image-decode APIs are
+ * unavailable or fail (e.g. test environments, or an undecodable image), the
+ * source blob is returned unchanged so callers never fail over a thumbnail.
  */
 async function makeThumbnail(source: Blob): Promise<Blob> {
-  if (typeof OffscreenCanvas === 'undefined') return source;
+  if (typeof OffscreenCanvas === 'undefined' || typeof createImageBitmap === 'undefined') {
+    return source;
+  }
 
-  const bitmap = await createImageBitmap(source);
-  const max = 256;
-  const scale = Math.min(1, max / Math.max(bitmap.width, bitmap.height));
-  const w = Math.round(bitmap.width * scale);
-  const h = Math.round(bitmap.height * scale);
-  const canvas = new OffscreenCanvas(w, h);
-  const ctx = canvas.getContext('2d')!;
-  ctx.drawImage(bitmap, 0, 0, w, h);
-  return await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.8 });
+  try {
+    const bitmap = await createImageBitmap(source);
+    const max = 256;
+    const scale = Math.min(1, max / Math.max(bitmap.width, bitmap.height));
+    const w = Math.round(bitmap.width * scale);
+    const h = Math.round(bitmap.height * scale);
+    const canvas = new OffscreenCanvas(w, h);
+    const ctx = canvas.getContext('2d')!;
+    ctx.drawImage(bitmap, 0, 0, w, h);
+    return await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.8 });
+  } catch (err) {
+    console.warn('makeThumbnail: falling back to source blob', err);
+    return source;
+  }
 }
