@@ -1,6 +1,6 @@
-# syntax=docker/dockerfile:1.24.0@sha256:87999aa3d42bdc6bea60565083ee17e86d1f3339802f543c0d03998580f9cb89
+# syntax=docker/dockerfile:1.25.0@sha256:0adf442eae370b6087e08edc7c50b552d80ddf261576f4ebd6421006b2461f12
 
-FROM node:24.16.0-alpine@sha256:fb71d01345f11b708a3553c66e7c74074f2d506400ea81973343d915cb64eef0 AS deps
+FROM node:24.17.0-alpine@sha256:156b55f92e98ccd5ef49578a8cea0df4679826564bad1c9d4ef04462b9f0ded6 AS deps
 WORKDIR /app
 # Corepack ships with Node and pins pnpm to the version recorded in
 # package.json's `packageManager` field. No network install of pnpm needed.
@@ -22,7 +22,7 @@ RUN cd server && pnpm exec tsc -p src/vendor/tsconfig.json --noEmit false --outD
  && echo '{"type":"commonjs"}' > dist/vendor/package.json
 RUN pnpm --filter @doc-scanner/pwa run build
 
-FROM node:24.16.0-alpine@sha256:fb71d01345f11b708a3553c66e7c74074f2d506400ea81973343d915cb64eef0 AS runtime
+FROM node:24.17.0-alpine@sha256:156b55f92e98ccd5ef49578a8cea0df4679826564bad1c9d4ef04462b9f0ded6 AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 
