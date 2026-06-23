@@ -26,7 +26,7 @@
       "enabled": false
     },
     {
-      "description": "Gate @protontech/drive-sdk bumps behind manual dashboard approval — 0.15.x is blocked upstream by @protontech/crypto shipping bare .ts source (TS5097). See closed PRs #9 and #34. Isolate in its own PR, never automerge.",
+      "description": "Gate @protontech/drive-sdk bumps behind manual dashboard approval — 0.15.x+ is blocked upstream by the @protontech/crypto ^2.0.0 peer dep shipping bare .ts source (TS5097). See closed PRs #9 (0.15.0) and #34 (0.15.1). Re-checked 0.17.3 on 2026-06-23: still blocked — peer dep unchanged, dist still does require('@protontech/crypto/subtle/hmac.ts'), and @protontech/crypto@2.0.1 still publishes raw .ts via its exports map (no main/types/dist). Unblocks only when @protontech/crypto ships compiled JS + .d.ts. Isolate in its own PR, never automerge.",
       "matchPackageNames": ["@protontech/drive-sdk", "@protontech/crypto"],
       "groupName": "@protontech/drive-sdk",
       "dependencyDashboardApproval": true,
