@@ -33,10 +33,10 @@ LABEL org.opencontainers.image.title="doc-scanner" \
       org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image.vendor="owine"
 
-# tini pinned to its Alpine 3.23 repo version for deterministic builds; Renovate
-# tracks it via the Repology customManager (alpine_3_23/tini in renovate.json).
-# NOTE: the node base tag now floats its Alpine version (node:24.16.0-alpine), so
-# when node's default Alpine moves to 3.24 both this pin and the alpine_3_23
+# tini pinned to its Alpine 3.24 repo version for deterministic builds; Renovate
+# tracks it via the Repology customManager (alpine_3_24/tini in renovate.json).
+# NOTE: the node base tag floats its Alpine version (node:24.18.0-alpine), so
+# when node's default Alpine moves to 3.25 both this pin and the alpine_3_24
 # depNameTemplate must be hand-updated — the build fails loudly until then.
 RUN apk add --no-cache \
   tini=0.19.0-r3
