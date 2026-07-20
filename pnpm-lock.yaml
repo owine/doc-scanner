@@ -60,8 +60,8 @@ importers:
   server:
     dependencies:
       '@hono/node-server':
-        specifier: 2.0.8
-        version: 2.0.8(hono@4.12.29)
+        specifier: 2.0.10
+        version: 2.0.10(hono@4.12.30)
       '@protontech/drive-sdk':
         specifier: 0.14.10
         version: 0.14.10
@@ -69,8 +69,8 @@ importers:
         specifier: 3.0.3
         version: 3.0.3
       hono:
-        specifier: 4.12.29
-        version: 4.12.29
+        specifier: 4.12.30
+        version: 4.12.30
       openpgp:
         specifier: 6.3.1
         version: 6.3.1
@@ -367,8 +367,8 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@hono/node-server@2.0.8':
-    resolution: {integrity: sha512-GuCWzLxwg218fy1JaHculFsdcuY12hxit83V+algozTPnwhNjLrRL/Alg9OYjLZLoUZ1rw/S4CdTMsnkSKCmFA==}
+  '@hono/node-server@2.0.10':
+    resolution: {integrity: sha512-ZcnNVhKTmyDJeg0UlnZjvM73JBsTAuhrH/J4fjwGOw59PwOW51r4J+p6CsKZWXdKSme4MFqU62CZMOsdDrU4CA==}
     engines: {node: '>=20'}
     peerDependencies:
       hono: ^4
@@ -935,8 +935,8 @@ packages:
   help-me@5.0.0:
     resolution: {integrity: sha512-7xgomUX6ADmcYzFik0HzAxh/73YlKR9bmFzf51CZwR+b6YtzU2m0u49hQCqV6SvlqIqsaxovfwdvbnsw3b/zpg==}
 
-  hono@4.12.29:
-    resolution: {integrity: sha512-1hNiRjawYrLq/4m3DQQjPGFg0VZkk4RjQJDff/excI6Dm9BiL75qxGrd7/c6YOxPdq6AscP3LiXhQ6fKFC1Waw==}
+  hono@4.12.30:
+    resolution: {integrity: sha512-emn+JoJjrN9YTpRDS5it/UI2SO9BAE37T6I3d963RxcZ81G9A4pr2SZTEiiaiKbzx+NKRg5BZ89fCL7gCJCUog==}
     engines: {node: '>=16.9.0'}
 
   html-entities@2.6.0:
@@ -1830,9 +1830,9 @@ snapshots:
   '@esbuild/win32-x64@0.28.1':
     optional: true
 
-  '@hono/node-server@2.0.8(hono@4.12.29)':
+  '@hono/node-server@2.0.10(hono@4.12.30)':
     dependencies:
-      hono: 4.12.29
+      hono: 4.12.30
 
   '@jridgewell/gen-mapping@0.3.13':
     dependencies:
@@ -2410,7 +2410,7 @@ snapshots:
 
   help-me@5.0.0: {}
 
-  hono@4.12.29: {}
+  hono@4.12.30: {}
 
   html-entities@2.6.0: {}
 
