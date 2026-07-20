@@ -17,8 +17,12 @@ COPY tsconfig.base.json ./
 COPY server ./server
 COPY pwa ./pwa
 RUN pnpm --filter @doc-scanner/server run build
-# Compile vendored code to dist/vendor (vendor tsconfig has noEmit: true; override here)
-RUN cd server && pnpm exec tsc -p src/vendor/tsconfig.json --noEmit false --outDir dist/vendor --rootDir src/vendor --module commonjs --moduleResolution node10 --ignoreDeprecations 6.0 \
+# Compile vendored code to dist/vendor (vendor tsconfig has noEmit: true; override here).
+# --module commonjs is required because server/package.json is "type":"module".
+# moduleResolution is left as the base config's "bundler": TypeScript 7 removed the
+# legacy "node10" mode (TS5108) and now permits bundler resolution alongside
+# --module commonjs, so no override (and no --ignoreDeprecations) is needed.
+RUN cd server && pnpm exec tsc -p src/vendor/tsconfig.json --noEmit false --outDir dist/vendor --rootDir src/vendor --module commonjs \
  && echo '{"type":"commonjs"}' > dist/vendor/package.json
 RUN pnpm --filter @doc-scanner/pwa run build
 
