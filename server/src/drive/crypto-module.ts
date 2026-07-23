@@ -184,8 +184,8 @@ const proxyImpl = {
     const sk = await (
       openpgp.generateSessionKey as unknown as (o: unknown) => Promise<{
         data: Uint8Array;
-        algorithm?: string | null;
-        aeadAlgorithm?: string | null;
+        algorithm: string;
+        aeadAlgorithm?: string;
       }>
     )({
       encryptionKeys: options.recipientKeys,
@@ -193,8 +193,11 @@ const proxyImpl = {
     });
     return {
       data: asArrayBufferBacked(sk.data),
-      algorithm: sk.algorithm ?? null,
-      aeadAlgorithm: sk.aeadAlgorithm ?? null,
+      // openpgp uses the same standard cipher names as the SDK's SessionKey
+      // enums (e.g. 'aes256'); cast at the boundary. Absent AEAD is `undefined`
+      // in 0.19.x's SessionKey, not `null`.
+      algorithm: sk.algorithm as SessionKey['algorithm'],
+      aeadAlgorithm: sk.aeadAlgorithm as SessionKey['aeadAlgorithm'],
     };
   },
 
@@ -222,9 +225,13 @@ const proxyImpl = {
     binaryMessage?: Uint8Array<ArrayBuffer>;
     decryptionKeys: PrivateKey | PrivateKey[];
   }): Promise<SessionKey | undefined> => {
-    const message = options.armoredMessage
+    // Both branches produce a real Message; the data-type generic is phantom
+    // for session-key extraction (it reads key packets, not message data).
+    // Unify the two branch types so decryptSessionKeys resolves a single T.
+    const message = (options.armoredMessage
       ? await openpgp.readMessage({ armoredMessage: options.armoredMessage })
-      : await openpgp.readMessage({ binaryMessage: options.binaryMessage! });
+      : await openpgp.readMessage({ binaryMessage: options.binaryMessage! })
+    ) as openpgp.Message<Uint8Array<ArrayBuffer>>;
     const sks = await openpgp.decryptSessionKeys({
       message,
       decryptionKeys: options.decryptionKeys as unknown as openpgp.PrivateKey | openpgp.PrivateKey[],
@@ -232,13 +239,13 @@ const proxyImpl = {
     if (sks.length === 0) return undefined;
     const sk = sks[0] as unknown as {
       data: Uint8Array;
-      algorithm?: string | null;
-      aeadAlgorithm?: string | null;
+      algorithm: string;
+      aeadAlgorithm?: string;
     };
     return {
       data: asArrayBufferBacked(sk.data),
-      algorithm: sk.algorithm ?? null,
-      aeadAlgorithm: sk.aeadAlgorithm ?? null,
+      algorithm: sk.algorithm as SessionKey['algorithm'],
+      aeadAlgorithm: sk.aeadAlgorithm as SessionKey['aeadAlgorithm'],
     };
   },
 
