@@ -95,12 +95,16 @@ export class EntitiesCache implements ProtonDriveCache<string> {
 
   async removeEntities(keys: string[]): Promise<void> {
     const stmt = this.db.prepare('DELETE FROM entities_cache WHERE key = ?');
-    this.db.prepare('BEGIN').run();
+    // SQLite has no nested transactions: only open one if the caller has not
+    // already started one, otherwise the BEGIN throws and takes the delete
+    // down with it.
+    const ownsTransaction = !this.db.isTransaction;
+    if (ownsTransaction) this.db.prepare('BEGIN').run();
     try {
       for (const k of keys) stmt.run(k);
-      this.db.prepare('COMMIT').run();
+      if (ownsTransaction) this.db.prepare('COMMIT').run();
     } catch (err) {
-      this.db.prepare('ROLLBACK').run();
+      if (ownsTransaction) this.db.prepare('ROLLBACK').run();
       throw err;
     }
   }
