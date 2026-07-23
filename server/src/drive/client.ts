@@ -4,9 +4,7 @@ import {
   NullFeatureFlagProvider,
   type ProtonDriveTelemetry,
   type Logger,
-  type MaybeNode,
   type NodeEntity,
-  type DegradedNode,
 } from '@protontech/drive-sdk';
 import type { DB } from '../db.js';
 import type { ProtonAuth, ProtonSession } from '../auth/srp.js';
@@ -74,16 +72,13 @@ const NULL_TELEMETRY: ProtonDriveTelemetry = {
 };
 
 /**
- * Unwrap a `MaybeNode` (`Result<NodeEntity, DegradedNode>`) into a plain
- * NodeEntity, throwing on the degraded branch. Phase 2 has no UI to
- * surface partial decryption, so a thrown error is the cleanest signal.
+ * `NodeEntity.name` is a `Result`: the SDK can decrypt the node while failing
+ * to decrypt its name (e.g. a name signed with an unavailable key). Returns
+ * the name, or null when it could not be decrypted. This is the field-level
+ * successor to the pre-0.17 node-level `DegradedNode`.
  */
-function unwrapNode(maybe: MaybeNode): NodeEntity {
-  if (maybe.ok) return maybe.value;
-  const degraded = maybe.error as DegradedNode;
-  throw new Error(
-    `Drive node degraded (uid=${(degraded as { uid?: string }).uid ?? 'unknown'}): cannot decrypt`,
-  );
+export function nodeName(node: NodeEntity): string | null {
+  return node.name.ok ? node.name.value : null;
 }
 
 /** The SDK's config takes a bare host; strip any scheme and trailing slash. */
@@ -142,35 +137,29 @@ export class DriveClient {
   }
 
   async listRoot(): Promise<ListRootResult> {
-    const rootMaybe = await this.sdk.getMyFilesRootFolder();
-    const root = unwrapNode(rootMaybe);
+    const root = await this.sdk.getMyFilesRootFolder();
 
     const children: ListRootChild[] = [];
     let degradedCount = 0;
-    for await (const childMaybe of this.sdk.iterateFolderChildren(root.uid)) {
-      if (!childMaybe.ok) {
-        // Skip degraded children rather than failing the whole listing, but
-        // report how many were dropped so a partial listing is never silent.
+    for await (const child of this.sdk.iterateFolderChildren(root.uid)) {
+      const name = nodeName(child);
+      if (name === null) {
+        // Name could not be decrypted; skip it but keep the count visible.
         degradedCount += 1;
         continue;
       }
-      children.push({
-        uid: childMaybe.value.uid,
-        name: childMaybe.value.name,
-        type: String(childMaybe.value.type),
-      });
+      children.push({ uid: child.uid, name, type: String(child.type) });
     }
 
     return {
-      root: { uid: root.uid, name: root.name },
+      root: { uid: root.uid, name: nodeName(root) ?? '(unknown)' },
       children,
       degradedCount,
     };
   }
 
   async uploadFile(name: string, bytes: Uint8Array, mimeType: string): Promise<UploadResult> {
-    const rootMaybe = await this.sdk.getMyFilesRootFolder();
-    const root = unwrapNode(rootMaybe);
+    const root = await this.sdk.getMyFilesRootFolder();
 
     // `getFileUploader` rejects outright when the name is taken, so resolve a
     // free name first ("scan.pdf" -> "scan (1).pdf") instead of surfacing a

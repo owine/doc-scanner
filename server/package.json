@@ -7,9 +7,9 @@
     "dev": "tsx watch src/index.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p src/vendor/tsconfig.json",
     "start": "tsx src/index.ts",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "test:integration": "vitest run --config vitest.integration.config.ts"
+    "test": "NODE_OPTIONS=--import=tsx vitest run",
+    "test:watch": "NODE_OPTIONS=--import=tsx vitest",
+    "test:integration": "NODE_OPTIONS=--import=tsx vitest run --config vitest.integration.config.ts"
   },
   "dependencies": {
     "@hono/node-server": "2.0.10",
