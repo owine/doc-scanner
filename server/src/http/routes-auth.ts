@@ -80,8 +80,10 @@ export function authRoutes(deps: {
     if (driveClient) {
       try {
         await driveClient.clearCaches();
-      } catch (e) {
-        logger.warn({ err: (e as Error).message }, 'failed to clear drive caches on logout');
+      } catch (err) {
+        // Log the full error (pino's default err serializer keeps type + stack)
+        // so a cache/DB failure on logout is diagnosable in production.
+        logger.warn({ err }, 'failed to clear drive caches on logout');
       }
     }
     deps.store.clear();
