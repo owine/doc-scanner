@@ -12,9 +12,12 @@ import { installCryptoImpl } from '../auth/crypto-impl.js';
  * the public-link session flow; all three methods are stateless wrappers
  * around the vendored crypto code.
  *
- * `getSrpVerifier` is used by the SDK only for password-change flows, which
- * are out of scope for Phase 2 (read-only Drive access). We throw a clear
- * error so a future phase can wire it up explicitly when needed.
+ * `getSrpVerifier` is used by the SDK only for password-change / password-
+ * protected public-link flows, which are out of scope for Phase 2 (read-only
+ * Drive access). We throw a clear error so a future phase can wire it up
+ * explicitly when needed. Note: `generateKeySalt` is its sibling in that same
+ * SDK flow — a future phase implementing password-protected links should wire
+ * both together.
  */
 export class DriveSrpModule implements SRPModule {
   constructor() {

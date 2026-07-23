@@ -43,4 +43,27 @@ describe('DriveSrpModule', () => {
       await expect(mod.getSrpVerifier('pw')).rejects.toThrow(/not implemented/i);
     });
   });
+
+  describe('generateKeySalt', () => {
+    it('returns a fresh 24-char base64 salt decoding to 16 bytes', () => {
+      const mod = new DriveSrpModule();
+      const salt = mod.generateKeySalt();
+      // computeKeyPassword requires a 24-char salt (16 bytes base64).
+      expect(salt).toHaveLength(24);
+      expect(Buffer.from(salt, 'base64')).toHaveLength(16);
+    });
+
+    it('produces a different salt on each call', () => {
+      const mod = new DriveSrpModule();
+      const salts = new Set(Array.from({ length: 8 }, () => mod.generateKeySalt()));
+      expect(salts.size).toBe(8);
+    });
+
+    it('produces a salt computeKeyPassword accepts', async () => {
+      const mod = new DriveSrpModule();
+      const salt = mod.generateKeySalt();
+      // Round-trips through the length check inside computeKeyPassword.
+      await expect(mod.computeKeyPassword('hunter2', salt)).resolves.toHaveLength(31);
+    });
+  });
 });

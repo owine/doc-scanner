@@ -84,3 +84,44 @@ describe('crypto module signature contexts', () => {
     expect(result.verified).toBe(VALID);
   });
 });
+
+/**
+ * Exercises the SessionKey paths that drive-sdk 0.19.2 retyped (algorithm ->
+ * symmetricNames, aeadAlgorithm -> aeadNames | undefined). The adapter casts
+ * openpgp's names to those types at the boundary; this round-trip proves the
+ * values actually survive generate -> encrypt -> decrypt at runtime, so the
+ * casts aren't hiding a real mismatch.
+ */
+describe('crypto module session keys', () => {
+  const crypto = getOpenPGPModule();
+  let privateKey: PrivateKey;
+  let publicKey: PublicKey;
+
+  beforeAll(async () => {
+    const { privateKey: generated } = await openpgp.generateKey({
+      type: 'ecc',
+      curve: 'ed25519Legacy',
+      userIDs: [{ email: 'sk@example.com' }],
+      passphrase: 'p',
+      format: 'object',
+    });
+    const decrypted = await openpgp.decryptKey({ privateKey: generated, passphrase: 'p' });
+    privateKey = decrypted as unknown as PrivateKey;
+    publicKey = decrypted.toPublic() as unknown as PublicKey;
+  });
+
+  it('round-trips a session key through encrypt + decrypt, preserving the algorithm', async () => {
+    const sk = await crypto.generateSessionKey([publicKey], {
+      enableAeadWithEncryptionKeys: false,
+    });
+    expect(sk.algorithm).toBeTruthy();
+    // Non-AEAD path: exercises the aeadAlgorithm -> undefined mapping.
+    expect(sk.aeadAlgorithm ?? undefined).toBeUndefined();
+
+    const { keyPacket } = await crypto.encryptSessionKey(sk, publicKey);
+    const recovered = await crypto.decryptSessionKey(keyPacket, privateKey);
+
+    expect(Buffer.from(recovered.data)).toEqual(Buffer.from(sk.data));
+    expect(recovered.algorithm).toBe(sk.algorithm);
+  });
+});
