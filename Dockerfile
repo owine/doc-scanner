@@ -16,14 +16,7 @@ FROM deps AS build
 COPY tsconfig.base.json ./
 COPY server ./server
 COPY pwa ./pwa
-RUN pnpm --filter @doc-scanner/server run build
-# Compile vendored code to dist/vendor (vendor tsconfig has noEmit: true; override here).
-# --module commonjs is required because server/package.json is "type":"module".
-# moduleResolution is left as the base config's "bundler": TypeScript 7 removed the
-# legacy "node10" mode (TS5108) and now permits bundler resolution alongside
-# --module commonjs, so no override (and no --ignoreDeprecations) is needed.
-RUN cd server && pnpm exec tsc -p src/vendor/tsconfig.json --noEmit false --outDir dist/vendor --rootDir src/vendor --module commonjs \
- && echo '{"type":"commonjs"}' > dist/vendor/package.json
+RUN pnpm --filter @doc-scanner/server run typecheck
 RUN pnpm --filter @doc-scanner/pwa run build
 
 FROM node:24.18.0-alpine@sha256:a0b9bf06e4e6193cf7a0f58816cc935ff8c2a908f81e6f1a95432d679c54fbfd AS runtime
@@ -45,8 +38,11 @@ LABEL org.opencontainers.image.title="doc-scanner" \
 RUN apk add --no-cache \
   tini=0.19.0-r3
 COPY --from=deps /app/node_modules ./node_modules
-COPY --from=build /app/server/dist ./server/dist
-COPY --from=build /app/server/src/migrations ./server/dist/migrations
+# pnpm's workspace layout symlinks tsx (now a server runtime dep) into
+# server/node_modules, not the root node_modules copied above — needed for
+# `node --import tsx` to resolve it at container start.
+COPY --from=build /app/server/node_modules ./server/node_modules
+COPY --from=build /app/server/src ./server/src
 COPY --from=build /app/server/package.json ./server/
 COPY --from=build /app/pwa/dist ./pwa/dist
 COPY package.json ./
@@ -54,7 +50,11 @@ EXPOSE 3000
 VOLUME ["/data"]
 ENV DB_PATH=/data/app.db
 ENTRYPOINT ["/sbin/tini", "--"]
-CMD ["node", "server/dist/index.js"]
+# `--import tsx` resolves the bare "tsx" specifier relative to process.cwd(),
+# and pnpm's workspace layout only symlinks tsx into server/node_modules (not
+# an ancestor of /app) — so the process must start with cwd server/. DB_PATH
+# and PWA_DIST_PATH are absolute (see compose.yml), so this cwd change is safe.
+CMD ["sh", "-c", "cd server && exec node --import tsx src/index.ts"]
 
 # Volatile OCI labels — placed last so they don't bust earlier layer cache.
 # CI passes real values via --build-arg; standalone builds get the defaults.

@@ -91,6 +91,64 @@ describe('fetchAndDecryptUserKey', () => {
     expect(result.addresses[0]!.addressId).toBe('real-address-id-AAA');
     expect(result.primaryAddress.addressId).toBe('real-address-id-AAA');
     expect(result.primaryAddress.email).toBe('test@example.com');
+    // The address *key* ID is carried separately from the address ID: the SDK
+    // sends it to the API as AddressKeyID when creating volumes and shares.
+    expect(result.addresses[0]!.keys).toHaveLength(1);
+    expect(result.addresses[0]!.keys[0]!.id).toBe('addr-key-id-1');
+    expect(result.addresses[0]!.primaryKeyIndex).toBe(0);
+  });
+
+  it('decrypts every active address key and indexes the primary one', async () => {
+    const passphrase = 'multi-key-mailbox-password';
+    const userKeyArmored = await makeUserKey(passphrase);
+    const rotatedOut = await makeAddressKeyWithToken(userKeyArmored, passphrase);
+    const current = await makeAddressKeyWithToken(userKeyArmored, passphrase);
+
+    const fakeUser: ProtonUser = {
+      ID: 'u1', Name: 'test', Currency: 'USD', Email: 'test@example.com', DisplayName: 'Test',
+      Keys: [{
+        ID: 'user-key-id-1', Version: 4, Primary: 1, Active: 1, Flags: 3,
+        PrivateKey: userKeyArmored, Fingerprint: 'fp', Address: 'test@example.com',
+      }],
+    };
+    const fakeAddress: ProtonAddress = {
+      ID: 'real-address-id-MULTI', Email: 'test@example.com',
+      Status: 1, Type: 1, Order: 1, Receive: 1, Send: 1,
+      Keys: [
+        {
+          ID: 'addr-key-old', Version: 3, Primary: 0, Active: 1, Flags: 3,
+          PrivateKey: rotatedOut.addrKeyArmored, Token: rotatedOut.Token,
+          Signature: null, Fingerprint: 'fp-old',
+        },
+        {
+          ID: 'addr-key-current', Version: 3, Primary: 1, Active: 1, Flags: 3,
+          PrivateKey: current.addrKeyArmored, Token: current.Token,
+          Signature: null, Fingerprint: 'fp-current',
+        },
+        // Inactive keys stay out: the SDK would try to verify against them.
+        {
+          ID: 'addr-key-inactive', Version: 3, Primary: 0, Active: 0, Flags: 3,
+          PrivateKey: current.addrKeyArmored, Token: current.Token,
+          Signature: null, Fingerprint: 'fp-inactive',
+        },
+      ],
+    };
+
+    const fakeApi = {
+      getUser: vi.fn().mockResolvedValue({ User: fakeUser }),
+      getAddresses: vi.fn().mockResolvedValue({ Addresses: [fakeAddress] }),
+      getKeySalts: vi.fn(),
+      getAuthInfo: vi.fn(),
+    } as unknown as ProtonApi;
+
+    const result = await fetchAndDecryptUserKey({
+      api: fakeApi, uid: 'u', accessToken: 'a',
+      mailboxPasswordBytes: new TextEncoder().encode(passphrase),
+    });
+
+    const address = result.addresses[0]!;
+    expect(address.keys.map((k) => k.id)).toEqual(['addr-key-old', 'addr-key-current']);
+    expect(address.primaryKeyIndex).toBe(1);
   });
 
   it('decrypts a legacy address key (no Token) using mailbox password', async () => {

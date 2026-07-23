@@ -1,6 +1,9 @@
 import type { SRPModule, SRPVerifier } from '@protontech/drive-sdk/dist/crypto/interface.js';
 import { getSrp } from '../vendor/proton-srp/srp.js';
-import { computeKeyPassword as vendorComputeKeyPassword } from '../vendor/proton-srp/keys.js';
+import {
+  computeKeyPassword as vendorComputeKeyPassword,
+  generateKeySalt as vendorGenerateKeySalt,
+} from '../vendor/proton-srp/keys.js';
 import { installCryptoImpl } from '../auth/crypto-impl.js';
 
 /**
@@ -9,9 +12,12 @@ import { installCryptoImpl } from '../auth/crypto-impl.js';
  * the public-link session flow; all three methods are stateless wrappers
  * around the vendored crypto code.
  *
- * `getSrpVerifier` is used by the SDK only for password-change flows, which
- * are out of scope for Phase 2 (read-only Drive access). We throw a clear
- * error so a future phase can wire it up explicitly when needed.
+ * `getSrpVerifier` is used by the SDK only for password-change / password-
+ * protected public-link flows, which are out of scope for Phase 2 (read-only
+ * Drive access). We throw a clear error so a future phase can wire it up
+ * explicitly when needed. Note: `generateKeySalt` is its sibling in that same
+ * SDK flow — a future phase implementing password-protected links should wire
+ * both together.
  */
 export class DriveSrpModule implements SRPModule {
   constructor() {
@@ -47,5 +53,12 @@ export class DriveSrpModule implements SRPModule {
 
   computeKeyPassword = async (password: string, salt: string): Promise<string> => {
     return vendorComputeKeyPassword(password, salt);
+  };
+
+  // Added in drive-sdk 0.19.x: the SDK generates a fresh 16-byte key salt
+  // (base64) when creating key material. Delegates to the same vendored
+  // primitive the auth flow uses, keeping salt generation in one place.
+  generateKeySalt = (): string => {
+    return vendorGenerateKeySalt();
   };
 }

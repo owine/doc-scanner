@@ -42,9 +42,6 @@ jobs:
       - name: Test (pwa)
         run: pnpm --filter @doc-scanner/pwa test
 
-      - name: Build (server)
-        run: pnpm --filter @doc-scanner/server run build
-
       - name: Build (pwa)
         run: pnpm --filter @doc-scanner/pwa run build
 

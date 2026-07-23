@@ -3,6 +3,7 @@
   "compilerOptions": {
     "outDir": "dist",
     "rootDir": "src",
+    "allowImportingTsExtensions": true,
     "types": ["node"],
     "lib": ["ES2022", "ESNext.TypedArrays"],
     "noUncheckedIndexedAccess": false,

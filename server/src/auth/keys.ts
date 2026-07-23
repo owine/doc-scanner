@@ -1,16 +1,35 @@
 import * as openpgp from 'openpgp';
 import type { ProtonApi, ProtonAddress, ProtonAddressKey } from './proton-api.js';
 
+/**
+ * One decrypted address key. `id` is the Proton *address key* ID
+ * (`Addresses[].Keys[].ID`), which is a different identifier from the address
+ * ID and is sent to the API as `AddressKeyID` during volume and share
+ * creation. Getting these two confused makes those calls fail server-side.
+ */
 export interface DecryptedAddressKey {
+  id: string;
+  key: openpgp.PrivateKey;
+}
+
+export interface DecryptedAddress {
   email: string;
   addressId: string;
-  key: openpgp.PrivateKey;
+  /** All active keys of the address, newest-to-oldest as returned by Proton. */
+  keys: DecryptedAddressKey[];
+  /** Index into `keys` of the address's primary key. */
+  primaryKeyIndex: number;
 }
 
 export interface DecryptedUserKey {
   primaryAddress: { email: string; addressId: string };
+  /**
+   * The primary *user* key. This is the root key that unlocks address-key
+   * tokens — it is NOT an address key and must never be used to sign Drive
+   * material. Use `addresses[].keys` for anything the SDK signs with.
+   */
   primaryKey: openpgp.PrivateKey;
-  addresses: DecryptedAddressKey[];
+  addresses: DecryptedAddress[];
 }
 
 export class KeyDecryptError extends Error {
@@ -38,10 +57,10 @@ export interface FetchAndDecryptParams {
  *   2. Legacy: no `Token`; address `PrivateKey` is encrypted directly with
  *      the mailbox password.
  *
- * The returned `addresses[]` carry real Proton AddressIDs (from the
- * `/core/v4/addresses` response, NOT user-key IDs). The Drive SDK's
- * `SharesManager.createVolume` validates these against Proton's address
- * table, so they must be authentic.
+ * The returned `addresses[]` carry real Proton AddressIDs *and* real address
+ * key IDs (both from the `/core/v4/addresses` response, NOT user-key IDs).
+ * The Drive SDK's `SharesManager.createVolume` sends both to the API as
+ * `AddressID` / `AddressKeyID`, so they must be authentic and distinct.
  */
 export async function fetchAndDecryptUserKey(params: FetchAndDecryptParams): Promise<DecryptedUserKey> {
   const { api, uid, accessToken, mailboxPasswordBytes } = params;
@@ -79,20 +98,37 @@ export async function fetchAndDecryptUserKey(params: FetchAndDecryptParams): Pro
 
   const addressUserKeys = decryptedUserKeys.map((k) => k.key);
 
-  const decryptedAddresses: DecryptedAddressKey[] = [];
+  const decryptedAddresses: DecryptedAddress[] = [];
   for (const addr of enabled) {
-    const primaryKeyEntry = pickPrimaryAddressKey(addr);
-    if (!primaryKeyEntry) continue;
-    try {
-      const addrPriv = await decryptAddressKey({
-        addressKey: primaryKeyEntry,
-        userKeys: addressUserKeys,
-        mailboxPassphrase: passphrase,
-      });
-      decryptedAddresses.push({ email: addr.Email, addressId: addr.ID, key: addrPriv });
-    } catch (e) {
-      throw new KeyDecryptError(`Failed to decrypt address key for ${addr.Email}`, e);
+    const activeKeys = (addr.Keys ?? []).filter((k) => k.Active === 1 && k.PrivateKey);
+    if (activeKeys.length === 0) continue;
+
+    // Decrypt every active key, not just the primary one. The SDK verifies
+    // node signatures against the union of all address keys
+    // (internal/nodes/cryptoService.ts), so dropping rotated-out keys turns
+    // older files into DegradedNodes. A single undecryptable key is not fatal
+    // — it only costs us verification coverage for material signed with it.
+    const keys: DecryptedAddressKey[] = [];
+    let primaryKeyIndex = 0;
+    for (const entry of activeKeys) {
+      let addrPriv: openpgp.PrivateKey;
+      try {
+        addrPriv = await decryptAddressKey({
+          addressKey: entry,
+          userKeys: addressUserKeys,
+          mailboxPassphrase: passphrase,
+        });
+      } catch {
+        continue;
+      }
+      if (entry.Primary === 1) primaryKeyIndex = keys.length;
+      keys.push({ id: entry.ID, key: addrPriv });
     }
+
+    if (keys.length === 0) {
+      throw new KeyDecryptError(`Failed to decrypt any address key for ${addr.Email}`);
+    }
+    decryptedAddresses.push({ email: addr.Email, addressId: addr.ID, keys, primaryKeyIndex });
   }
 
   if (decryptedAddresses.length === 0) {
@@ -111,11 +147,6 @@ export async function fetchAndDecryptUserKey(params: FetchAndDecryptParams): Pro
     primaryKey: primaryUserKey.key,
     addresses: decryptedAddresses,
   };
-}
-
-function pickPrimaryAddressKey(addr: ProtonAddress): ProtonAddressKey | undefined {
-  const active = (addr.Keys ?? []).filter((k) => k.Active === 1 && k.PrivateKey);
-  return active.find((k) => k.Primary === 1) ?? active[0];
 }
 
 interface DecryptAddressKeyArgs {

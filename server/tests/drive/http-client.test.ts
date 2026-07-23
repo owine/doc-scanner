@@ -14,12 +14,15 @@ describe('DriveHttpClient', () => {
     global.fetch = originalFetch;
   });
 
-  function makeClient() {
+  function makeClient(overrides: {
+    refreshSession?: () => Promise<{ uid: string; accessToken: string }>;
+    session?: { uid: string; accessToken: string };
+  } = {}) {
+    const session = overrides.session ?? { uid: 'uid-x', accessToken: 'at-x' };
     return new DriveHttpClient({
-      baseUrl: 'https://drive-api.example.test',
       appVersion: 'external-drive-docscanner@0.1.0',
-      uid: 'uid-x',
-      accessToken: 'at-x',
+      getSession: () => session,
+      refreshSession: overrides.refreshSession,
     });
   }
 
@@ -163,6 +166,118 @@ describe('DriveHttpClient', () => {
         timeoutMs: 60000,
       });
       expect(res.status).toBe(500);
+    });
+  });
+
+  describe('401 handling', () => {
+    it('refreshes the token and replays the request once', async () => {
+      mockFetch
+        .mockResolvedValueOnce(new Response('{"Code":401}', { status: 401 }))
+        .mockResolvedValueOnce(new Response('{"ok":true}', { status: 200 }));
+
+      const session = { uid: 'uid-x', accessToken: 'stale' };
+      const refreshSession = vi.fn(async () => {
+        session.accessToken = 'fresh';
+        return session;
+      });
+      const client = makeClient({ session, refreshSession });
+
+      const res = await client.fetchJson({
+        url: 'https://drive-api.example.test/x',
+        method: 'GET',
+        headers: new Headers(),
+        timeoutMs: 30000,
+      });
+
+      expect(res.status).toBe(200);
+      expect(refreshSession).toHaveBeenCalledTimes(1);
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      const firstHeaders = (mockFetch.mock.calls[0]![1] as RequestInit).headers as Headers;
+      const retryHeaders = (mockFetch.mock.calls[1]![1] as RequestInit).headers as Headers;
+      expect(firstHeaders.get('authorization')).toBe('Bearer stale');
+      expect(retryHeaders.get('authorization')).toBe('Bearer fresh');
+    });
+
+    it('replays blob bodies unchanged', async () => {
+      mockFetch
+        .mockResolvedValueOnce(new Response('', { status: 401 }))
+        .mockResolvedValueOnce(new Response('', { status: 200 }));
+      const body = new Uint8Array([1, 2, 3]);
+      const client = makeClient({ refreshSession: async () => ({ uid: 'uid-x', accessToken: 'fresh' }) });
+
+      await client.fetchBlob({
+        url: 'https://drive-api.example.test/blob',
+        method: 'POST',
+        headers: new Headers(),
+        timeoutMs: 60000,
+        body,
+      });
+
+      expect((mockFetch.mock.calls[1]![1] as RequestInit).body).toBe(body);
+    });
+
+    it('surfaces the original 401 when refresh fails', async () => {
+      mockFetch.mockResolvedValueOnce(new Response('{"Code":401}', { status: 401 }));
+      const client = makeClient({
+        refreshSession: async () => {
+          throw new Error('refresh token revoked');
+        },
+      });
+
+      const res = await client.fetchJson({
+        url: 'https://drive-api.example.test/x',
+        method: 'GET',
+        headers: new Headers(),
+        timeoutMs: 30000,
+      });
+
+      expect(res.status).toBe(401);
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not retry when no refresh callback is configured', async () => {
+      mockFetch.mockResolvedValueOnce(new Response('', { status: 401 }));
+      const client = new DriveHttpClient({
+        appVersion: 'external-drive-docscanner@0.1.0',
+        getSession: () => ({ uid: 'uid-x', accessToken: 'at-x' }),
+      });
+
+      const res = await client.fetchJson({
+        url: 'https://drive-api.example.test/x',
+        method: 'GET',
+        headers: new Headers(),
+        timeoutMs: 30000,
+      });
+
+      expect(res.status).toBe(401);
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('coalesces concurrent 401s into a single refresh', async () => {
+      mockFetch.mockImplementation(async (_url: string, init: RequestInit) => {
+        const auth = (init.headers as Headers).get('authorization');
+        return new Response('', { status: auth === 'Bearer fresh' ? 200 : 401 });
+      });
+
+      const session = { uid: 'uid-x', accessToken: 'stale' };
+      const refreshSession = vi.fn(async () => {
+        session.accessToken = 'fresh';
+        return session;
+      });
+      const client = makeClient({ session, refreshSession });
+
+      const request = (n: number) =>
+        client.fetchJson({
+          url: `https://drive-api.example.test/x${n}`,
+          method: 'GET',
+          headers: new Headers(),
+          timeoutMs: 30000,
+        });
+
+      const responses = await Promise.all([request(1), request(2), request(3)]);
+
+      expect(responses.map((r) => r.status)).toEqual([200, 200, 200]);
+      expect(refreshSession).toHaveBeenCalledTimes(1);
     });
   });
 });

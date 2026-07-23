@@ -58,8 +58,59 @@ function translateConfig(
   return undefined;
 }
 
+/**
+ * Proton implements signature "contexts" (domain separation) as an OpenPGP
+ * notation. A context-aware verifier must declare the notation name as known,
+ * otherwise OpenPGP.js rejects the signature outright when the notation is
+ * marked critical. See the SDK's `openPGPCrypto.sign` / `verifyArmored`, which
+ * pass `{ critical: true }` on signing and `{ required: true }` on verifying.
+ */
+const CONTEXT_NOTATION_NAME = 'context@proton.ch';
+
+/** Config every verification path needs so critical context notations parse. */
+const CONTEXT_AWARE_CONFIG = { knownNotations: [CONTEXT_NOTATION_NAME] };
+
+interface RawNotation {
+  name: string;
+  value: Uint8Array;
+}
+
+interface OpenPGPSignature {
+  verified: Promise<boolean>;
+  signature?: Promise<{ packets: { rawNotations?: RawNotation[] }[] }>;
+}
+
+function notationForContext(value: string, critical: boolean) {
+  return {
+    name: CONTEXT_NOTATION_NAME,
+    value: new TextEncoder().encode(value),
+    humanReadable: true,
+    critical,
+  };
+}
+
+/**
+ * Mirrors Proton's context semantics:
+ *   - a matching context notation always passes;
+ *   - a *mismatching* context notation always fails, required or not;
+ *   - no context notation passes only when the context is not required.
+ */
+async function hasValidContext(
+  sig: OpenPGPSignature,
+  context: { required: boolean; value: string },
+): Promise<boolean> {
+  if (!sig.signature) return !context.required;
+  const parsed = await sig.signature;
+  const notations = parsed.packets
+    .flatMap((packet) => packet.rawNotations ?? [])
+    .filter((notation) => notation.name === CONTEXT_NOTATION_NAME);
+  if (notations.length === 0) return !context.required;
+  return notations.some((n) => new TextDecoder().decode(n.value) === context.value);
+}
+
 async function evaluateSignatures(
-  signatures: ReadonlyArray<{ verified: Promise<boolean> }>,
+  signatures: ReadonlyArray<OpenPGPSignature>,
+  context?: { required: boolean; value: string },
 ): Promise<{ status: SDK_VERIFICATION_STATUS; errors?: Error[] }> {
   if (signatures.length === 0) return { status: VS_NOT_SIGNED };
   const errors: Error[] = [];
@@ -67,6 +118,12 @@ async function evaluateSignatures(
   for (const sig of signatures) {
     try {
       await sig.verified;
+      if (context && !(await hasValidContext(sig, context))) {
+        errors.push(
+          new Error(`Signature context mismatch: expected "${context.value}"`),
+        );
+        continue;
+      }
       anyValid = true;
     } catch (err) {
       errors.push(err instanceof Error ? err : new Error(String(err)));
@@ -127,8 +184,8 @@ const proxyImpl = {
     const sk = await (
       openpgp.generateSessionKey as unknown as (o: unknown) => Promise<{
         data: Uint8Array;
-        algorithm?: string | null;
-        aeadAlgorithm?: string | null;
+        algorithm: string;
+        aeadAlgorithm?: string;
       }>
     )({
       encryptionKeys: options.recipientKeys,
@@ -136,8 +193,11 @@ const proxyImpl = {
     });
     return {
       data: asArrayBufferBacked(sk.data),
-      algorithm: sk.algorithm ?? null,
-      aeadAlgorithm: sk.aeadAlgorithm ?? null,
+      // openpgp uses the same standard cipher names as the SDK's SessionKey
+      // enums (e.g. 'aes256'); cast at the boundary. Absent AEAD is `undefined`
+      // in 0.19.x's SessionKey, not `null`.
+      algorithm: sk.algorithm as SessionKey['algorithm'],
+      aeadAlgorithm: sk.aeadAlgorithm as SessionKey['aeadAlgorithm'],
     };
   },
 
@@ -165,9 +225,13 @@ const proxyImpl = {
     binaryMessage?: Uint8Array<ArrayBuffer>;
     decryptionKeys: PrivateKey | PrivateKey[];
   }): Promise<SessionKey | undefined> => {
-    const message = options.armoredMessage
+    // Both branches produce a real Message; the data-type generic is phantom
+    // for session-key extraction (it reads key packets, not message data).
+    // Unify the two branch types so decryptSessionKeys resolves a single T.
+    const message = (options.armoredMessage
       ? await openpgp.readMessage({ armoredMessage: options.armoredMessage })
-      : await openpgp.readMessage({ binaryMessage: options.binaryMessage! });
+      : await openpgp.readMessage({ binaryMessage: options.binaryMessage! })
+    ) as openpgp.Message<Uint8Array<ArrayBuffer>>;
     const sks = await openpgp.decryptSessionKeys({
       message,
       decryptionKeys: options.decryptionKeys as unknown as openpgp.PrivateKey | openpgp.PrivateKey[],
@@ -175,13 +239,13 @@ const proxyImpl = {
     if (sks.length === 0) return undefined;
     const sk = sks[0] as unknown as {
       data: Uint8Array;
-      algorithm?: string | null;
-      aeadAlgorithm?: string | null;
+      algorithm: string;
+      aeadAlgorithm?: string;
     };
     return {
       data: asArrayBufferBacked(sk.data),
-      algorithm: sk.algorithm ?? null,
-      aeadAlgorithm: sk.aeadAlgorithm ?? null,
+      algorithm: sk.algorithm as SessionKey['algorithm'],
+      aeadAlgorithm: sk.aeadAlgorithm as SessionKey['aeadAlgorithm'],
     };
   },
 
@@ -290,10 +354,11 @@ const proxyImpl = {
       passwords: options.passwords,
       decryptionKeys: options.decryptionKeys,
       verificationKeys: options.verificationKeys,
+      config: CONTEXT_AWARE_CONFIG,
     });
     const r = result as {
       data: string | Uint8Array;
-      signatures?: ReadonlyArray<{ verified: Promise<boolean> }>;
+      signatures?: ReadonlyArray<OpenPGPSignature>;
     };
     const verifiedSigs = r.signatures ?? [];
     const verification = options.verificationKeys
@@ -327,6 +392,9 @@ const proxyImpl = {
       format: options.format,
       signingKeys: options.signingKeys,
       detached: options.detached,
+      signatureNotations: options.signatureContext
+        ? notationForContext(options.signatureContext.value, options.signatureContext.critical)
+        : undefined,
     });
     return typeof result === 'string' ? result : asArrayBufferBacked(result as Uint8Array);
   },
@@ -346,9 +414,11 @@ const proxyImpl = {
       message,
       signature,
       verificationKeys: options.verificationKeys,
+      config: CONTEXT_AWARE_CONFIG,
     });
     const verification = await evaluateSignatures(
-      (result as { signatures: ReadonlyArray<{ verified: Promise<boolean> }> }).signatures,
+      (result as { signatures: ReadonlyArray<OpenPGPSignature> }).signatures,
+      options.signatureContext,
     );
     return {
       verificationStatus: verification.status,

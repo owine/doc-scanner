@@ -23,7 +23,7 @@ describe('openDb', () => {
     cleanupFn = cleanup;
 
     const v = db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number };
-    expect(v.v).toBe(2);
+    expect(v.v).toBe(3);
   });
 
   it('migration 002 creates drive cache tables', () => {
@@ -37,7 +37,20 @@ describe('openDb', () => {
     expect(names).toContain('event_cursors');
 
     const v = db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number };
-    expect(v.v).toBe(2);
+    expect(v.v).toBe(3);
+  });
+
+  it('migration 003 keys event cursors by scope and adds app_settings', () => {
+    const { db, cleanup } = createTestDb();
+    cleanupFn = cleanup;
+
+    const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all() as { name: string }[];
+    expect(tables.map((t) => t.name)).toContain('app_settings');
+
+    const columns = db.prepare('PRAGMA table_info(event_cursors)').all() as { name: string }[];
+    const columnNames = columns.map((c) => c.name);
+    expect(columnNames).toContain('scope_id');
+    expect(columnNames).not.toContain('id');
   });
 
   it('does not re-apply migrations on re-open', () => {
@@ -54,7 +67,7 @@ describe('openDb', () => {
     const secondCount = (db2.prepare('SELECT COUNT(*) AS c FROM schema_version').get() as { c: number }).c;
     db2.close();
 
-    expect(secondCount).toBe(2);
+    expect(secondCount).toBe(3);
     expect(secondCount).toBe(firstCount);
     expect(secondApplied).toBe(firstApplied);
   });
