@@ -29,7 +29,7 @@ describe('DriveClient', () => {
         user: {
           primaryAddress: { email: 'x@y.test', addressId: 'a1' },
           primaryKey: decrypted,
-          addresses: [{ email: 'x@y.test', addressId: 'a1', key: decrypted }],
+          addresses: [{ email: 'x@y.test', addressId: 'a1', keys: [{ id: 'k1', key: decrypted }], primaryKeyIndex: 0 }],
         },
         session: { uid: 'u', accessToken: 'a', refreshToken: 'r', email: 'x@y.test' },
         protonAuth,

@@ -25,7 +25,7 @@ beforeAll(async () => {
   testDecryptedKeys = {
     primaryAddress: { email: 'e@x.test', addressId: 'a1' },
     primaryKey: decrypted,
-    addresses: [{ email: 'e@x.test', addressId: 'a1', key: decrypted }],
+    addresses: [{ email: 'e@x.test', addressId: 'a1', keys: [{ id: 'k1', key: decrypted }], primaryKeyIndex: 0 }],
   };
 });
 

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   ProtonDriveClient,
   NullFeatureFlagProvider,
@@ -16,7 +17,11 @@ import { DriveSrpModule } from './srp-module.js';
 import { EntitiesCache } from './entities-cache.js';
 import { CryptoCache } from './crypto-cache.js';
 import { EventIdStore } from './event-id-store.js';
+import { getOrCreateClientUid } from './client-uid.js';
 import { getOpenPGPModule } from './crypto-module.js';
+
+/** Proton's production Drive API host. The SDK config wants a host, not a URL. */
+const DEFAULT_DRIVE_HOST = 'drive-api.proton.me';
 
 export interface DriveClientConfig {
   db: DB;
@@ -24,7 +29,11 @@ export interface DriveClientConfig {
   encryptionKey: string;
   /** Proton appversion string (e.g. "external-drive-docscanner@0.1.0"). */
   appVersion: string;
-  /** Drive API base URL. Defaults to production. */
+  /**
+   * Drive API host, with or without scheme. Defaults to production.
+   * The SDK builds its own URLs from this, so it must reach the SDK config —
+   * setting it only on our HTTP adapter would do nothing.
+   */
   baseUrl?: string;
   user: DecryptedUserKey;
   session: ProtonSession;
@@ -41,11 +50,15 @@ export interface ListRootChild {
 export interface ListRootResult {
   root: { uid: string; name: string };
   children: ListRootChild[];
+  /** Children that could not be decrypted and were omitted from `children`. */
+  degradedCount: number;
 }
 
 export interface UploadResult {
   nodeUid: string;
   driveUrl: string;
+  /** The name actually used, which may be de-duplicated by the SDK. */
+  name: string;
 }
 
 const NOOP_LOGGER: Logger = {
@@ -73,6 +86,11 @@ function unwrapNode(maybe: MaybeNode): NodeEntity {
   );
 }
 
+/** The SDK's config takes a bare host; strip any scheme and trailing slash. */
+function toHost(baseUrl: string): string {
+  return baseUrl.replace(/^https?:\/\//, '').replace(/\/+$/, '');
+}
+
 /**
  * Facade over the Proton Drive SDK. Wires together all six adapters
  * (account, http, srp, entities cache, crypto cache, event-id store) plus
@@ -80,30 +98,46 @@ function unwrapNode(maybe: MaybeNode): NodeEntity {
  *
  *   - listRoot()              — list children of "My files" root
  *   - uploadFile(name, bytes) — upload a single Uint8Array as a new file
+ *   - clearCaches()           — drop persisted state on logout
  *
  * Construction is cheap; the adapters do the heavy lifting lazily.
  */
 export class DriveClient {
   private readonly sdk: ProtonDriveClient;
+  private readonly entitiesCache: EntitiesCache;
+  private readonly eventIdStore: EventIdStore;
+  /** Mutable: replaced in place when the access token is refreshed. */
+  private session: ProtonSession;
 
   constructor(cfg: DriveClientConfig) {
+    this.session = cfg.session;
+    this.entitiesCache = new EntitiesCache(cfg.db, cfg.encryptionKey);
+    this.eventIdStore = new EventIdStore(cfg.db);
+
     const httpClient = new DriveHttpClient({
-      baseUrl: cfg.baseUrl ?? 'https://drive-api.proton.me',
       appVersion: cfg.appVersion,
-      uid: cfg.session.uid,
-      accessToken: cfg.session.accessToken,
+      getSession: () => this.session,
+      refreshSession: async () => {
+        this.session = await cfg.protonAuth.refresh(this.session);
+        cfg.onSessionRefreshed?.(this.session);
+        return this.session;
+      },
     });
 
     this.sdk = new ProtonDriveClient({
       httpClient,
-      entitiesCache: new EntitiesCache(cfg.db, cfg.encryptionKey),
+      entitiesCache: this.entitiesCache,
       cryptoCache: new CryptoCache(),
       account: new DriveAccount(cfg.user),
       openPGPCryptoModule: getOpenPGPModule(),
       srpModule: new DriveSrpModule(),
       featureFlagProvider: new NullFeatureFlagProvider(),
-      latestEventIdProvider: new EventIdStore(cfg.db),
+      latestEventIdProvider: this.eventIdStore,
       telemetry: NULL_TELEMETRY,
+      config: {
+        baseUrl: toHost(cfg.baseUrl ?? DEFAULT_DRIVE_HOST),
+        clientUid: getOrCreateClientUid(cfg.db),
+      },
     });
   }
 
@@ -112,9 +146,12 @@ export class DriveClient {
     const root = unwrapNode(rootMaybe);
 
     const children: ListRootChild[] = [];
+    let degradedCount = 0;
     for await (const childMaybe of this.sdk.iterateFolderChildren(root.uid)) {
       if (!childMaybe.ok) {
-        // Skip degraded children rather than failing the whole listing.
+        // Skip degraded children rather than failing the whole listing, but
+        // report how many were dropped so a partial listing is never silent.
+        degradedCount += 1;
         continue;
       }
       children.push({
@@ -127,6 +164,7 @@ export class DriveClient {
     return {
       root: { uid: root.uid, name: root.name },
       children,
+      degradedCount,
     };
   }
 
@@ -134,9 +172,17 @@ export class DriveClient {
     const rootMaybe = await this.sdk.getMyFilesRootFolder();
     const root = unwrapNode(rootMaybe);
 
-    const uploader = await this.sdk.getFileUploader(root.uid, name, {
+    // `getFileUploader` rejects outright when the name is taken, so resolve a
+    // free name first ("scan.pdf" -> "scan (1).pdf") instead of surfacing a
+    // collision as an upload failure.
+    const availableName = await this.sdk.getAvailableName(root.uid, name);
+
+    const uploader = await this.sdk.getFileUploader(root.uid, availableName, {
       mediaType: mimeType,
       expectedSize: bytes.byteLength,
+      // We hold the whole buffer, so let the SDK verify what it uploaded
+      // against a hash we computed independently.
+      expectedSha1: createHash('sha1').update(bytes).digest('hex'),
       modificationTime: new Date(),
     });
 
@@ -161,6 +207,16 @@ export class DriveClient {
       driveUrl = `https://drive.proton.me/${nodeUid}`;
     }
 
-    return { nodeUid, driveUrl };
+    return { nodeUid, driveUrl, name: availableName };
+  }
+
+  /**
+   * Drops all persisted SDK state. Must be called on logout: the caches are
+   * keyed by SDK-internal IDs with no account scoping, so entities left behind
+   * by one account would be served to the next one and fail to decrypt.
+   */
+  async clearCaches(): Promise<void> {
+    await this.entitiesCache.clear();
+    await this.eventIdStore.clear();
   }
 }

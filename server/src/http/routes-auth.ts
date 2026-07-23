@@ -45,6 +45,13 @@ export function authRoutes(deps: {
         user: result.decryptedKeys,
         session: result.session,
         protonAuth: deps.protonAuth,
+        // The SDK's HTTP adapter refreshes the access token on a 401. Persist
+        // the rotated tokens, or the next process restart resumes with a
+        // refresh token Proton has already invalidated.
+        onSessionRefreshed: (session) => {
+          deps.store.save(session);
+          logger.info({ email: session.email }, 'proton session refreshed');
+        },
       });
 
       registerLiveSession({
@@ -65,7 +72,18 @@ export function authRoutes(deps: {
     }
   });
 
-  r.post('/logout', (c) => {
+  r.post('/logout', async (c) => {
+    // Drop the SDK's persisted caches before the live session goes away. They
+    // are not account-scoped, so leaving them behind would serve one account's
+    // entities to whoever logs in next.
+    const driveClient = c.get('auth')?.liveSession?.driveClient;
+    if (driveClient) {
+      try {
+        await driveClient.clearCaches();
+      } catch (e) {
+        logger.warn({ err: (e as Error).message }, 'failed to clear drive caches on logout');
+      }
+    }
     deps.store.clear();
     revokeSession(c);
     return c.json({ ok: true });
