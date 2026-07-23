@@ -3,5 +3,6 @@ packages:
   - pwa
 
 allowBuilds:
+  core-js: false
   esbuild: true
   tesseract.js: true

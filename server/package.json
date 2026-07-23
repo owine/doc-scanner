@@ -13,7 +13,8 @@
   },
   "dependencies": {
     "@hono/node-server": "2.0.10",
-    "@protontech/drive-sdk": "0.14.10",
+    "@protontech/crypto": "2.1.1",
+    "@protontech/drive-sdk": "0.19.2",
     "bcryptjs": "3.0.3",
     "hono": "4.12.30",
     "openpgp": "6.3.1",
