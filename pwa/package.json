@@ -21,7 +21,7 @@
     "@cantoo/pdf-lib": "2.7.4"
   },
   "devDependencies": {
-    "@preact/preset-vite": "2.10.5",
+    "@preact/preset-vite": "2.10.6",
     "@testing-library/jest-dom": "6.9.1",
     "@testing-library/preact": "3.2.4",
     "@types/node": "25.9.5",
