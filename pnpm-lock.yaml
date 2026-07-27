@@ -45,8 +45,8 @@ importers:
         specifier: 6.2.5
         version: 6.2.5
       happy-dom:
-        specifier: 20.10.6
-        version: 20.10.6
+        specifier: 20.11.1
+        version: 20.11.1
       typescript:
         specifier: 7.0.2
         version: 7.0.2
@@ -55,7 +55,7 @@ importers:
         version: 8.1.5(@types/node@25.9.5)(esbuild@0.28.1)(tsx@4.23.1)
       vitest:
         specifier: 4.1.10
-        version: 4.1.10(@types/node@25.9.5)(happy-dom@20.10.6)(vite@8.1.5(@types/node@25.9.5)(esbuild@0.28.1)(tsx@4.23.1))
+        version: 4.1.10(@types/node@25.9.5)(happy-dom@20.11.1)(vite@8.1.5(@types/node@25.9.5)(esbuild@0.28.1)(tsx@4.23.1))
 
   server:
     dependencies:
@@ -98,7 +98,7 @@ importers:
         version: 7.0.2
       vitest:
         specifier: 4.1.10
-        version: 4.1.10(@types/node@25.9.5)(happy-dom@20.10.6)(vite@8.1.5(@types/node@25.9.5)(esbuild@0.28.1)(tsx@4.23.1))
+        version: 4.1.10(@types/node@25.9.5)(happy-dom@20.11.1)(vite@8.1.5(@types/node@25.9.5)(esbuild@0.28.1)(tsx@4.23.1))
 
 packages:
 
@@ -1055,8 +1055,8 @@ packages:
     resolution: {integrity: sha512-ZUKRh6/kUFoAiTAtTYPZJ3hw9wNxx+BIBOijnlG9PnrJsCcSjs1wyyD6vJpaYtgnzDrKYRSqf3OO6Rfa93xsRg==}
     engines: {node: '>= 0.4'}
 
-  happy-dom@20.10.6:
-    resolution: {integrity: sha512-6QD0ilzDDt93tX44y8tbmZdAcdTRYDhUP+Asgi6pC8Pp5IA3cvaZGyoVN/EGtlq9ziT65iPuBBn3ASLr6hCgVw==}
+  happy-dom@20.11.1:
+    resolution: {integrity: sha512-XSt8tMzbW9ymE7687xztkO1ckR7qJNQ3LywY9vlYGhGi3zXrGBHuUo2Cl1ztZaICW+1eAGdkLbj6iwVqDT33kg==}
     engines: {node: '>=20.0.0'}
 
   has-bigints@1.1.0:
@@ -2617,7 +2617,7 @@ snapshots:
 
   gopd@1.2.0: {}
 
-  happy-dom@20.10.6:
+  happy-dom@20.11.1:
     dependencies:
       '@types/node': 25.9.5
       '@types/whatwg-mimetype': 3.0.2
@@ -3186,7 +3186,7 @@ snapshots:
       fsevents: 2.3.3
       tsx: 4.23.1
 
-  vitest@4.1.10(@types/node@25.9.5)(happy-dom@20.10.6)(vite@8.1.5(@types/node@25.9.5)(esbuild@0.28.1)(tsx@4.23.1)):
+  vitest@4.1.10(@types/node@25.9.5)(happy-dom@20.11.1)(vite@8.1.5(@types/node@25.9.5)(esbuild@0.28.1)(tsx@4.23.1)):
     dependencies:
       '@vitest/expect': 4.1.10
       '@vitest/mocker': 4.1.10(vite@8.1.5(@types/node@25.9.5)(esbuild@0.28.1)(tsx@4.23.1))
@@ -3210,7 +3210,7 @@ snapshots:
       why-is-node-running: 2.3.0
     optionalDependencies:
       '@types/node': 25.9.5
-      happy-dom: 20.10.6
+      happy-dom: 20.11.1
     transitivePeerDependencies:
       - msw
 
