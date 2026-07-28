@@ -22,7 +22,7 @@
   },
   "devDependencies": {
     "@preact/preset-vite": "2.10.6",
-    "@testing-library/jest-dom": "6.9.1",
+    "@testing-library/jest-dom": "7.0.0",
     "@testing-library/preact": "3.2.4",
     "@types/node": "25.9.5",
     "happy-dom": "20.11.1",
