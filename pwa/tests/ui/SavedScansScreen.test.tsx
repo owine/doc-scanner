@@ -103,5 +103,11 @@ describe('SavedScansScreen', () => {
     await waitFor(() => expect(screen.getByText(/1 page/i)).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: /^delete$/i }));
     await waitFor(() => expect(cancelSpy).toHaveBeenCalledWith(id));
+    // del() calls queue.cancel() *before* `await store.delete()` and `await reload()`,
+    // so the assertion above is satisfied while that chain is still pending. Wait for
+    // the reload to land too — otherwise its trailing setScans/setThumbs can fire after
+    // Vitest tears down happy-dom, throwing "document is not defined" as an unhandled
+    // rejection that fails the run even though every test passed.
+    await waitFor(() => expect(screen.getByText(/no saved scans/i)).toBeInTheDocument());
   });
 });
