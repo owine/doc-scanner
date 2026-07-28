@@ -36,6 +36,4 @@ beforeEach(() => {
 // final one). A left-mounted tree turns any late setState from a still-pending promise
 // into a real Preact DOM diff against a torn-down happy-dom, surfacing as an
 // unhandled "ReferenceError: document is not defined" that fails the whole run.
-afterEach(() => {
-  cleanup();
-});
+afterEach(cleanup);

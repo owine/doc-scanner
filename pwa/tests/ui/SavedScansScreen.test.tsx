@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/preact';
 import { SavedScansScreen } from '../../src/ui/SavedScansScreen.js';
 import { ScansStore } from '../../src/scanner/scans-store.js';
@@ -15,6 +15,12 @@ beforeEach(async () => {
   await store.open();
   queue = new OcrQueue(store, { init: async () => {}, recognize: async () => ({ text: '', words: [] }), terminate: () => {} } as any, async () => new Blob());
 });
+
+// happy-dom does not implement window.confirm, so the delete tests assign their own
+// stub. Capture the native value (genuinely `undefined` here) and put it back after
+// each test so the stub cannot outlive the test that needs it.
+const nativeConfirm = window.confirm;
+afterEach(() => { window.confirm = nativeConfirm; });
 
 const Q: Quad = { tl: {x:0,y:0}, tr: {x:1,y:0}, bl: {x:0,y:1}, br: {x:1,y:1} };
 const blob = (s: string) => new Blob([s], { type: 'image/jpeg' });
