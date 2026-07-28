@@ -98,7 +98,9 @@ describe('SavedScansScreen', () => {
     await store.finish(id);
     await store.setPdfStatus(id, 'running');
     const cancelSpy = vi.spyOn(queue, 'cancel');
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    // Assign rather than vi.spyOn: happy-dom does not define window.confirm, so
+    // spyOn only worked here because an earlier test in this file assigned it.
+    window.confirm = vi.fn().mockReturnValue(true);
     render(<SavedScansScreen store={store} queue={queue} onBack={() => {}} onNewScan={() => {}} onView={() => {}} />);
     await waitFor(() => expect(screen.getByText(/1 page/i)).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: /^delete$/i }));
