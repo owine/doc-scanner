@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/preact';
 import { SavedScansScreen } from '../../src/ui/SavedScansScreen.js';
 import { ScansStore } from '../../src/scanner/scans-store.js';
@@ -15,6 +15,12 @@ beforeEach(async () => {
   await store.open();
   queue = new OcrQueue(store, { init: async () => {}, recognize: async () => ({ text: '', words: [] }), terminate: () => {} } as any, async () => new Blob());
 });
+
+// happy-dom does not implement window.confirm, so the delete tests assign their own
+// stub. Capture the native value (genuinely `undefined` here) and put it back after
+// each test so the stub cannot outlive the test that needs it.
+const nativeConfirm = window.confirm;
+afterEach(() => { window.confirm = nativeConfirm; });
 
 const Q: Quad = { tl: {x:0,y:0}, tr: {x:1,y:0}, bl: {x:0,y:1}, br: {x:1,y:1} };
 const blob = (s: string) => new Blob([s], { type: 'image/jpeg' });
@@ -98,10 +104,18 @@ describe('SavedScansScreen', () => {
     await store.finish(id);
     await store.setPdfStatus(id, 'running');
     const cancelSpy = vi.spyOn(queue, 'cancel');
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    // Assign rather than vi.spyOn: happy-dom does not define window.confirm, so
+    // spyOn only worked here because an earlier test in this file assigned it.
+    window.confirm = vi.fn().mockReturnValue(true);
     render(<SavedScansScreen store={store} queue={queue} onBack={() => {}} onNewScan={() => {}} onView={() => {}} />);
     await waitFor(() => expect(screen.getByText(/1 page/i)).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: /^delete$/i }));
     await waitFor(() => expect(cancelSpy).toHaveBeenCalledWith(id));
+    // del() calls queue.cancel() *before* `await store.delete()` and `await reload()`,
+    // so the assertion above is satisfied while that chain is still pending. Wait for
+    // the reload to land too — otherwise its trailing setScans/setThumbs can fire after
+    // Vitest tears down happy-dom, throwing "document is not defined" as an unhandled
+    // rejection that fails the run even though every test passed.
+    await waitFor(() => expect(screen.getByText(/no saved scans/i)).toBeInTheDocument());
   });
 });

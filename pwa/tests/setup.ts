@@ -1,7 +1,8 @@
 /// <reference types="node" />
 import '@testing-library/jest-dom/vitest';
 import 'fake-indexeddb/auto';
-import { beforeEach } from 'vitest';
+import { afterEach, beforeEach } from 'vitest';
+import { cleanup } from '@testing-library/preact';
 import { IDBFactory as FakeIDBFactory } from 'fake-indexeddb';
 import { Blob as NodeBlob } from 'buffer';
 
@@ -27,3 +28,12 @@ delete (globalThis as any).createImageBitmap;
 beforeEach(() => {
   globalThis.indexedDB = new FakeIDBFactory();
 });
+
+// Unmount rendered trees after every test. @testing-library/preact only self-registers
+// its auto-cleanup when `afterEach` is a global, and this project deliberately runs
+// without `globals: true` — so without this, nothing ever unmounts the *last* tree in a
+// file (a `beforeEach(cleanup)` only cleans up before the next test, never after the
+// final one). A left-mounted tree turns any late setState from a still-pending promise
+// into a real Preact DOM diff against a torn-down happy-dom, surfacing as an
+// unhandled "ReferenceError: document is not defined" that fails the whole run.
+afterEach(cleanup);
