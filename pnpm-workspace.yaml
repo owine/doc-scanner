@@ -53,5 +53,12 @@ engineStrict: true
 # second, coarser control interacting with it is unverified.
 allowBuilds:
   core-js: false
+  # Optional dependency of @protontech/drive-sdk >=0.20.0 (alongside
+  # @xmldom/xmldom, which has no build script). Listed pre-emptively: without
+  # an explicit decision pnpm fails the install outright with
+  # ERR_PNPM_IGNORED_BUILDS, so the drive-sdk 0.20.0 PR would go red on CI the
+  # moment Renovate opens it. Denied because nothing here reads image EXIF —
+  # the SDK only needs it for photo-upload metadata, which this app does not use.
+  exifreader: false
   esbuild: true
   tesseract.js: true
