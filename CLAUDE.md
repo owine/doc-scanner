@@ -71,7 +71,9 @@ The server runs its TypeScript **source** under `tsx` in dev, prod, and Docker (
 
 ## Drive SDK version gate (read before bumping)
 
-`@protontech/drive-sdk` + `@protontech/crypto` are pinned and held behind **manual dashboard approval, never automerge** in `renovate.json` — each minor can carry breaking API changes (0.17 unwrapped node returns and made `NodeEntity.name` a `Result`; 0.19 added `SRPModule.generateKeySalt` and retyped `SessionKey`). On any bump, re-run typecheck against `drive/{client,srp-module,crypto-module}.ts` and re-verify tests. The `renovate.json` note documents the current state.
+`@protontech/drive-sdk` + `@protontech/crypto` are pinned, grouped into their own PR, and **never automerged** in `renovate.json` — each 0.x minor can carry breaking API changes (0.17 unwrapped node returns and made `NodeEntity.name` a `Result`; 0.19 added `SRPModule.generateKeySalt` and retyped `SessionKey`; 0.20 renamed the sharing surface public-link → URL-access and unwrapped `NodeEntity.activeRevision`). On any bump, re-run typecheck against `drive/{client,srp-module,crypto-module}.ts` and re-verify tests. The `renovate.json` note documents the current state.
+
+Renovate opens these PRs on its own — the `dependencyDashboardApproval` gate was dropped 2026-08-03 because every break of this kind is a compile error that CI's `tsc --noEmit` already catches, so the manual tick delayed PR *creation* without adding detection. A human still merges. The risk that remains is a change that typechecks but behaves differently, which only reading the diff catches — so read the diff.
 
 ## Conventions
 
