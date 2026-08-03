@@ -10,9 +10,12 @@ A personal-use, self-hosted PWA for scanning paper documents from a phone camera
 
 ## Toolchain (strict)
 
-- **Node `24.18.0`** (pinned in `.nvmrc`, enforced by `engine-strict`). Run `fnm use` / `nvm use` first. Node 26 breaks some happy-dom tests — that's an environment mismatch, not a real failure.
-- **pnpm `11.15.1`** via Corepack. This is a pnpm workspace; **do not use npm**.
-- Install with `pnpm install` (`.npmrc` sets `ignore-scripts`, a 7-day `minimum-release-age` soak, and exact pins; package build scripts are gated through `allowBuilds` in `pnpm-workspace.yaml`).
+- **Node `24.18.1`** (pinned in `.nvmrc`, enforced by `engineStrict`). Run `fnm use` / `nvm use` first. Node 26 breaks some happy-dom tests — that's an environment mismatch, not a real failure.
+- **pnpm `11.18.0`** via Corepack. This is a pnpm workspace; **do not use npm**.
+- Install with `pnpm install`. All pnpm settings live in **`pnpm-workspace.yaml`**, not `.npmrc` — pnpm 11 reads only auth/registry keys from `.npmrc` and silently ignores the rest, so settings put there look enforced while doing nothing (this repo's 7-day soak was inert that way until 2026-08-03). The hardening block sets a 7-day `minimumReleaseAge`, exact pins, strict engines, and gates package build scripts through `allowBuilds`. Two settings there are load-bearing — read their comments before touching either:
+  - `minimumReleaseAgeStrict: false` — every direct dep is pinned exact, so under strict mode the 7-day floor would override Renovate's soak tiers and block zero-day security fixes outright. With it off, the floor governs only transitive range resolution and Renovate's tiers stay authoritative.
+  - `trustLockfile: true` — `--frozen-lockfile` otherwise re-applies the floor to *existing* lockfile entries, turning CI red for a week after every Renovate merge.
+- `engineStrict` is now genuinely enforced: `pnpm install` **fails** unless Node is exactly `24.18.1`. Run `fnm use` / `nvm use` first.
 
 ## Common commands
 
