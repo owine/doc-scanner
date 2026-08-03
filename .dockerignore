@@ -1,9 +1,14 @@
-node_modules
-dist
+# Docker matches these against the full path relative to the context root, NOT
+# with .gitignore semantics — a bare `node_modules` matches only ./node_modules
+# and would let this pnpm workspace's server/ and pwa/ trees into the context,
+# where they'd clobber the symlink trees `pnpm install` builds in the image.
+# The `**/` prefix is load-bearing; don't "simplify" it away.
+**/node_modules
+**/dist
 .git
 .env
 .env.local
 data
-coverage
+**/coverage
 *.log
 docs
