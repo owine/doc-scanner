@@ -10,9 +10,9 @@ A personal-use, self-hosted PWA for scanning paper documents from a phone camera
 
 ## Toolchain (strict)
 
-- **Node `24.18.0`** (pinned in `.nvmrc`, enforced by `engine-strict`). Run `fnm use` / `nvm use` first. Node 26 breaks some happy-dom tests — that's an environment mismatch, not a real failure.
-- **pnpm `11.15.1`** via Corepack. This is a pnpm workspace; **do not use npm**.
-- Install with `pnpm install` (`.npmrc` sets `ignore-scripts`, a 7-day `minimum-release-age` soak, and exact pins; package build scripts are gated through `allowBuilds` in `pnpm-workspace.yaml`).
+- **Node `24.18.1`** (pinned in `.nvmrc`, enforced by `engineStrict` — `pnpm install` **fails** on any other version). Run `fnm use` / `nvm use` first. Node 26 breaks some happy-dom tests — that's an environment mismatch, not a real failure.
+- **pnpm `11.18.0`** via Corepack. This is a pnpm workspace; **do not use npm**.
+- Install with `pnpm install`. All pnpm settings live in **`pnpm-workspace.yaml`**, not `.npmrc` — pnpm 11 reads only auth/registry keys from `.npmrc` and silently ignores the rest, so anything put there looks enforced while doing nothing. The hardening block sets a 7-day `minimumReleaseAge`, exact pins, strict engines, and gates package build scripts through `allowBuilds`. `minimumReleaseAgeStrict` and `trustLockfile` are load-bearing for different reasons; the comments in that file are the canonical explanation, so read them before changing anything in the block.
 
 ## Common commands
 

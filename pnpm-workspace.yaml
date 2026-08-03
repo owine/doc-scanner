@@ -2,7 +2,63 @@ packages:
   - server
   - pwa
 
+# Supply-chain hardening. These MUST live here, not in .npmrc: pnpm 11 reads
+# ONLY auth and registry settings from .npmrc and silently ignores every other
+# key — no warning, no error. The equivalents (minimum-release-age, save-exact,
+# engine-strict) sat inert in .npmrc until 2026-08-03; the 7-day soak below was
+# never actually enforced, the real floor was pnpm 11's 1-day default.
+#
+# minimumReleaseAge: refuse versions published in the last 7 days (10080 min) —
+# defense in depth against the compromised-maintainer vector.
+#
+# minimumReleaseAgeStrict:false is LOAD-BEARING, do not drop it. Setting a floor
+# implicitly turns strict ON, which HARD-FAILS resolution
+# (ERR_PNPM_NO_MATURE_MATCHING_VERSION) when no version in range is old enough.
+# Because renovate-config pins every direct dep to an exact version, a pinned
+# dep is a single candidate — so under strict the floor overrides Renovate's
+# soak tiers and blocks anything younger than 7 days outright. That would kill
+# the `vulnerabilityAlerts: minimumReleaseAge 0 days` tier: a zero-day CVE fix
+# dies during Renovate's lockfile generation, so the PR lands in the dashboard's
+# Errored section instead of opening at all.
+#
+# With strict:false the floor cannot block a pinned direct dep at all, so
+# Renovate's tiers (3d baseline / 7d major / 0d security) stay the sole
+# authority on direct-dep timing. The floor still does real, non-redundant work
+# on TRANSITIVE deps, which carry real ranges: pnpm prefers a mature version
+# when one exists and only falls through when nothing in range qualifies. That
+# is the surface Renovate does not cover — lockFileMaintenance runs at 0 days,
+# 4x/week, and automerges. Verified empirically against pnpm 11.18.0; note
+# pnpm 10 behaves differently here, so don't port conclusions across majors.
+#
+# trustLockfile:true is ALSO load-bearing, and guards a SEPARATE mechanism from
+# strict:false. strict governs *resolution* (picking a version); independently,
+# `pnpm install --frozen-lockfile` runs a verification pass that re-applies
+# minimumReleaseAge to entries ALREADY in the lockfile. Without trustLockfile
+# that pass rejects any lockfile containing a package published in the last 7
+# days — which is the normal state of this repo for a week after every Renovate
+# merge (it was failing on @rolldown/binding-*@1.2.1, pulled in by vite 8.2.0,
+# when this block was first enabled). CI would go red on a green lockfile.
+# The lockfile is the reviewed artifact: the soak governs what ENTERS it, not a
+# re-litigation on every install. Trade-off: a hand-committed lockfile carrying
+# a too-new package is trusted, so review lockfile diffs you did not generate.
+minimumReleaseAge: 10080
+minimumReleaseAgeStrict: false
+trustLockfile: true
+saveExact: true
+engineStrict: true
+
+# Dependency build scripts are blocked by default in pnpm 10+; this is the
+# allowlist. Deliberately NOT paired with a global `ignoreScripts` — the
+# default plus this allowlist already expresses the policy precisely, and a
+# second, coarser control interacting with it is unverified.
 allowBuilds:
   core-js: false
+  # Optional dependency of @protontech/drive-sdk >=0.20.0 (alongside
+  # @xmldom/xmldom, which has no build script). Listed pre-emptively: without
+  # an explicit decision pnpm fails the install outright with
+  # ERR_PNPM_IGNORED_BUILDS, so the drive-sdk 0.20.0 PR would go red on CI the
+  # moment Renovate opens it. Denied because nothing here reads image EXIF —
+  # the SDK only needs it for photo-upload metadata, which this app does not use.
+  exifreader: false
   esbuild: true
   tesseract.js: true
