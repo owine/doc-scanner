@@ -11,8 +11,8 @@ importers:
   pwa:
     dependencies:
       '@cantoo/pdf-lib':
-        specifier: 2.8.1
-        version: 2.8.1(html-entities@2.6.0)
+        specifier: 2.8.2
+        version: 2.8.2(html-entities@2.6.0)
       idb:
         specifier: 8.0.3
         version: 8.0.3
@@ -31,10 +31,10 @@ importers:
     devDependencies:
       '@preact/preset-vite':
         specifier: 2.10.6
-        version: 2.10.6(@babel/core@7.29.7(supports-color@7.2.0))(preact@10.29.8)(supports-color@7.2.0)(vite@8.2.1(@types/node@25.9.5)(esbuild@0.28.2)(tsx@4.23.11))
+        version: 2.10.6(@babel/core@7.29.7(supports-color@7.2.0))(preact@10.29.8)(supports-color@7.2.0)(vite@8.2.1(@types/node@25.9.5)(esbuild@0.28.2)(tsx@4.23.12))
       '@testing-library/jest-dom':
-        specifier: 7.0.0
-        version: 7.0.0(@testing-library/dom@10.4.1)
+        specifier: 7.0.1
+        version: 7.0.1(@testing-library/dom@10.4.1)(vitest@4.1.10(@types/node@25.9.5)(happy-dom@20.11.2)(vite@8.2.1(@types/node@25.9.5)(esbuild@0.28.2)(tsx@4.23.12)))
       '@testing-library/preact':
         specifier: 3.2.4
         version: 3.2.4(preact@10.29.8)
@@ -52,10 +52,10 @@ importers:
         version: 7.0.2
       vite:
         specifier: 8.2.1
-        version: 8.2.1(@types/node@25.9.5)(esbuild@0.28.2)(tsx@4.23.11)
+        version: 8.2.1(@types/node@25.9.5)(esbuild@0.28.2)(tsx@4.23.12)
       vitest:
         specifier: 4.1.10
-        version: 4.1.10(@types/node@25.9.5)(happy-dom@20.11.2)(vite@8.2.1(@types/node@25.9.5)(esbuild@0.28.2)(tsx@4.23.11))
+        version: 4.1.10(@types/node@25.9.5)(happy-dom@20.11.2)(vite@8.2.1(@types/node@25.9.5)(esbuild@0.28.2)(tsx@4.23.12))
 
   server:
     dependencies:
@@ -84,8 +84,8 @@ importers:
         specifier: 13.1.3
         version: 13.1.3
       tsx:
-        specifier: 4.23.11
-        version: 4.23.11
+        specifier: 4.23.12
+        version: 4.23.12
       zod:
         specifier: 4.4.3
         version: 4.4.3
@@ -98,7 +98,7 @@ importers:
         version: 7.0.2
       vitest:
         specifier: 4.1.10
-        version: 4.1.10(@types/node@25.9.5)(happy-dom@20.11.2)(vite@8.2.1(@types/node@25.9.5)(esbuild@0.28.2)(tsx@4.23.11))
+        version: 4.1.10(@types/node@25.9.5)(happy-dom@20.11.2)(vite@8.2.1(@types/node@25.9.5)(esbuild@0.28.2)(tsx@4.23.12))
 
 packages:
 
@@ -202,8 +202,8 @@ packages:
     resolution: {integrity: sha512-Vj1jF3cPfxg7OAfoI7QnVKLoILlm2JF9pnVHrX8qx7AHMiYWT+NDAA7jChlNgRS4WTLc/fD1lXLmPixluj+3Gg==}
     engines: {node: '>=6.9.0'}
 
-  '@cantoo/pdf-lib@2.8.1':
-    resolution: {integrity: sha512-ChSLQuCqetxsElt45FXs/4CmsgYIlI12PBfo0HPyQnhH6U+Rs1WSNekNwG8ppAi2N/1eqjIr7ldeGrtjtkRhbQ==}
+  '@cantoo/pdf-lib@2.8.2':
+    resolution: {integrity: sha512-f0BJM3uPOjbPR3YriSEUIaTM0qnqthjFmTZX9NGI0NDM2Tj4a8xv7Z5Hb6jzUrhfb3/9Y77+xxoOln0IIiYq+w==}
     peerDependencies:
       html-entities: ^2.3.2
 
@@ -577,11 +577,15 @@ packages:
     resolution: {integrity: sha512-/DiOQ5xBxgdYRC8LNk7U+RWat0S3qRLeIw3ZIkMQ9kkVlRmwD/Eg8k8CqIpD6GW7u20JIUOfMKbxtiLutpjQ4g==}
     engines: {node: '>=12'}
 
-  '@testing-library/jest-dom@7.0.0':
-    resolution: {integrity: sha512-HKAH9C6mBo5yBG6yRO5i43L2iisencAo5z+o5P/saHUoY+miC5ivXRxHBJcFyB5ypPNxHJdK3BoF/3O4DIptMg==}
+  '@testing-library/jest-dom@7.0.1':
+    resolution: {integrity: sha512-oMDTC3oA+6CXSO2JZnvOI7CA6oVub6kij5ggk9ohwye5slmkwxYDXcPOVxgMw/RQlticjtO0C1RZkR97HgrWMw==}
     engines: {node: '>=22', npm: '>=6', yarn: '>=1'}
     peerDependencies:
       '@testing-library/dom': '>=10 <11'
+      vitest: '>= 0.32'
+    peerDependenciesMeta:
+      vitest:
+        optional: true
 
   '@testing-library/preact@3.2.4':
     resolution: {integrity: sha512-F+kJ243LP6VmEK1M809unzTE/ijg+bsMNuiRN0JEDIJBELKKDNhdgC/WrUSZ7klwJvtlO3wQZ9ix+jhObG07Fg==}
@@ -1583,8 +1587,8 @@ packages:
   tslib@2.8.1:
     resolution: {integrity: sha512-oJFu94HQb+KVduSUQL7wnpmqnfmLsOA/nAh6b6EH0wCEoK0/mPeXU6c3wKDV83MkOuHPRHtSXKKU99IBazS/2w==}
 
-  tsx@4.23.11:
-    resolution: {integrity: sha512-Ry2oTEUnhBdeEdWIztY8kf3/nBGnPnjMLVGL0YfdRXMORuPER5NlKmayqxtxRxwB1xBN+RivRaJfe7PM1rtiyw==}
+  tsx@4.23.12:
+    resolution: {integrity: sha512-FDf4L4sYzKtzWYhU/Xm0AQFdTjdIxNo9ElTf2mxXM6k8YMHXzYUe4yODVaXP4V9uMFbVg8c0qyBccK2OOxb45Q==}
     engines: {node: '>=18.0.0'}
     hasBin: true
 
@@ -1890,7 +1894,7 @@ snapshots:
       '@babel/helper-string-parser': 7.29.7
       '@babel/helper-validator-identifier': 7.29.7
 
-  '@cantoo/pdf-lib@2.8.1(html-entities@2.6.0)':
+  '@cantoo/pdf-lib@2.8.2(html-entities@2.6.0)':
     dependencies:
       '@pdf-lib/standard-fonts': 1.0.0
       '@pdf-lib/upng': 1.0.1
@@ -2023,19 +2027,19 @@ snapshots:
 
   '@pinojs/redact@0.4.0': {}
 
-  '@preact/preset-vite@2.10.6(@babel/core@7.29.7(supports-color@7.2.0))(preact@10.29.8)(supports-color@7.2.0)(vite@8.2.1(@types/node@25.9.5)(esbuild@0.28.2)(tsx@4.23.11))':
+  '@preact/preset-vite@2.10.6(@babel/core@7.29.7(supports-color@7.2.0))(preact@10.29.8)(supports-color@7.2.0)(vite@8.2.1(@types/node@25.9.5)(esbuild@0.28.2)(tsx@4.23.12))':
     dependencies:
       '@babel/core': 7.29.7(supports-color@7.2.0)
       '@babel/plugin-transform-react-jsx': 7.29.7(@babel/core@7.29.7(supports-color@7.2.0))(supports-color@7.2.0)
       '@babel/plugin-transform-react-jsx-development': 7.29.7(@babel/core@7.29.7(supports-color@7.2.0))(supports-color@7.2.0)
-      '@prefresh/vite': 2.4.12(preact@10.29.8)(supports-color@7.2.0)(vite@8.2.1(@types/node@25.9.5)(esbuild@0.28.2)(tsx@4.23.11))
+      '@prefresh/vite': 2.4.12(preact@10.29.8)(supports-color@7.2.0)(vite@8.2.1(@types/node@25.9.5)(esbuild@0.28.2)(tsx@4.23.12))
       '@rollup/pluginutils': 5.4.0
       babel-plugin-transform-hook-names: 1.0.2(@babel/core@7.29.7(supports-color@7.2.0))
       debug: 4.4.3(supports-color@7.2.0)
       magic-string: 0.30.21
       picocolors: 1.1.1
-      vite: 8.2.1(@types/node@25.9.5)(esbuild@0.28.2)(tsx@4.23.11)
-      vite-prerender-plugin: 0.5.13(vite@8.2.1(@types/node@25.9.5)(esbuild@0.28.2)(tsx@4.23.11))
+      vite: 8.2.1(@types/node@25.9.5)(esbuild@0.28.2)(tsx@4.23.12)
+      vite-prerender-plugin: 0.5.13(vite@8.2.1(@types/node@25.9.5)(esbuild@0.28.2)(tsx@4.23.12))
       zimmerframe: 1.1.4
     transitivePeerDependencies:
       - preact
@@ -2050,7 +2054,7 @@ snapshots:
 
   '@prefresh/utils@1.2.1': {}
 
-  '@prefresh/vite@2.4.12(preact@10.29.8)(supports-color@7.2.0)(vite@8.2.1(@types/node@25.9.5)(esbuild@0.28.2)(tsx@4.23.11))':
+  '@prefresh/vite@2.4.12(preact@10.29.8)(supports-color@7.2.0)(vite@8.2.1(@types/node@25.9.5)(esbuild@0.28.2)(tsx@4.23.12))':
     dependencies:
       '@babel/core': 7.29.7(supports-color@7.2.0)
       '@prefresh/babel-plugin': 0.5.3
@@ -2058,7 +2062,7 @@ snapshots:
       '@prefresh/utils': 1.2.1
       '@rollup/pluginutils': 4.2.1
       preact: 10.29.8
-      vite: 8.2.1(@types/node@25.9.5)(esbuild@0.28.2)(tsx@4.23.11)
+      vite: 8.2.1(@types/node@25.9.5)(esbuild@0.28.2)(tsx@4.23.12)
     transitivePeerDependencies:
       - supports-color
 
@@ -2171,7 +2175,7 @@ snapshots:
       lz-string: 1.5.0
       pretty-format: 27.5.1
 
-  '@testing-library/jest-dom@7.0.0(@testing-library/dom@10.4.1)':
+  '@testing-library/jest-dom@7.0.1(@testing-library/dom@10.4.1)(vitest@4.1.10(@types/node@25.9.5)(happy-dom@20.11.2)(vite@8.2.1(@types/node@25.9.5)(esbuild@0.28.2)(tsx@4.23.12)))':
     dependencies:
       '@adobe/css-tools': 4.5.0
       '@testing-library/dom': 10.4.1
@@ -2180,6 +2184,8 @@ snapshots:
       dom-accessibility-api: 0.6.3
       picocolors: 1.1.1
       redent: 3.0.0
+    optionalDependencies:
+      vitest: 4.1.10(@types/node@25.9.5)(happy-dom@20.11.2)(vite@8.2.1(@types/node@25.9.5)(esbuild@0.28.2)(tsx@4.23.12))
 
   '@testing-library/preact@3.2.4(preact@10.29.8)':
     dependencies:
@@ -2276,13 +2282,13 @@ snapshots:
       chai: 6.2.2
       tinyrainbow: 3.1.1
 
-  '@vitest/mocker@4.1.10(vite@8.2.1(@types/node@25.9.5)(esbuild@0.28.2)(tsx@4.23.11))':
+  '@vitest/mocker@4.1.10(vite@8.2.1(@types/node@25.9.5)(esbuild@0.28.2)(tsx@4.23.12))':
     dependencies:
       '@vitest/spy': 4.1.10
       estree-walker: 3.0.3
       magic-string: 0.30.21
     optionalDependencies:
-      vite: 8.2.1(@types/node@25.9.5)(esbuild@0.28.2)(tsx@4.23.11)
+      vite: 8.2.1(@types/node@25.9.5)(esbuild@0.28.2)(tsx@4.23.12)
 
   '@vitest/pretty-format@4.1.10':
     dependencies:
@@ -3125,7 +3131,7 @@ snapshots:
 
   tslib@2.8.1: {}
 
-  tsx@4.23.11:
+  tsx@4.23.12:
     dependencies:
       esbuild: 0.28.2
     optionalDependencies:
@@ -3171,7 +3177,7 @@ snapshots:
       escalade: 3.2.0
       picocolors: 1.1.1
 
-  vite-prerender-plugin@0.5.13(vite@8.2.1(@types/node@25.9.5)(esbuild@0.28.2)(tsx@4.23.11)):
+  vite-prerender-plugin@0.5.13(vite@8.2.1(@types/node@25.9.5)(esbuild@0.28.2)(tsx@4.23.12)):
     dependencies:
       kolorist: 1.8.0
       magic-string: 0.30.21
@@ -3179,9 +3185,9 @@ snapshots:
       simple-code-frame: 1.3.0
       source-map: 0.7.6
       stack-trace: 1.0.0
-      vite: 8.2.1(@types/node@25.9.5)(esbuild@0.28.2)(tsx@4.23.11)
+      vite: 8.2.1(@types/node@25.9.5)(esbuild@0.28.2)(tsx@4.23.12)
 
-  vite@8.2.1(@types/node@25.9.5)(esbuild@0.28.2)(tsx@4.23.11):
+  vite@8.2.1(@types/node@25.9.5)(esbuild@0.28.2)(tsx@4.23.12):
     dependencies:
       lightningcss: 1.33.0
       picomatch: 4.0.5
@@ -3192,12 +3198,12 @@ snapshots:
       '@types/node': 25.9.5
       esbuild: 0.28.2
       fsevents: 2.3.3
-      tsx: 4.23.11
+      tsx: 4.23.12
 
-  vitest@4.1.10(@types/node@25.9.5)(happy-dom@20.11.2)(vite@8.2.1(@types/node@25.9.5)(esbuild@0.28.2)(tsx@4.23.11)):
+  vitest@4.1.10(@types/node@25.9.5)(happy-dom@20.11.2)(vite@8.2.1(@types/node@25.9.5)(esbuild@0.28.2)(tsx@4.23.12)):
     dependencies:
       '@vitest/expect': 4.1.10
-      '@vitest/mocker': 4.1.10(vite@8.2.1(@types/node@25.9.5)(esbuild@0.28.2)(tsx@4.23.11))
+      '@vitest/mocker': 4.1.10(vite@8.2.1(@types/node@25.9.5)(esbuild@0.28.2)(tsx@4.23.12))
       '@vitest/pretty-format': 4.1.10
       '@vitest/runner': 4.1.10
       '@vitest/snapshot': 4.1.10
@@ -3214,7 +3220,7 @@ snapshots:
       tinyexec: 1.3.0
       tinyglobby: 0.2.17
       tinyrainbow: 3.1.1
-      vite: 8.2.1(@types/node@25.9.5)(esbuild@0.28.2)(tsx@4.23.11)
+      vite: 8.2.1(@types/node@25.9.5)(esbuild@0.28.2)(tsx@4.23.12)
       why-is-node-running: 2.3.0
     optionalDependencies:
       '@types/node': 25.9.5

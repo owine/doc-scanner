@@ -18,11 +18,11 @@
     "ulid": "3.0.2",
     "tesseract.js": "7.0.0",
     "tesseract.js-core": "7.0.0",
-    "@cantoo/pdf-lib": "2.8.1"
+    "@cantoo/pdf-lib": "2.8.2"
   },
   "devDependencies": {
     "@preact/preset-vite": "2.10.6",
-    "@testing-library/jest-dom": "7.0.0",
+    "@testing-library/jest-dom": "7.0.1",
     "@testing-library/preact": "3.2.4",
     "@types/node": "25.9.5",
     "happy-dom": "20.11.2",
