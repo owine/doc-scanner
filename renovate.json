@@ -9,13 +9,14 @@
   ],
   "customManagers": [
     {
-      "description": "Track pinned Alpine apk packages via Repology. IMPORTANT: bump alpine version in depNameTemplate when the base image changes (e.g. alpine_3_24 -> alpine_3_25)",
+      "description": "Track pinned Alpine apk packages against the Alpine CDN index via the shared custom.alpine datasource (supplied by the alpine preset). extractVersionTemplate selects this package's .apk from the directory listing; the \\d anchor after the name stops a prefix package from matching a longer sibling. IMPORTANT: bump alpine version in depNameTemplate when the base image changes (e.g. alpine_3_24 -> alpine_3_25) — that one edit also drives the registry URL, which the preset derives from the depName prefix.",
       "customType": "regex",
       "managerFilePatterns": ["/Dockerfile$/"],
       "matchStringsStrategy": "any",
       "matchStrings": ["\\s\\s(?<package>[a-z0-9][a-z0-9-_]+)=(?<currentValue>[a-z0-9-_.]+)\\s+"],
       "versioningTemplate": "loose",
-      "datasourceTemplate": "repology",
+      "datasourceTemplate": "custom.alpine",
+      "extractVersionTemplate": "^{{{package}}}-(?<version>\\d.*)\\.apk$",
       "depNameTemplate": "alpine_3_24/{{package}}"
     }
   ],
@@ -30,6 +31,12 @@
       "matchPackageNames": ["@protontech/drive-sdk", "@protontech/crypto"],
       "groupName": "@protontech/drive-sdk",
       "automerge": false
+    },
+    {
+      "description": "tini lives in the Alpine community repository. Custom datasources use registryStrategy 'first', so this REPLACES the main index rather than adding to it — listing both URLs would warn and use only the first. The URL derives its release line from the depName, so an Alpine bump stays a one-line edit to depNameTemplate. A community package missing from this rule is SILENTLY untracked: no warning, no dashboard entry. See owine/renovate-config README.",
+      "matchDatasources": ["custom.alpine"],
+      "matchPackageNames": ["/^alpine_.*/tini$/"],
+      "registryUrls": ["https://dl-cdn.alpinelinux.org/alpine/v{{ replace '_' '.' (replace 'alpine_' '' (lookup (split packageName '/') 0)) }}/community/x86_64/"]
     }
   ]
 }
