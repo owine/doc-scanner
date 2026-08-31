@@ -61,7 +61,7 @@ importers:
     dependencies:
       '@hono/node-server':
         specifier: 2.1.1
-        version: 2.1.1(hono@4.13.3)
+        version: 2.1.1(hono@4.13.5)
       '@protontech/crypto':
         specifier: 2.1.2
         version: 2.1.2(@types/node@25.9.5)(typescript@7.0.2)
@@ -72,8 +72,8 @@ importers:
         specifier: 3.0.3
         version: 3.0.3
       hono:
-        specifier: 4.13.3
-        version: 4.13.3
+        specifier: 4.13.5
+        version: 4.13.5
       openpgp:
         specifier: 6.3.1
         version: 6.3.1(@openpgp/web-stream-tools@0.3.1(@types/node@25.9.5)(typescript@7.0.2))
@@ -1102,8 +1102,8 @@ packages:
   help-me@5.0.0:
     resolution: {integrity: sha512-7xgomUX6ADmcYzFik0HzAxh/73YlKR9bmFzf51CZwR+b6YtzU2m0u49hQCqV6SvlqIqsaxovfwdvbnsw3b/zpg==}
 
-  hono@4.13.3:
-    resolution: {integrity: sha512-r8AO2mYHoLxSHkgafNeC/BXyb2vWRxD3jem4Ts+ptav8oTG5FIRifAjuJEmZI4bSvvc2ns0GxmIYiZnHqN3mMw==}
+  hono@4.13.5:
+    resolution: {integrity: sha512-O6+/eCYRkzzzy0rPWwKLiGBR1nFuUPZynnwjxN1MBA62NNqbT0wQEzQyK2gSO5yDIDB336sXQleAhOHrzlYyKw==}
     engines: {node: '>=16.9.0'}
 
   html-entities@2.6.0:
@@ -1984,9 +1984,9 @@ snapshots:
   '@esbuild/win32-x64@0.28.2':
     optional: true
 
-  '@hono/node-server@2.1.1(hono@4.13.3)':
+  '@hono/node-server@2.1.1(hono@4.13.5)':
     dependencies:
-      hono: 4.13.3
+      hono: 4.13.5
 
   '@jridgewell/gen-mapping@0.3.13':
     dependencies:
@@ -2667,7 +2667,7 @@ snapshots:
 
   help-me@5.0.0: {}
 
-  hono@4.13.3: {}
+  hono@4.13.5: {}
 
   html-entities@2.6.0: {}
 
