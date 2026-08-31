@@ -63,11 +63,11 @@ importers:
         specifier: 2.1.1
         version: 2.1.1(hono@4.13.5)
       '@protontech/crypto':
-        specifier: 2.1.2
-        version: 2.1.2(@types/node@25.9.5)(typescript@7.0.2)
+        specifier: 2.1.3
+        version: 2.1.3(@types/node@25.9.5)(typescript@7.0.2)
       '@protontech/drive-sdk':
         specifier: 0.21.0
-        version: 0.21.0(@protontech/crypto@2.1.2(@types/node@25.9.5)(typescript@7.0.2))
+        version: 0.21.0(@protontech/crypto@2.1.3(@types/node@25.9.5)(typescript@7.0.2))
       bcryptjs:
         specifier: 3.0.3
         version: 3.0.3
@@ -440,17 +440,13 @@ packages:
       preact: ^10.4.0 || ^11.0.0-0
       vite: '>=2.0.0'
 
-  '@protontech/crypto@2.1.2':
-    resolution: {integrity: sha512-st9SQdkzzvxzEM3eTM6nk8qwVP4mVLU987isRRoHd+Pbr6De64YK+6okCdEyQdztXVhrsEm31vyVZBPT/td+vA==}
+  '@protontech/crypto@2.1.3':
+    resolution: {integrity: sha512-Sbf/7yqwIE40L7AzZvRPfCWvDaHJ3GzELF3BhvhoVpGPImUxkbjRsJscGq/+Amglh3zAWaN1z2mCPoC1uUl2ZA==}
 
   '@protontech/drive-sdk@0.21.0':
     resolution: {integrity: sha512-WdJ+PT7x6zKHUHJZJyyVOHrODD08Qdfq4PvGm4g3EG8B3/aNdlfU90hFGsezkucYjySXCaHt/BEbnErJN13zDw==}
     peerDependencies:
       '@protontech/crypto': ^2.0.0
-
-  '@protontech/jsmimeparser@3.0.2':
-    resolution: {integrity: sha512-PConkdRdY8xc1A8+oEmQ2pGC7nnJPqWwkUb/+odjFPbof2w3zpIws77D9J9assvZg8OdB8dRe/cZdBU+BCijgA==}
-    deprecated: Package no longer maintained. Relevant features are now integrated under the @protontech/crypto package.
 
   '@protontech/openpgp@6.3.1':
     resolution: {integrity: sha512-+NUfnF0rbw553xwT09YROb3TBmitumSSgOEx3eQh8LOx7CAKQzo2CLfsbBQz7KFc3+d9iMIMOKLrLzerYCtLIw==}
@@ -2067,31 +2063,28 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@protontech/crypto@2.1.2(@types/node@25.9.5)(typescript@7.0.2)':
+  '@protontech/crypto@2.1.3(@types/node@25.9.5)(typescript@7.0.2)':
     dependencies:
       '@noble/hashes': 2.3.0
       '@openpgp/web-stream-tools': 0.3.1(@types/node@25.9.5)(typescript@7.0.2)
       bcryptjs: 3.0.3
       comlink: 4.4.2
       core-js: 3.50.0
-      jsmimeparser: '@protontech/jsmimeparser@3.0.2'
       openpgp: '@protontech/openpgp@6.3.1(@openpgp/web-stream-tools@0.3.1(@types/node@25.9.5)(typescript@7.0.2))'
     transitivePeerDependencies:
       - '@types/node'
       - typescript
 
-  '@protontech/drive-sdk@0.21.0(@protontech/crypto@2.1.2(@types/node@25.9.5)(typescript@7.0.2))':
+  '@protontech/drive-sdk@0.21.0(@protontech/crypto@2.1.3(@types/node@25.9.5)(typescript@7.0.2))':
     dependencies:
       '@noble/hashes': 1.8.0
-      '@protontech/crypto': 2.1.2(@types/node@25.9.5)(typescript@7.0.2)
+      '@protontech/crypto': 2.1.3(@types/node@25.9.5)(typescript@7.0.2)
       ttag: 1.8.12
     optionalDependencies:
       '@xmldom/xmldom': 0.9.12
       exifreader: 4.44.0
     transitivePeerDependencies:
       - babel-plugin-macros
-
-  '@protontech/jsmimeparser@3.0.2': {}
 
   '@protontech/openpgp@6.3.1(@openpgp/web-stream-tools@0.3.1(@types/node@25.9.5)(typescript@7.0.2))':
     optionalDependencies:
