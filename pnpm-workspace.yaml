@@ -27,8 +27,11 @@ packages:
 # on TRANSITIVE deps, which carry real ranges: pnpm prefers a mature version
 # when one exists and only falls through when nothing in range qualifies. That
 # is the surface Renovate does not cover — lockFileMaintenance runs at 0 days,
-# 4x/week, and automerges. Verified empirically against pnpm 11.18.0; note
-# pnpm 10 behaves differently here, so don't port conclusions across majors.
+# 4x/week, and automerges. Re-verified empirically against pnpm 12.1.0 (was
+# 11.18.0): an exact pin 2 days old resolves under strict:false and hard-fails
+# with ERR_PNPM_NO_MATURE_MATCHING_VERSION under strict:true, and a transitive
+# range still picks the mature version over the fresh one. Note pnpm 10 behaves
+# differently here, so don't port conclusions across majors.
 #
 # trustLockfile:true is ALSO load-bearing, and guards a SEPARATE mechanism from
 # strict:false. strict governs *resolution* (picking a version); independently,
@@ -62,6 +65,17 @@ allowBuilds:
   exifreader: false
   esbuild: true
   tesseract.js: true
+
+# minimumReleaseAgeExclude is MACHINE-WRITTEN — do not treat it as hand-curated.
+# Under strict:false an install that has to pick a version younger than the
+# floor appends it here itself and merges same-package entries into a `||`
+# union (pnpm 11 and 12 both do this). Every entry is a permanent hole in the
+# soak for that exact version, so prune ones that no longer match a live pin.
+#
+# Comments INSIDE the list do not survive that rewrite under pnpm 12: 11.25.0
+# preserved them, 12.1.0 drops them. Provenance notes therefore go here, above
+# the key, which is preserved. Verified against 12.1.0.
+#
+# hono@4.12.34 — Renovate security update.
 minimumReleaseAgeExclude:
-  # Renovate security update: hono@4.12.34
   - hono@4.12.34
