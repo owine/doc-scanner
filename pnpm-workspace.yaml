@@ -27,11 +27,20 @@ packages:
 # on TRANSITIVE deps, which carry real ranges: pnpm prefers a mature version
 # when one exists and only falls through when nothing in range qualifies. That
 # is the surface Renovate does not cover — lockFileMaintenance runs at 0 days,
-# 4x/week, and automerges. Re-verified empirically against pnpm 12.1.0 (was
-# 11.18.0): an exact pin 2 days old resolves under strict:false and hard-fails
-# with ERR_PNPM_NO_MATURE_MATCHING_VERSION under strict:true, and a transitive
-# range still picks the mature version over the fresh one. Note pnpm 10 behaves
-# differently here, so don't port conclusions across majors.
+# 4x/week, and automerges. Re-verified empirically on pnpm 12.x (12.1.0 and
+# 12.3.4; previously 11.18.0): an exact pin 3 days old resolves under
+# strict:false and hard-fails with ERR_PNPM_NO_MATURE_MATCHING_VERSION under
+# strict:true, and a transitive range still picks the mature version over the
+# fresh one. Scoped to the major on purpose — minors automerge here, so pinning
+# these claims to an exact patch makes them stale on arrival. Note pnpm 10
+# behaves differently, so don't port conclusions across majors.
+#
+# When re-verifying by hand, do it in a CLEAN directory. pnpm caches lockfile
+# policy verdicts in ~/Library/Caches/pnpm/lockfile-verified.jsonl (keyed on
+# lockfile hash + path + inode + mtime and the policy used, and NOT new in 12 —
+# entries here predate it). A repeat install prints "Lockfile passes
+# supply-chain policies (verified Ns ago)" and skips the check entirely, which
+# makes a policy look inert when it is merely cached.
 #
 # trustLockfile:true is ALSO load-bearing, and guards a SEPARATE mechanism from
 # strict:false. strict governs *resolution* (picking a version); independently,
@@ -73,8 +82,8 @@ allowBuilds:
 # soak for that exact version, so prune ones that no longer match a live pin.
 #
 # Comments INSIDE the list do not survive that rewrite under pnpm 12: 11.25.0
-# preserved them, 12.1.0 drops them. Provenance notes therefore go here, above
-# the key, which is preserved. Verified against 12.1.0.
+# preserved them, 12.1.0 and 12.3.4 drop them. Provenance notes therefore go
+# here, above the key, which is preserved.
 #
 # hono@4.12.34 — Renovate security update.
 minimumReleaseAgeExclude:
