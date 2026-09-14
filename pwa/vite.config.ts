@@ -21,5 +21,13 @@ export default defineConfig({
   test: {
     environment: 'happy-dom',
     setupFiles: ['./tests/setup.ts'],
+    server: {
+      // @cantoo/pdf-lib >= 2.11 vendored @pdf-lib/standard-fonts, and its ESM build
+      // imports the font metrics as bare `.json` with no `with { type: 'json' }`.
+      // Node's native ESM loader rejects that, and Vitest externalizes node_modules
+      // by default — so let Vite transform the package instead. The production build
+      // is unaffected (Rollup inlines the JSON at bundle time).
+      deps: { inline: ['@cantoo/pdf-lib'] },
+    },
   } as any,
 });
