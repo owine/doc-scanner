@@ -53,10 +53,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # Hand-maintained: Renovate's runner extraction only reads literal
+        # `runs-on:` values, so these `runner` labels are invisible to it
+        # (confirmed by PR #209, which bumped the `runs-on:` above to 26.04 and
+        # left both of these on 24.04). Update them together with that label
+        # whenever the runner image moves, or the build goes split-brain with
+        # the two arches on different images.
         include:
-          - runner: ubuntu-24.04
+          - runner: ubuntu-26.04
             platform: linux/amd64
-          - runner: ubuntu-24.04-arm
+          - runner: ubuntu-26.04-arm
             platform: linux/arm64
     runs-on: ${{ matrix.runner }}
 
