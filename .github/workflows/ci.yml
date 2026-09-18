@@ -40,7 +40,12 @@ jobs:
             printf '%-8s %s\n' "$b" "$(command -v "$b" || echo MISSING)"
           done
           pg_config --version
-          ls -d /usr/lib/postgresql/*/bin 2>/dev/null || echo "no /usr/lib/postgresql/*/bin"
+          for d in /usr/lib/postgresql/*/bin; do
+            [ -d "$d" ] || { echo "no /usr/lib/postgresql/*/bin"; break; }
+            echo "-- $d"
+            ls "$d"
+          done
+          dpkg -l | grep -iE 'postgresql|libpq' | awk '{print $2, $3}'
           echo "::endgroup::"
           echo "::group::node toolcache"
           ls /opt/hostedtoolcache/node 2>/dev/null
@@ -116,7 +121,12 @@ jobs:
             printf '%-8s %s\n' "$b" "$(command -v "$b" || echo MISSING)"
           done
           pg_config --version
-          ls -d /usr/lib/postgresql/*/bin 2>/dev/null || echo "no /usr/lib/postgresql/*/bin"
+          for d in /usr/lib/postgresql/*/bin; do
+            [ -d "$d" ] || { echo "no /usr/lib/postgresql/*/bin"; break; }
+            echo "-- $d"
+            ls "$d"
+          done
+          dpkg -l | grep -iE 'postgresql|libpq' | awk '{print $2, $3}'
           echo "::endgroup::"
           echo "::group::node toolcache"
           ls /opt/hostedtoolcache/node 2>/dev/null
