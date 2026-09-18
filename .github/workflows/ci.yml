@@ -12,10 +12,41 @@ permissions:
 jobs:
   test:
     name: test + typecheck
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
 
     steps:
+      # TEMPORARY (canary/ubuntu-26.04 only) - probes the runner image so we can
+      # validate ubuntu-26.04 before the fleet-wide migration. Never merge this.
+      - name: Canary probe
+        continue-on-error: true
+        run: |
+          set +e
+          echo "::group::os-release"
+          . /etc/os-release && echo "$PRETTY_NAME"
+          echo "uname -m: $(uname -m)   RUNNER_ARCH: ${RUNNER_ARCH:-unset}"
+          echo "::endgroup::"
+          echo "::group::toolchain"
+          node --version
+          python3 --version
+          docker --version
+          docker compose version
+          docker buildx version
+          git --version
+          yamllint --version
+          echo "::endgroup::"
+          echo "::group::postgresql"
+          for b in initdb pg_ctl pg_dump psql; do
+            printf '%-8s %s\n' "$b" "$(command -v "$b" || echo MISSING)"
+          done
+          pg_config --version
+          ls -d /usr/lib/postgresql/*/bin 2>/dev/null || echo "no /usr/lib/postgresql/*/bin"
+          echo "::endgroup::"
+          echo "::group::node toolcache"
+          ls /opt/hostedtoolcache/node 2>/dev/null
+          echo "::endgroup::"
+          exit 0
+
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
@@ -54,13 +85,44 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: ubuntu-24.04
+          - runner: ubuntu-26.04
             platform: linux/amd64
-          - runner: ubuntu-24.04-arm
+          - runner: ubuntu-26.04-arm
             platform: linux/arm64
     runs-on: ${{ matrix.runner }}
 
     steps:
+      # TEMPORARY (canary/ubuntu-26.04 only) - probes the runner image so we can
+      # validate ubuntu-26.04 before the fleet-wide migration. Never merge this.
+      - name: Canary probe
+        continue-on-error: true
+        run: |
+          set +e
+          echo "::group::os-release"
+          . /etc/os-release && echo "$PRETTY_NAME"
+          echo "uname -m: $(uname -m)   RUNNER_ARCH: ${RUNNER_ARCH:-unset}"
+          echo "::endgroup::"
+          echo "::group::toolchain"
+          node --version
+          python3 --version
+          docker --version
+          docker compose version
+          docker buildx version
+          git --version
+          yamllint --version
+          echo "::endgroup::"
+          echo "::group::postgresql"
+          for b in initdb pg_ctl pg_dump psql; do
+            printf '%-8s %s\n' "$b" "$(command -v "$b" || echo MISSING)"
+          done
+          pg_config --version
+          ls -d /usr/lib/postgresql/*/bin 2>/dev/null || echo "no /usr/lib/postgresql/*/bin"
+          echo "::endgroup::"
+          echo "::group::node toolcache"
+          ls /opt/hostedtoolcache/node 2>/dev/null
+          echo "::endgroup::"
+          exit 0
+
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
