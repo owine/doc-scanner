@@ -53,12 +53,22 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Hand-maintained: Renovate's runner extraction only reads literal
-        # `runs-on:` values, so these `runner` labels are invisible to it
+        # Renovate's built-in github-actions manager CANNOT see these labels:
+        # it reads `runs-on:` off parsed YAML, where this job's value is the
+        # literal string `${{ matrix.runner }}` with no version in it
         # (confirmed by PR #209, which bumped the `runs-on:` above to 26.04 and
-        # left both of these on 24.04). Update them together with that label
-        # whenever the runner image moves, or the build goes split-brain with
-        # the two arches on different images.
+        # left both of these on 24.04 — a split-brain build that still passed,
+        # since both runner images work).
+        # They ARE tracked now, by a second `github-runners` customManager in
+        # the shared preset (owine/renovate-config#103), which keys on the
+        # `runner:` key and captures with the same shape as the built-in
+        # manager, so these share a branch with the literal `runs-on:` deps and
+        # both halves land in ONE PR. So do not bump them by hand — but keep
+        # the shape: one line per label, `runner: <os>-<version>`, version's
+        # first character a digit, suffix kept attached (`26.04-arm` is its own
+        # datasource version, not `26.04` decorated). Renaming the key, moving
+        # a label behind an env var, or splitting it across lines un-tracks it
+        # again, silently and with no error anywhere.
         include:
           - runner: ubuntu-26.04
             platform: linux/amd64
