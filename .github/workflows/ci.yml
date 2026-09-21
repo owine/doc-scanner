@@ -19,21 +19,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
-      - name: Setup pnpm
-        uses: pnpm/setup@703c52620218391530e48b9e8870d5c0082e1b9b # v2.1.0
+      - name: Setup pnpm, Node, and install
+        # v3 does the whole trio in one step: it installs pnpm (version from
+        # `packageManager`), auto-detects the Node version from `.nvmrc`, and
+        # runs `pnpm install` itself (`install` defaults to true). Do NOT add a
+        # separate install step -- `require-lockfile: true` makes this one run
+        # with `--frozen-lockfile` and fail outright if the lockfile is missing.
+        # No `working-directory`: the install must run at the repo root so the
+        # whole workspace is present for the `pnpm --filter` steps below.
+        uses: pnpm/setup@fbda4c85fc2e1e08721cd8763afea8f48d60f024 # v3.0.0
         with:
-          # This action's `install` input defaults to true; the explicit
-          # `pnpm install --frozen-lockfile` step below stays the single install.
-          install: false
-
-      - name: Setup Node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
-        with:
-          node-version-file: .nvmrc
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+          cache: true
+          require-lockfile: true
 
       - name: Typecheck (server)
         run: pnpm --filter @doc-scanner/server run typecheck
