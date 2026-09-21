@@ -169,8 +169,8 @@ importers:
   pwa:
     dependencies:
       '@cantoo/pdf-lib':
-        specifier: 2.11.0
-        version: 2.11.0(html-entities@2.6.0)
+        specifier: 2.11.1
+        version: 2.11.1(html-entities@2.6.0)
       idb:
         specifier: 8.0.3
         version: 8.0.3
@@ -189,16 +189,16 @@ importers:
     devDependencies:
       '@preact/preset-vite':
         specifier: 2.10.6
-        version: 2.10.6(@babel/core@7.29.7(supports-color@7.2.0))(preact@10.29.8)(supports-color@7.2.0)(vite@8.3.0(@types/node@25.9.6)(esbuild@0.28.2)(tsx@4.23.13))
+        version: 2.10.6(@babel/core@7.29.7(supports-color@7.2.0))(preact@10.29.8)(supports-color@7.2.0)(vite@8.3.0(@types/node@25.9.7)(esbuild@0.28.2)(tsx@4.23.13))
       '@testing-library/jest-dom':
         specifier: 7.0.1
-        version: 7.0.1(@testing-library/dom@10.4.2)(vitest@5.0.1(@types/node@25.9.6)(happy-dom@20.14.5)(vite@8.3.0(@types/node@25.9.6)(esbuild@0.28.2)(tsx@4.23.13)))
+        version: 7.0.1(@testing-library/dom@10.4.2)(vitest@5.0.1(@types/node@25.9.7)(happy-dom@20.14.5)(vite@8.3.0(@types/node@25.9.7)(esbuild@0.28.2)(tsx@4.23.13)))
       '@testing-library/preact':
         specifier: 3.2.4
         version: 3.2.4(preact@10.29.8)
       '@types/node':
-        specifier: 25.9.6
-        version: 25.9.6
+        specifier: 25.9.7
+        version: 25.9.7
       fake-indexeddb:
         specifier: 6.2.5
         version: 6.2.5
@@ -210,10 +210,10 @@ importers:
         version: 7.0.2
       vite:
         specifier: 8.3.0
-        version: 8.3.0(@types/node@25.9.6)(esbuild@0.28.2)(tsx@4.23.13)
+        version: 8.3.0(@types/node@25.9.7)(esbuild@0.28.2)(tsx@4.23.13)
       vitest:
         specifier: 5.0.1
-        version: 5.0.1(@types/node@25.9.6)(happy-dom@20.14.5)(vite@8.3.0(@types/node@25.9.6)(esbuild@0.28.2)(tsx@4.23.13))
+        version: 5.0.1(@types/node@25.9.7)(happy-dom@20.14.5)(vite@8.3.0(@types/node@25.9.7)(esbuild@0.28.2)(tsx@4.23.13))
 
   server:
     dependencies:
@@ -222,10 +222,10 @@ importers:
         version: 2.1.1(hono@4.13.8)
       '@protontech/crypto':
         specifier: 2.1.3
-        version: 2.1.3(@types/node@25.9.6)(typescript@7.0.2)
+        version: 2.1.3(@types/node@25.9.7)(typescript@7.0.2)
       '@protontech/drive-sdk':
         specifier: 0.21.0
-        version: 0.21.0(@protontech/crypto@2.1.3(@types/node@25.9.6)(typescript@7.0.2))
+        version: 0.21.0(@protontech/crypto@2.1.3(@types/node@25.9.7)(typescript@7.0.2))
       bcryptjs:
         specifier: 3.0.3
         version: 3.0.3
@@ -234,7 +234,7 @@ importers:
         version: 4.13.8
       openpgp:
         specifier: 6.3.1
-        version: 6.3.1(@openpgp/web-stream-tools@0.3.1(@types/node@25.9.6)(typescript@7.0.2))
+        version: 6.3.1(@openpgp/web-stream-tools@0.3.1(@types/node@25.9.7)(typescript@7.0.2))
       pino:
         specifier: 10.3.1
         version: 10.3.1
@@ -245,18 +245,18 @@ importers:
         specifier: 4.23.13
         version: 4.23.13
       zod:
-        specifier: 4.6.2
-        version: 4.6.2
+        specifier: 4.6.5
+        version: 4.6.5
     devDependencies:
       '@types/node':
-        specifier: 25.9.6
-        version: 25.9.6
+        specifier: 25.9.7
+        version: 25.9.7
       typescript:
         specifier: 7.0.2
         version: 7.0.2
       vitest:
         specifier: 5.0.1
-        version: 5.0.1(@types/node@25.9.6)(happy-dom@20.14.5)(vite@8.3.0(@types/node@25.9.6)(esbuild@0.28.2)(tsx@4.23.13))
+        version: 5.0.1(@types/node@25.9.7)(happy-dom@20.14.5)(vite@8.3.0(@types/node@25.9.7)(esbuild@0.28.2)(tsx@4.23.13))
 
 packages:
 
@@ -360,8 +360,8 @@ packages:
     resolution: {integrity: sha512-Vj1jF3cPfxg7OAfoI7QnVKLoILlm2JF9pnVHrX8qx7AHMiYWT+NDAA7jChlNgRS4WTLc/fD1lXLmPixluj+3Gg==}
     engines: {node: '>=6.9.0'}
 
-  '@cantoo/pdf-lib@2.11.0':
-    resolution: {integrity: sha512-C5bUEG8F8nRqiZ00+ytp90QqNSMo1O1WEKVirh6J491H7D9+BBOs+SS0haFlJrb74gu7r2KD56FKDKOOgoy5jw==}
+  '@cantoo/pdf-lib@2.11.1':
+    resolution: {integrity: sha512-lYuRJFfXgoP8WVE8HYSeoLfDcnSXmjMLmdZS7YvmYHngbcZfiqDOruHrZBqjYizkrNa4ad1yW4WCrPYyb26T3Q==}
     peerDependencies:
       html-entities: '>=2.3.2'
 
@@ -759,8 +759,8 @@ packages:
   '@types/estree@1.0.9':
     resolution: {integrity: sha512-GhdPgy1el4/ImP05X05Uw4cw2/M93BCUmnEvWZNStlCzEKME4Fkk+YpoA5OiHNQmoS7Cafb8Xa3Pya8m1Qrzeg==}
 
-  '@types/node@25.9.6':
-    resolution: {integrity: sha512-JR6Q/PV5DKFvjrGFVqQJdeG0qvsqQQLDa3TzFrqVwhqRXqwNaxPo2KYCtCQXpOdIulCouKwT7a6in9nFthBAzw==}
+  '@types/node@25.9.7':
+    resolution: {integrity: sha512-Y+axoNWOFLvDNFxNbDA+kqqV05imHwTu5bZWWO6tQM3Y2NX1jvzUJkYlf4nYnMCnvu4wQBKW6Nr+ok6yHWA9aQ==}
 
   '@types/whatwg-mimetype@3.0.2':
     resolution: {integrity: sha512-c2AKvDT8ToxLIOUlN51gTiHXflsfIFisS4pO7pDPoKouJCESkhZnEy623gwP9laCy5lnLDAw1vAzu2vM2YLOrA==}
@@ -1875,8 +1875,8 @@ packages:
   zlibjs@0.3.1:
     resolution: {integrity: sha512-+J9RrgTKOmlxFSDHo0pI1xM6BLVUv+o0ZT9ANtCxGkjIVCCUdx9alUF8Gm+dGLKbkkkidWIHFDZHDMpfITt4+w==}
 
-  zod@4.6.2:
-    resolution: {integrity: sha512-lh5RCAGFa1Cm2hjtNwLQhSs/AsqdWnTQaBER9fEwN/88pSh7KOtJavtBx/0VlkN/uFd61SwYmljLMDAsHlvzBQ==}
+  zod@4.6.5:
+    resolution: {integrity: sha512-v5l/aFXZQeai4awLbOpSoHecE9UiMrnfx75tEXLjNonXVARxQ5mOeipTjROUchszUNCqnE+hqAMujRsRHsut2Q==}
 
 snapshots:
 
@@ -2013,7 +2013,7 @@ snapshots:
       '@babel/helper-string-parser': 7.29.7
       '@babel/helper-validator-identifier': 7.29.7
 
-  '@cantoo/pdf-lib@2.11.0(html-entities@2.6.0)':
+  '@cantoo/pdf-lib@2.11.1(html-entities@2.6.0)':
     dependencies:
       culori: 4.0.2
       fflate: 0.8.3
@@ -2126,28 +2126,28 @@ snapshots:
 
   '@noble/hashes@2.4.0': {}
 
-  '@openpgp/web-stream-tools@0.3.1(@types/node@25.9.6)(typescript@7.0.2)':
+  '@openpgp/web-stream-tools@0.3.1(@types/node@25.9.7)(typescript@7.0.2)':
     optionalDependencies:
-      '@types/node': 25.9.6
+      '@types/node': 25.9.7
       typescript: 7.0.2
 
   '@oxc-project/types@0.149.0': {}
 
   '@pinojs/redact@0.4.0': {}
 
-  '@preact/preset-vite@2.10.6(@babel/core@7.29.7(supports-color@7.2.0))(preact@10.29.8)(supports-color@7.2.0)(vite@8.3.0(@types/node@25.9.6)(esbuild@0.28.2)(tsx@4.23.13))':
+  '@preact/preset-vite@2.10.6(@babel/core@7.29.7(supports-color@7.2.0))(preact@10.29.8)(supports-color@7.2.0)(vite@8.3.0(@types/node@25.9.7)(esbuild@0.28.2)(tsx@4.23.13))':
     dependencies:
       '@babel/core': 7.29.7(supports-color@7.2.0)
       '@babel/plugin-transform-react-jsx': 7.29.7(@babel/core@7.29.7(supports-color@7.2.0))(supports-color@7.2.0)
       '@babel/plugin-transform-react-jsx-development': 7.29.7(@babel/core@7.29.7(supports-color@7.2.0))(supports-color@7.2.0)
-      '@prefresh/vite': 2.4.12(preact@10.29.8)(supports-color@7.2.0)(vite@8.3.0(@types/node@25.9.6)(esbuild@0.28.2)(tsx@4.23.13))
+      '@prefresh/vite': 2.4.12(preact@10.29.8)(supports-color@7.2.0)(vite@8.3.0(@types/node@25.9.7)(esbuild@0.28.2)(tsx@4.23.13))
       '@rollup/pluginutils': 5.4.0
       babel-plugin-transform-hook-names: 1.0.2(@babel/core@7.29.7(supports-color@7.2.0))
       debug: 4.4.3(supports-color@7.2.0)
       magic-string: 0.30.21
       picocolors: 1.1.1
-      vite: 8.3.0(@types/node@25.9.6)(esbuild@0.28.2)(tsx@4.23.13)
-      vite-prerender-plugin: 0.5.13(vite@8.3.0(@types/node@25.9.6)(esbuild@0.28.2)(tsx@4.23.13))
+      vite: 8.3.0(@types/node@25.9.7)(esbuild@0.28.2)(tsx@4.23.13)
+      vite-prerender-plugin: 0.5.13(vite@8.3.0(@types/node@25.9.7)(esbuild@0.28.2)(tsx@4.23.13))
       zimmerframe: 1.1.5
     transitivePeerDependencies:
       - preact
@@ -2164,7 +2164,7 @@ snapshots:
 
   '@prefresh/utils@1.2.1': {}
 
-  '@prefresh/vite@2.4.12(preact@10.29.8)(supports-color@7.2.0)(vite@8.3.0(@types/node@25.9.6)(esbuild@0.28.2)(tsx@4.23.13))':
+  '@prefresh/vite@2.4.12(preact@10.29.8)(supports-color@7.2.0)(vite@8.3.0(@types/node@25.9.7)(esbuild@0.28.2)(tsx@4.23.13))':
     dependencies:
       '@babel/core': 7.29.7(supports-color@7.2.0)
       '@prefresh/babel-plugin': 0.5.4(@babel/core@7.29.7(supports-color@7.2.0))
@@ -2172,26 +2172,26 @@ snapshots:
       '@prefresh/utils': 1.2.1
       '@rollup/pluginutils': 4.2.1
       preact: 10.29.8
-      vite: 8.3.0(@types/node@25.9.6)(esbuild@0.28.2)(tsx@4.23.13)
+      vite: 8.3.0(@types/node@25.9.7)(esbuild@0.28.2)(tsx@4.23.13)
     transitivePeerDependencies:
       - supports-color
 
-  '@protontech/crypto@2.1.3(@types/node@25.9.6)(typescript@7.0.2)':
+  '@protontech/crypto@2.1.3(@types/node@25.9.7)(typescript@7.0.2)':
     dependencies:
       '@noble/hashes': 2.4.0
-      '@openpgp/web-stream-tools': 0.3.1(@types/node@25.9.6)(typescript@7.0.2)
+      '@openpgp/web-stream-tools': 0.3.1(@types/node@25.9.7)(typescript@7.0.2)
       bcryptjs: 3.0.3
       comlink: 4.4.2
       core-js: 3.50.0
-      openpgp: '@protontech/openpgp@6.3.1(@openpgp/web-stream-tools@0.3.1(@types/node@25.9.6)(typescript@7.0.2))'
+      openpgp: '@protontech/openpgp@6.3.1(@openpgp/web-stream-tools@0.3.1(@types/node@25.9.7)(typescript@7.0.2))'
     transitivePeerDependencies:
       - '@types/node'
       - typescript
 
-  '@protontech/drive-sdk@0.21.0(@protontech/crypto@2.1.3(@types/node@25.9.6)(typescript@7.0.2))':
+  '@protontech/drive-sdk@0.21.0(@protontech/crypto@2.1.3(@types/node@25.9.7)(typescript@7.0.2))':
     dependencies:
       '@noble/hashes': 1.8.0
-      '@protontech/crypto': 2.1.3(@types/node@25.9.6)(typescript@7.0.2)
+      '@protontech/crypto': 2.1.3(@types/node@25.9.7)(typescript@7.0.2)
       ttag: 1.8.12
     optionalDependencies:
       '@xmldom/xmldom': 0.9.12
@@ -2199,9 +2199,9 @@ snapshots:
     transitivePeerDependencies:
       - babel-plugin-macros
 
-  '@protontech/openpgp@6.3.1(@openpgp/web-stream-tools@0.3.1(@types/node@25.9.6)(typescript@7.0.2))':
+  '@protontech/openpgp@6.3.1(@openpgp/web-stream-tools@0.3.1(@types/node@25.9.7)(typescript@7.0.2))':
     optionalDependencies:
-      '@openpgp/web-stream-tools': 0.3.1(@types/node@25.9.6)(typescript@7.0.2)
+      '@openpgp/web-stream-tools': 0.3.1(@types/node@25.9.7)(typescript@7.0.2)
 
   '@rolldown/binding-android-arm-eabi@1.2.8':
     optional: true
@@ -2283,7 +2283,7 @@ snapshots:
       lz-string: 1.5.0
       pretty-format: 27.5.1
 
-  '@testing-library/jest-dom@7.0.1(@testing-library/dom@10.4.2)(vitest@5.0.1(@types/node@25.9.6)(happy-dom@20.14.5)(vite@8.3.0(@types/node@25.9.6)(esbuild@0.28.2)(tsx@4.23.13)))':
+  '@testing-library/jest-dom@7.0.1(@testing-library/dom@10.4.2)(vitest@5.0.1(@types/node@25.9.7)(happy-dom@20.14.5)(vite@8.3.0(@types/node@25.9.7)(esbuild@0.28.2)(tsx@4.23.13)))':
     dependencies:
       '@adobe/css-tools': 4.5.0
       '@testing-library/dom': 10.4.2
@@ -2293,7 +2293,7 @@ snapshots:
       picocolors: 1.1.1
       redent: 3.0.0
     optionalDependencies:
-      vitest: 5.0.1(@types/node@25.9.6)(happy-dom@20.14.5)(vite@8.3.0(@types/node@25.9.6)(esbuild@0.28.2)(tsx@4.23.13))
+      vitest: 5.0.1(@types/node@25.9.7)(happy-dom@20.14.5)(vite@8.3.0(@types/node@25.9.7)(esbuild@0.28.2)(tsx@4.23.13))
 
   '@testing-library/preact@3.2.4(preact@10.29.8)':
     dependencies:
@@ -2311,7 +2311,7 @@ snapshots:
 
   '@types/estree@1.0.9': {}
 
-  '@types/node@25.9.6':
+  '@types/node@25.9.7':
     dependencies:
       undici-types: 7.24.6
 
@@ -2319,7 +2319,7 @@ snapshots:
 
   '@types/ws@8.18.1':
     dependencies:
-      '@types/node': 25.9.6
+      '@types/node': 25.9.7
 
   '@typescript/typescript-aix-ppc64@7.0.2':
     optional: true
@@ -2381,14 +2381,14 @@ snapshots:
   '@typescript/typescript-win32-x64@7.0.2':
     optional: true
 
-  '@vitest/mocker@5.0.1(vite@8.3.0(@types/node@25.9.6)(esbuild@0.28.2)(tsx@4.23.13))':
+  '@vitest/mocker@5.0.1(vite@8.3.0(@types/node@25.9.7)(esbuild@0.28.2)(tsx@4.23.13))':
     dependencies:
       '@jridgewell/trace-mapping': 0.3.31
       '@vitest/spy': 5.0.1
       estree-walker: 3.0.3
       magic-string: 1.3.1
     optionalDependencies:
-      vite: 8.3.0(@types/node@25.9.6)(esbuild@0.28.2)(tsx@4.23.13)
+      vite: 8.3.0(@types/node@25.9.7)(esbuild@0.28.2)(tsx@4.23.13)
 
   '@vitest/spy@5.0.1': {}
 
@@ -2448,7 +2448,7 @@ snapshots:
 
   buffer-image-size@0.6.4:
     dependencies:
-      '@types/node': 25.9.6
+      '@types/node': 25.9.7
 
   call-bind-apply-helpers@1.0.2:
     dependencies:
@@ -2702,7 +2702,7 @@ snapshots:
 
   happy-dom@20.14.5:
     dependencies:
-      '@types/node': 25.9.6
+      '@types/node': 25.9.7
       '@types/whatwg-mimetype': 3.0.2
       '@types/ws': 8.18.1
       buffer-image-size: 0.6.4
@@ -2950,9 +2950,9 @@ snapshots:
 
   opencollective-postinstall@2.0.3: {}
 
-  openpgp@6.3.1(@openpgp/web-stream-tools@0.3.1(@types/node@25.9.6)(typescript@7.0.2)):
+  openpgp@6.3.1(@openpgp/web-stream-tools@0.3.1(@types/node@25.9.7)(typescript@7.0.2)):
     optionalDependencies:
-      '@openpgp/web-stream-tools': 0.3.1(@types/node@25.9.6)(typescript@7.0.2)
+      '@openpgp/web-stream-tools': 0.3.1(@types/node@25.9.7)(typescript@7.0.2)
 
   picocolors@1.1.1: {}
 
@@ -3238,7 +3238,7 @@ snapshots:
       escalade: 3.2.0
       picocolors: 1.1.1
 
-  vite-prerender-plugin@0.5.13(vite@8.3.0(@types/node@25.9.6)(esbuild@0.28.2)(tsx@4.23.13)):
+  vite-prerender-plugin@0.5.13(vite@8.3.0(@types/node@25.9.7)(esbuild@0.28.2)(tsx@4.23.13)):
     dependencies:
       kolorist: 1.8.0
       magic-string: 0.30.21
@@ -3246,9 +3246,9 @@ snapshots:
       simple-code-frame: 1.3.0
       source-map: 0.7.6
       stack-trace: 1.0.0
-      vite: 8.3.0(@types/node@25.9.6)(esbuild@0.28.2)(tsx@4.23.13)
+      vite: 8.3.0(@types/node@25.9.7)(esbuild@0.28.2)(tsx@4.23.13)
 
-  vite@8.3.0(@types/node@25.9.6)(esbuild@0.28.2)(tsx@4.23.13):
+  vite@8.3.0(@types/node@25.9.7)(esbuild@0.28.2)(tsx@4.23.13):
     dependencies:
       lightningcss: 1.33.0
       picomatch: 4.0.7
@@ -3256,15 +3256,15 @@ snapshots:
       rolldown: 1.2.8
       tinyglobby: 0.2.17
     optionalDependencies:
-      '@types/node': 25.9.6
+      '@types/node': 25.9.7
       esbuild: 0.28.2
       fsevents: 2.3.3
       tsx: 4.23.13
 
-  vitest@5.0.1(@types/node@25.9.6)(happy-dom@20.14.5)(vite@8.3.0(@types/node@25.9.6)(esbuild@0.28.2)(tsx@4.23.13)):
+  vitest@5.0.1(@types/node@25.9.7)(happy-dom@20.14.5)(vite@8.3.0(@types/node@25.9.7)(esbuild@0.28.2)(tsx@4.23.13)):
     dependencies:
       '@types/chai': 5.2.3
-      '@vitest/mocker': 5.0.1(vite@8.3.0(@types/node@25.9.6)(esbuild@0.28.2)(tsx@4.23.13))
+      '@vitest/mocker': 5.0.1(vite@8.3.0(@types/node@25.9.7)(esbuild@0.28.2)(tsx@4.23.13))
       chai: 6.2.2
       es-module-lexer: 2.3.2
       expect-type: 1.4.0
@@ -3275,10 +3275,10 @@ snapshots:
       tinybench: 6.1.4
       tinyexec: 1.3.0
       tinyglobby: 0.2.17
-      vite: 8.3.0(@types/node@25.9.6)(esbuild@0.28.2)(tsx@4.23.13)
+      vite: 8.3.0(@types/node@25.9.7)(esbuild@0.28.2)(tsx@4.23.13)
       why-is-node-running: 2.3.0
     optionalDependencies:
-      '@types/node': 25.9.6
+      '@types/node': 25.9.7
       happy-dom: 20.14.5
     transitivePeerDependencies:
       - msw
@@ -3334,4 +3334,4 @@ snapshots:
 
   zlibjs@0.3.1: {}
 
-  zod@4.6.2: {}
+  zod@4.6.5: {}
