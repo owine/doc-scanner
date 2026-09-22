@@ -189,16 +189,16 @@ importers:
     devDependencies:
       '@preact/preset-vite':
         specifier: 2.10.6
-        version: 2.10.6(@babel/core@7.29.7(supports-color@7.2.0))(preact@10.29.8)(supports-color@7.2.0)(vite@8.3.0(@types/node@25.9.7)(esbuild@0.28.2)(tsx@4.23.13))
+        version: 2.10.6(@babel/core@7.29.7(supports-color@7.2.0))(preact@10.29.8)(supports-color@7.2.0)(vite@8.3.0(@types/node@25.9.8)(esbuild@0.28.2)(tsx@4.23.13))
       '@testing-library/jest-dom':
         specifier: 7.0.1
-        version: 7.0.1(@testing-library/dom@10.4.2)(vitest@5.0.1(@types/node@25.9.7)(happy-dom@20.14.5)(vite@8.3.0(@types/node@25.9.7)(esbuild@0.28.2)(tsx@4.23.13)))
+        version: 7.0.1(@testing-library/dom@10.4.2)(vitest@5.0.1(@types/node@25.9.8)(happy-dom@20.14.5)(vite@8.3.0(@types/node@25.9.8)(esbuild@0.28.2)(tsx@4.23.13)))
       '@testing-library/preact':
         specifier: 3.2.4
         version: 3.2.4(preact@10.29.8)
       '@types/node':
-        specifier: 25.9.7
-        version: 25.9.7
+        specifier: 25.9.8
+        version: 25.9.8
       fake-indexeddb:
         specifier: 6.2.5
         version: 6.2.5
@@ -210,10 +210,10 @@ importers:
         version: 7.0.2
       vite:
         specifier: 8.3.0
-        version: 8.3.0(@types/node@25.9.7)(esbuild@0.28.2)(tsx@4.23.13)
+        version: 8.3.0(@types/node@25.9.8)(esbuild@0.28.2)(tsx@4.23.13)
       vitest:
         specifier: 5.0.1
-        version: 5.0.1(@types/node@25.9.7)(happy-dom@20.14.5)(vite@8.3.0(@types/node@25.9.7)(esbuild@0.28.2)(tsx@4.23.13))
+        version: 5.0.1(@types/node@25.9.8)(happy-dom@20.14.5)(vite@8.3.0(@types/node@25.9.8)(esbuild@0.28.2)(tsx@4.23.13))
 
   server:
     dependencies:
@@ -222,10 +222,10 @@ importers:
         version: 2.1.1(hono@4.13.8)
       '@protontech/crypto':
         specifier: 2.1.3
-        version: 2.1.3(@types/node@25.9.7)(typescript@7.0.2)
+        version: 2.1.3(@types/node@25.9.8)(typescript@7.0.2)
       '@protontech/drive-sdk':
         specifier: 0.21.1
-        version: 0.21.1(@protontech/crypto@2.1.3(@types/node@25.9.7)(typescript@7.0.2))
+        version: 0.21.1(@protontech/crypto@2.1.3(@types/node@25.9.8)(typescript@7.0.2))
       bcryptjs:
         specifier: 3.0.3
         version: 3.0.3
@@ -234,7 +234,7 @@ importers:
         version: 4.13.8
       openpgp:
         specifier: 6.3.1
-        version: 6.3.1(@openpgp/web-stream-tools@0.3.1(@types/node@25.9.7)(typescript@7.0.2))
+        version: 6.3.1(@openpgp/web-stream-tools@0.3.1(@types/node@25.9.8)(typescript@7.0.2))
       pino:
         specifier: 10.3.1
         version: 10.3.1
@@ -249,14 +249,14 @@ importers:
         version: 4.6.5
     devDependencies:
       '@types/node':
-        specifier: 25.9.7
-        version: 25.9.7
+        specifier: 25.9.8
+        version: 25.9.8
       typescript:
         specifier: 7.0.2
         version: 7.0.2
       vitest:
         specifier: 5.0.1
-        version: 5.0.1(@types/node@25.9.7)(happy-dom@20.14.5)(vite@8.3.0(@types/node@25.9.7)(esbuild@0.28.2)(tsx@4.23.13))
+        version: 5.0.1(@types/node@25.9.8)(happy-dom@20.14.5)(vite@8.3.0(@types/node@25.9.8)(esbuild@0.28.2)(tsx@4.23.13))
 
 packages:
 
@@ -759,8 +759,8 @@ packages:
   '@types/estree@1.0.9':
     resolution: {integrity: sha512-GhdPgy1el4/ImP05X05Uw4cw2/M93BCUmnEvWZNStlCzEKME4Fkk+YpoA5OiHNQmoS7Cafb8Xa3Pya8m1Qrzeg==}
 
-  '@types/node@25.9.7':
-    resolution: {integrity: sha512-Y+axoNWOFLvDNFxNbDA+kqqV05imHwTu5bZWWO6tQM3Y2NX1jvzUJkYlf4nYnMCnvu4wQBKW6Nr+ok6yHWA9aQ==}
+  '@types/node@25.9.8':
+    resolution: {integrity: sha512-VfMrScDmMhUJQmd5hArdQnFvK0OIeD36uN2Va1FcpYaLB/BgkgM8Ulc50XtYISPMz7APJ30+N0T5EM0jlcdfRw==}
 
   '@types/node@26.5.1':
     resolution: {integrity: sha512-CzNm2FezW4VR/LjG6yUdiEgLE/rAQ9Slj5gCu/C2VrdcW7I0ahNZ8DRbHT7zOZ6r3ONgd/bsQIeSaoDGrd1C6g==}
@@ -2132,28 +2132,28 @@ snapshots:
 
   '@noble/hashes@2.4.0': {}
 
-  '@openpgp/web-stream-tools@0.3.1(@types/node@25.9.7)(typescript@7.0.2)':
+  '@openpgp/web-stream-tools@0.3.1(@types/node@25.9.8)(typescript@7.0.2)':
     optionalDependencies:
-      '@types/node': 25.9.7
+      '@types/node': 25.9.8
       typescript: 7.0.2
 
   '@oxc-project/types@0.149.0': {}
 
   '@pinojs/redact@0.4.0': {}
 
-  '@preact/preset-vite@2.10.6(@babel/core@7.29.7(supports-color@7.2.0))(preact@10.29.8)(supports-color@7.2.0)(vite@8.3.0(@types/node@25.9.7)(esbuild@0.28.2)(tsx@4.23.13))':
+  '@preact/preset-vite@2.10.6(@babel/core@7.29.7(supports-color@7.2.0))(preact@10.29.8)(supports-color@7.2.0)(vite@8.3.0(@types/node@25.9.8)(esbuild@0.28.2)(tsx@4.23.13))':
     dependencies:
       '@babel/core': 7.29.7(supports-color@7.2.0)
       '@babel/plugin-transform-react-jsx': 7.29.7(@babel/core@7.29.7(supports-color@7.2.0))(supports-color@7.2.0)
       '@babel/plugin-transform-react-jsx-development': 7.29.7(@babel/core@7.29.7(supports-color@7.2.0))(supports-color@7.2.0)
-      '@prefresh/vite': 2.4.12(preact@10.29.8)(supports-color@7.2.0)(vite@8.3.0(@types/node@25.9.7)(esbuild@0.28.2)(tsx@4.23.13))
+      '@prefresh/vite': 2.4.12(preact@10.29.8)(supports-color@7.2.0)(vite@8.3.0(@types/node@25.9.8)(esbuild@0.28.2)(tsx@4.23.13))
       '@rollup/pluginutils': 5.4.0
       babel-plugin-transform-hook-names: 1.0.2(@babel/core@7.29.7(supports-color@7.2.0))
       debug: 4.4.3(supports-color@7.2.0)
       magic-string: 0.30.21
       picocolors: 1.1.1
-      vite: 8.3.0(@types/node@25.9.7)(esbuild@0.28.2)(tsx@4.23.13)
-      vite-prerender-plugin: 0.5.13(vite@8.3.0(@types/node@25.9.7)(esbuild@0.28.2)(tsx@4.23.13))
+      vite: 8.3.0(@types/node@25.9.8)(esbuild@0.28.2)(tsx@4.23.13)
+      vite-prerender-plugin: 0.5.13(vite@8.3.0(@types/node@25.9.8)(esbuild@0.28.2)(tsx@4.23.13))
       zimmerframe: 1.1.5
     transitivePeerDependencies:
       - preact
@@ -2170,7 +2170,7 @@ snapshots:
 
   '@prefresh/utils@1.2.1': {}
 
-  '@prefresh/vite@2.4.12(preact@10.29.8)(supports-color@7.2.0)(vite@8.3.0(@types/node@25.9.7)(esbuild@0.28.2)(tsx@4.23.13))':
+  '@prefresh/vite@2.4.12(preact@10.29.8)(supports-color@7.2.0)(vite@8.3.0(@types/node@25.9.8)(esbuild@0.28.2)(tsx@4.23.13))':
     dependencies:
       '@babel/core': 7.29.7(supports-color@7.2.0)
       '@prefresh/babel-plugin': 0.5.4(@babel/core@7.29.7(supports-color@7.2.0))
@@ -2178,26 +2178,26 @@ snapshots:
       '@prefresh/utils': 1.2.1
       '@rollup/pluginutils': 4.2.1
       preact: 10.29.8
-      vite: 8.3.0(@types/node@25.9.7)(esbuild@0.28.2)(tsx@4.23.13)
+      vite: 8.3.0(@types/node@25.9.8)(esbuild@0.28.2)(tsx@4.23.13)
     transitivePeerDependencies:
       - supports-color
 
-  '@protontech/crypto@2.1.3(@types/node@25.9.7)(typescript@7.0.2)':
+  '@protontech/crypto@2.1.3(@types/node@25.9.8)(typescript@7.0.2)':
     dependencies:
       '@noble/hashes': 2.4.0
-      '@openpgp/web-stream-tools': 0.3.1(@types/node@25.9.7)(typescript@7.0.2)
+      '@openpgp/web-stream-tools': 0.3.1(@types/node@25.9.8)(typescript@7.0.2)
       bcryptjs: 3.0.3
       comlink: 4.4.2
       core-js: 3.50.0
-      openpgp: '@protontech/openpgp@6.3.1(@openpgp/web-stream-tools@0.3.1(@types/node@25.9.7)(typescript@7.0.2))'
+      openpgp: '@protontech/openpgp@6.3.1(@openpgp/web-stream-tools@0.3.1(@types/node@25.9.8)(typescript@7.0.2))'
     transitivePeerDependencies:
       - '@types/node'
       - typescript
 
-  '@protontech/drive-sdk@0.21.1(@protontech/crypto@2.1.3(@types/node@25.9.7)(typescript@7.0.2))':
+  '@protontech/drive-sdk@0.21.1(@protontech/crypto@2.1.3(@types/node@25.9.8)(typescript@7.0.2))':
     dependencies:
       '@noble/hashes': 1.8.0
-      '@protontech/crypto': 2.1.3(@types/node@25.9.7)(typescript@7.0.2)
+      '@protontech/crypto': 2.1.3(@types/node@25.9.8)(typescript@7.0.2)
       ttag: 1.8.12
     optionalDependencies:
       '@xmldom/xmldom': 0.9.12
@@ -2205,9 +2205,9 @@ snapshots:
     transitivePeerDependencies:
       - babel-plugin-macros
 
-  '@protontech/openpgp@6.3.1(@openpgp/web-stream-tools@0.3.1(@types/node@25.9.7)(typescript@7.0.2))':
+  '@protontech/openpgp@6.3.1(@openpgp/web-stream-tools@0.3.1(@types/node@25.9.8)(typescript@7.0.2))':
     optionalDependencies:
-      '@openpgp/web-stream-tools': 0.3.1(@types/node@25.9.7)(typescript@7.0.2)
+      '@openpgp/web-stream-tools': 0.3.1(@types/node@25.9.8)(typescript@7.0.2)
 
   '@rolldown/binding-android-arm-eabi@1.2.8':
     optional: true
@@ -2289,7 +2289,7 @@ snapshots:
       lz-string: 1.5.0
       pretty-format: 27.5.1
 
-  '@testing-library/jest-dom@7.0.1(@testing-library/dom@10.4.2)(vitest@5.0.1(@types/node@25.9.7)(happy-dom@20.14.5)(vite@8.3.0(@types/node@25.9.7)(esbuild@0.28.2)(tsx@4.23.13)))':
+  '@testing-library/jest-dom@7.0.1(@testing-library/dom@10.4.2)(vitest@5.0.1(@types/node@25.9.8)(happy-dom@20.14.5)(vite@8.3.0(@types/node@25.9.8)(esbuild@0.28.2)(tsx@4.23.13)))':
     dependencies:
       '@adobe/css-tools': 4.5.0
       '@testing-library/dom': 10.4.2
@@ -2299,7 +2299,7 @@ snapshots:
       picocolors: 1.1.1
       redent: 3.0.0
     optionalDependencies:
-      vitest: 5.0.1(@types/node@25.9.7)(happy-dom@20.14.5)(vite@8.3.0(@types/node@25.9.7)(esbuild@0.28.2)(tsx@4.23.13))
+      vitest: 5.0.1(@types/node@25.9.8)(happy-dom@20.14.5)(vite@8.3.0(@types/node@25.9.8)(esbuild@0.28.2)(tsx@4.23.13))
 
   '@testing-library/preact@3.2.4(preact@10.29.8)':
     dependencies:
@@ -2317,7 +2317,7 @@ snapshots:
 
   '@types/estree@1.0.9': {}
 
-  '@types/node@25.9.7':
+  '@types/node@25.9.8':
     dependencies:
       undici-types: 7.24.6
 
@@ -2391,14 +2391,14 @@ snapshots:
   '@typescript/typescript-win32-x64@7.0.2':
     optional: true
 
-  '@vitest/mocker@5.0.1(vite@8.3.0(@types/node@25.9.7)(esbuild@0.28.2)(tsx@4.23.13))':
+  '@vitest/mocker@5.0.1(vite@8.3.0(@types/node@25.9.8)(esbuild@0.28.2)(tsx@4.23.13))':
     dependencies:
       '@jridgewell/trace-mapping': 0.3.31
       '@vitest/spy': 5.0.1
       estree-walker: 3.0.3
       magic-string: 1.3.1
     optionalDependencies:
-      vite: 8.3.0(@types/node@25.9.7)(esbuild@0.28.2)(tsx@4.23.13)
+      vite: 8.3.0(@types/node@25.9.8)(esbuild@0.28.2)(tsx@4.23.13)
 
   '@vitest/spy@5.0.1': {}
 
@@ -2960,9 +2960,9 @@ snapshots:
 
   opencollective-postinstall@2.0.3: {}
 
-  openpgp@6.3.1(@openpgp/web-stream-tools@0.3.1(@types/node@25.9.7)(typescript@7.0.2)):
+  openpgp@6.3.1(@openpgp/web-stream-tools@0.3.1(@types/node@25.9.8)(typescript@7.0.2)):
     optionalDependencies:
-      '@openpgp/web-stream-tools': 0.3.1(@types/node@25.9.7)(typescript@7.0.2)
+      '@openpgp/web-stream-tools': 0.3.1(@types/node@25.9.8)(typescript@7.0.2)
 
   picocolors@1.1.1: {}
 
@@ -3250,7 +3250,7 @@ snapshots:
       escalade: 3.2.0
       picocolors: 1.1.1
 
-  vite-prerender-plugin@0.5.13(vite@8.3.0(@types/node@25.9.7)(esbuild@0.28.2)(tsx@4.23.13)):
+  vite-prerender-plugin@0.5.13(vite@8.3.0(@types/node@25.9.8)(esbuild@0.28.2)(tsx@4.23.13)):
     dependencies:
       kolorist: 1.8.0
       magic-string: 0.30.21
@@ -3258,9 +3258,9 @@ snapshots:
       simple-code-frame: 1.3.0
       source-map: 0.7.6
       stack-trace: 1.0.0
-      vite: 8.3.0(@types/node@25.9.7)(esbuild@0.28.2)(tsx@4.23.13)
+      vite: 8.3.0(@types/node@25.9.8)(esbuild@0.28.2)(tsx@4.23.13)
 
-  vite@8.3.0(@types/node@25.9.7)(esbuild@0.28.2)(tsx@4.23.13):
+  vite@8.3.0(@types/node@25.9.8)(esbuild@0.28.2)(tsx@4.23.13):
     dependencies:
       lightningcss: 1.33.0
       picomatch: 4.0.7
@@ -3268,15 +3268,15 @@ snapshots:
       rolldown: 1.2.8
       tinyglobby: 0.2.17
     optionalDependencies:
-      '@types/node': 25.9.7
+      '@types/node': 25.9.8
       esbuild: 0.28.2
       fsevents: 2.3.3
       tsx: 4.23.13
 
-  vitest@5.0.1(@types/node@25.9.7)(happy-dom@20.14.5)(vite@8.3.0(@types/node@25.9.7)(esbuild@0.28.2)(tsx@4.23.13)):
+  vitest@5.0.1(@types/node@25.9.8)(happy-dom@20.14.5)(vite@8.3.0(@types/node@25.9.8)(esbuild@0.28.2)(tsx@4.23.13)):
     dependencies:
       '@types/chai': 5.2.3
-      '@vitest/mocker': 5.0.1(vite@8.3.0(@types/node@25.9.7)(esbuild@0.28.2)(tsx@4.23.13))
+      '@vitest/mocker': 5.0.1(vite@8.3.0(@types/node@25.9.8)(esbuild@0.28.2)(tsx@4.23.13))
       chai: 6.2.2
       es-module-lexer: 2.3.2
       expect-type: 1.4.0
@@ -3287,10 +3287,10 @@ snapshots:
       tinybench: 6.1.4
       tinyexec: 1.3.0
       tinyglobby: 0.2.17
-      vite: 8.3.0(@types/node@25.9.7)(esbuild@0.28.2)(tsx@4.23.13)
+      vite: 8.3.0(@types/node@25.9.8)(esbuild@0.28.2)(tsx@4.23.13)
       why-is-node-running: 2.3.0
     optionalDependencies:
-      '@types/node': 25.9.7
+      '@types/node': 25.9.8
       happy-dom: 20.14.5
     transitivePeerDependencies:
       - msw
