@@ -1,6 +1,13 @@
 services:
   app:
-    build: .
+    build:
+      context: .
+      args:
+        # Release tag for error reports: GIT_SHA=$(git rev-parse HEAD) docker compose build
+        GIT_SHA: ${GIT_SHA:-dev}
+        # Compiled into the PWA bundle; empty disables browser error reporting.
+        SENTRY_BROWSER_DSN: ${SENTRY_BROWSER_DSN:-}
+        SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-}
     ports: ["3000:3000"]
     volumes: ["./data:/data"]
     environment:
@@ -10,4 +17,7 @@ services:
       TRUST_PROXY: "true"
       INSECURE_COOKIES: ${INSECURE_COOKIES:-false}
       PWA_DIST_PATH: /app/pwa/dist
+      # Optional error reporting (GlitchTip); empty disables it.
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-}
     restart: unless-stopped

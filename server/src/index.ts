@@ -1,3 +1,4 @@
+import './instrument.js';
 import './polyfills/typed-array-base64.js';
 
 import { serve } from '@hono/node-server';

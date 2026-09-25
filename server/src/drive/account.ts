@@ -49,7 +49,8 @@ export class DriveAccount implements ProtonDriveAccount {
     const match = this.user.addresses.find(
       (a) => a.email === emailOrAddressId || a.addressId === emailOrAddressId,
     );
-    if (!match) throw new Error(`No address matching ${emailOrAddressId}`);
+    // No echo of the argument: it may be an email, and this can reach error reports.
+    if (!match) throw new Error('No own address matches the requested email or address ID');
     return toSDKAddress(match);
   }
 

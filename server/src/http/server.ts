@@ -1,5 +1,8 @@
 import { Hono } from 'hono';
+import { HTTPException } from 'hono/http-exception';
 import { serveStatic } from '@hono/node-server/serve-static';
+import * as Sentry from '@sentry/hono/node';
+import { sentry } from '@sentry/hono/node';
 import type { DB } from '../db.js';
 import { SessionStore } from '../auth/session-store.js';
 import { ProtonAuth } from '../auth/srp.js';
@@ -24,6 +27,15 @@ export function createApp(deps: AppDeps): Hono {
   );
 
   const app = new Hono();
+  // Reports errors a route threw. Must precede app.route() so sub-apps are
+  // covered. Mounted only when a DSN initialized Sentry: the middleware
+  // console.warns on every createApp otherwise, and without a DSN behaviour
+  // must be unchanged. The default filter skips any thrown error whose
+  // `status` is 3xx/4xx, so a ProtonApiError(429) escaping a route would be an
+  // unreported 500; only Hono's own HTTPExceptions are deliberate responses.
+  if (Sentry.isInitialized()) {
+    app.use(sentry(app, { shouldHandleError: (e) => !(e instanceof HTTPException) || e.status >= 500 }));
+  }
   app.get('/api/health', (c) => c.json({ ok: true }));
   app.route('/api/auth', authRoutes({ store, protonAuth, db: deps.db, encryptionKey: deps.encryptionKey, appVersion: deps.appVersion, secureCookie: deps.secureCookie }));
   app.route('/api/drive', driveRoutes({ db: deps.db, store }));
