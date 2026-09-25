@@ -753,12 +753,16 @@ Same as the original plan. Multipart: `pdf`, `name`, `folderLinkId`, `ocrText`. 
 - [ ] **Step 13.1** — TDD happy path → audit row → 200 with finalName.
 - [ ] **Step 13.2** — Implement.
 - [ ] **Step 13.3** — Tests for 401 refresh path, body limit, collision exhausted.
+> Error reporting: go through `DriveClient.uploadFile` (already reports `drive.operation` failures). If a new Drive call is added (e.g. resolving `parentFolderUid`), wrap it with `reportingDriveFailure('folder-lookup', …)` — see `docs/observability.md`.
+
 - [ ] **Step 13.4** — Commit: `feat(server): POST /api/upload sends PDFs to Drive`.
 
 ### Task 14: PWA `api.upload()`
 
 - [ ] **Step 14.1** — TDD pre-flight (50 MB cap), multipart shape, response mapping.
 - [ ] **Step 14.2** — Implement: `upload(pdf, name, folderLinkId, ocrText)`.
+> Error reporting: call `request(…, { reportAs: 'upload' })` so network failures and 5xx on the upload are reported from the phone — see `docs/observability.md`.
+
 - [ ] **Step 14.3** — Commit: `feat(pwa): api.upload() to /api/upload`.
 
 ### Task 15: PWA scans-store transitions for slice 2

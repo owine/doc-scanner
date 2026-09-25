@@ -44,7 +44,7 @@ Integration tests (`server/tests/**/*.integration.test.ts`) are `describe.skipIf
 
 ## Required environment
 
-`SESSION_ENCRYPTION_KEY` (32 random bytes, base64 — encrypts Proton session tokens at rest) and `ANTHROPIC_API_KEY` are **both required** or the server exits at startup (`server/src/config.ts`). Others: `DB_PATH`, `PORT`, `LOG_LEVEL`, `TRUST_PROXY`, `INSECURE_COOKIES`. Generate a key with `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`.
+`SESSION_ENCRYPTION_KEY` (32 random bytes, base64 — encrypts Proton session tokens at rest) and `ANTHROPIC_API_KEY` are **both required** or the server exits at startup (`server/src/config.ts`). Others: `DB_PATH`, `PORT`, `LOG_LEVEL`, `TRUST_PROXY`, `INSECURE_COOKIES`. Optional error reporting to GlitchTip (`SENTRY_DSN`, `SENTRY_ENVIRONMENT`, build-time `SENTRY_BROWSER_DSN`) is off when unset; `docs/observability.md` covers it, including what the `beforeSend` scrubbers must never let through. Generate a key with `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`.
 
 ## The tsx runtime (important, non-obvious)
 
