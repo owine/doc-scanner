@@ -1,7 +1,7 @@
 import * as Sentry from '@sentry/hono/node';
 import { scrubEvent } from './scrub.js';
 
-type SentryEnv = Partial<Record<'SENTRY_DSN' | 'SENTRY_ENVIRONMENT' | 'SENTRY_RELEASE' | 'NODE_ENV', string>>;
+type SentryEnv = Partial<Record<'SENTRY_DSN' | 'SENTRY_ENVIRONMENT' | 'SENTRY_RELEASE' | 'GIT_SHA' | 'NODE_ENV', string>>;
 
 /**
  * Sentry (GlitchTip) options from the environment, or null when no DSN is set
@@ -12,9 +12,11 @@ export function buildSentryOptions(env: SentryEnv): Sentry.NodeOptions | null {
   const dsn = env.SENTRY_DSN?.trim();
   if (!dsn) return null;
 
-  // The Dockerfile's GIT_SHA build arg defaults to "dev" for local builds;
-  // tagging every local build as one release would merge unrelated code.
-  const release = env.SENTRY_RELEASE && env.SENTRY_RELEASE !== 'dev' ? env.SENTRY_RELEASE : undefined;
+  // The image exports GIT_SHA, not SENTRY_RELEASE: the SDK auto-reads
+  // SENTRY_RELEASE whenever `release` is undefined, so exporting the "dev"
+  // default under that name would tag every local build as one release.
+  // SENTRY_RELEASE remains an explicit operator override.
+  const release = [env.SENTRY_RELEASE, env.GIT_SHA].find((v) => v && v !== 'dev');
 
   return {
     dsn,
@@ -28,10 +30,20 @@ export function buildSentryOptions(env: SentryEnv): Sentry.NodeOptions | null {
     // off. Registering them anyway would put import-in-the-middle between tsx
     // and the Drive SDK's raw-.ts crypto peer for no benefit.
     registerEsmLoaderHooks: false,
-    // The SDK's default ('warn') installs an unhandledRejection listener that
-    // only logs, which disables Node's crash-on-unhandled-rejection. Keep the
-    // crash: report, then exit, as the process did before Sentry.
-    integrations: [Sentry.onUnhandledRejectionIntegration({ mode: 'strict' })],
+    // Tracing is off, but the SDK still stamps sentry-trace/baggage (public
+    // key, release, environment) on every outgoing request unless told not
+    // to. Proton and Anthropic have no business receiving them.
+    tracePropagationTargets: [],
+    integrations: [
+      // The SDK's default ('warn') installs an unhandledRejection listener
+      // that only logs, which disables Node's crash-on-unhandled-rejection.
+      // Keep the crash: report, then exit, as the process did before Sentry.
+      Sentry.onUnhandledRejectionIntegration({ mode: 'strict' }),
+      // By default up to 10 KB of every incoming body is kept on the request
+      // scope: the login password, later scanned PDFs. beforeSend strips it
+      // from the wire, but it should never be held at all.
+      Sentry.httpIntegration({ ignoreIncomingRequestBody: () => true }),
+    ],
     beforeSend: (event) => scrubEvent(event),
   };
 }

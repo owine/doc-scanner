@@ -71,8 +71,10 @@ CMD ["sh", "-c", "cd server && exec node --import tsx src/index.ts"]
 ARG GIT_SHA=dev
 ARG BUILD_DATE=unknown
 ARG VERSION=dev
-# Server-side Sentry release; the SDK ignores the "dev" default.
-ENV SENTRY_RELEASE=${GIT_SHA}
+# Server-side Sentry release (observability/sentry.ts ignores the "dev"
+# default). Deliberately not exported as SENTRY_RELEASE: the SDK reads that
+# name on its own and would tag every local build "dev".
+ENV GIT_SHA=${GIT_SHA}
 LABEL org.opencontainers.image.revision="${GIT_SHA}" \
       org.opencontainers.image.created="${BUILD_DATE}" \
       org.opencontainers.image.version="${VERSION}"

@@ -26,6 +26,12 @@ describe('buildSentryOptions', () => {
     expect(options).toMatchObject({ dsn: DSN, release: '0123abcd', environment: 'staging' });
   });
 
+  it('uses GIT_SHA (what the image exports) when SENTRY_RELEASE is not set', () => {
+    expect(buildSentryOptions({ SENTRY_DSN: DSN, GIT_SHA: 'feedface' })?.release).toBe('feedface');
+    expect(buildSentryOptions({ SENTRY_DSN: DSN, GIT_SHA: 'dev' })?.release).toBeUndefined();
+    expect(buildSentryOptions({ SENTRY_DSN: DSN, GIT_SHA: 'feedface', SENTRY_RELEASE: 'override' })?.release).toBe('override');
+  });
+
   it('falls back to NODE_ENV for the environment', () => {
     expect(buildSentryOptions({ SENTRY_DSN: DSN, NODE_ENV: 'production' })?.environment).toBe('production');
     expect(buildSentryOptions({ SENTRY_DSN: DSN })?.environment).toBe('development');
