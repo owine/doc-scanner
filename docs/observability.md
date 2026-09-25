@@ -71,5 +71,6 @@ Tracing is off (`tracesSampleRate: 0`), and there is no session replay.
 
 - `server/src/instrument.ts` is the **first import** of `server/src/index.ts`. ES modules evaluate in import order, so Sentry initializes before any other app module.
 - `registerEsmLoaderHooks: false`: the hooks exist to auto-instrument imports for tracing, which is off. Leaving them on would put `import-in-the-middle` between tsx and the Drive SDK's raw-`.ts` crypto peer for no benefit.
+- Unhandled promise rejections still **crash** the server with a DSN set (`onUnhandledRejectionIntegration({ mode: 'strict' })`). The SDK's default `warn` mode only logs, which would silently swallow what Node 24 treats as fatal. `tests/observability/process-crash.test.ts` checks both cases in a child process.
 - The Hono middleware is mounted in `createApp` only when Sentry is initialized, because it `console.warn`s on every `createApp` otherwise.
 - The PWA SDK adds about 29 KB gzipped to the entry chunk even with no DSN (a static import). Lazy-loading it when a DSN is present would remove that, at the cost of async init and missing errors from before it loads.

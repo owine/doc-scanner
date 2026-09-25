@@ -28,6 +28,10 @@ export function buildSentryOptions(env: SentryEnv): Sentry.NodeOptions | null {
     // off. Registering them anyway would put import-in-the-middle between tsx
     // and the Drive SDK's raw-.ts crypto peer for no benefit.
     registerEsmLoaderHooks: false,
+    // The SDK's default ('warn') installs an unhandledRejection listener that
+    // only logs, which disables Node's crash-on-unhandled-rejection. Keep the
+    // crash: report, then exit, as the process did before Sentry.
+    integrations: [Sentry.onUnhandledRejectionIntegration({ mode: 'strict' })],
     beforeSend: (event) => scrubEvent(event),
   };
 }
