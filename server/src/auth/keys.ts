@@ -126,7 +126,8 @@ export async function fetchAndDecryptUserKey(params: FetchAndDecryptParams): Pro
     }
 
     if (keys.length === 0) {
-      throw new KeyDecryptError(`Failed to decrypt any address key for ${addr.Email}`);
+      // Address ID, not the email: this message can reach error reports.
+      throw new KeyDecryptError(`Failed to decrypt any address key for address ${addr.ID}`);
     }
     decryptedAddresses.push({ email: addr.Email, addressId: addr.ID, keys, primaryKeyIndex });
   }
