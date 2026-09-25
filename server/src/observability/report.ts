@@ -20,6 +20,18 @@ export function captureDriveFailure(error: unknown, operation: DriveOperation, s
   });
 }
 
+/**
+ * Reports an auth failure the user cannot fix by retyping (the caller filters
+ * out wrong passwords and TOTP typos). Tagged with the step that broke.
+ */
+export function captureAuthFailure(error: unknown, operation: 'login', stage: string): void {
+  Sentry.withScope((scope) => {
+    scope.setTag('auth.operation', operation);
+    scope.setTag('auth.stage', stage);
+    Sentry.captureException(error);
+  });
+}
+
 /** Runs `fn`, reporting and rethrowing any failure as `operation`. */
 export async function reportingDriveFailure<T>(
   operation: DriveOperation,
