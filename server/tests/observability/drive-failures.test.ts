@@ -114,7 +114,7 @@ describe('Drive failure reporting', () => {
     expect(JSON.stringify(events[0])).not.toContain(nameCore);
   });
 
-  it('never attaches the file bytes', async () => {
+  it('does not hand the file bytes to the reporter', async () => {
     const marker = `BYTES-${Math.random().toString(36).slice(2)}`;
     mockSdk.getFileUploader.mockRejectedValue(new Error('quota exceeded'));
     const client = await makeClient(db);

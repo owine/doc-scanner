@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { ErrorEvent } from '@sentry/hono/node';
-import { scrubEvent } from '../../src/observability/scrub.js';
+import { redactExact, scrubEvent } from '../../src/observability/scrub.js';
 
 // Every test plants a recognisable secret and asserts it appears NOWHERE in
 // the serialized event, not just that one field was cleared. A leak through
@@ -163,6 +163,18 @@ describe('scrubEvent', () => {
     expect(serialized(out)).not.toContain('Bank Statement');
   });
 
+  it('redacts email addresses embedded in exception messages', () => {
+    const event = baseEvent({
+      exception: { values: [{ type: 'KeyDecryptError', value: 'Failed to decrypt any address key for jane.doe@proton.me' }] },
+      message: 'No address matching jane+scans@pm.me',
+    });
+
+    const out = scrubEvent(event);
+
+    expect(serialized(out)).not.toContain('jane');
+    expect(out?.exception?.values?.[0]?.value).toBe('Failed to decrypt any address key for [email]');
+  });
+
   it('redacts a bare filename without swallowing the rest of the message', () => {
     const out = scrubEvent(baseEvent({ message: 'upload failed for payslip_march.pdf after 3 retries' }));
 
@@ -239,5 +251,40 @@ describe('scrubEvent', () => {
     const out = scrubEvent(baseEvent({ tags: { 'drive.operation': 'upload' } }));
 
     expect(out?.tags).toEqual({ 'drive.operation': 'upload' });
+  });
+});
+
+describe('redactExact', () => {
+  function eventWith(value: string): ErrorEvent {
+    return {
+      type: undefined,
+      tags: { 'drive.operation': 'upload' },
+      message: `failed: ${value}`,
+      exception: {
+        values: [{ type: 'Error', value: `could not store ${value}`, stacktrace: { frames: [{ filename: '/app/server/src/upload.ts', function: 'upload' }] } }],
+      },
+    };
+  }
+
+  it('redacts the value from exception values and messages', () => {
+    const out = redactExact(eventWith('Divorce Papers.pdf'), ['Divorce Papers.pdf']);
+
+    expect(serialized(out)).not.toContain('Divorce');
+  });
+
+  it('also redacts the name without its extension, which the SDK may echo with a suffix', () => {
+    const event = eventWith('Divorce Papers (2).pdf');
+
+    const out = redactExact(event, ['Divorce Papers.pdf']);
+
+    expect(serialized(out)).not.toContain('Divorce');
+  });
+
+  it('leaves tags and stack frames alone, so a common word as a name cannot break grouping', () => {
+    const out = redactExact(eventWith('upload'), ['upload']);
+
+    expect(out.tags).toEqual({ 'drive.operation': 'upload' });
+    expect(out.exception?.values?.[0]?.stacktrace?.frames?.[0]).toEqual({ filename: '/app/server/src/upload.ts', function: 'upload' });
+    expect(out.exception?.values?.[0]?.value).toBe('could not store [filename]');
   });
 });

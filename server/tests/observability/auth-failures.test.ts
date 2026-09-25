@@ -83,7 +83,7 @@ describe('login failure reporting', () => {
     expect(tagsOf(0)).toMatchObject({ 'auth.operation': 'login', 'auth.stage': 'info' });
   });
 
-  it('reports a key setup failure without leaking the session tokens or password', async () => {
+  it('reports a key setup failure tagged keys (auth-response tokens are not attached)', async () => {
     const api = fakeApi();
 
     await expect(new ProtonAuth(api).login('me@example.test', typedSecret)).rejects.toThrow(/no primary active key/);
@@ -93,6 +93,18 @@ describe('login failure reporting', () => {
     expect(tagsOf(0)).toMatchObject({ 'auth.operation': 'login', 'auth.stage': 'keys' });
     const wire = JSON.stringify(events[0]);
     for (const value of [accessToken, refreshToken, typedSecret]) expect(wire).not.toContain(value);
+  });
+
+  it('reports a key failure whose message names the address, without sending the address', async () => {
+    const address = `${Math.random().toString(36).slice(2)}@proton.example`;
+    const api = fakeApi({ getUser: vi.fn().mockRejectedValue(new Error(`no active keys for ${address}`)) });
+
+    await expect(new ProtonAuth(api).login('me@example.test', typedSecret)).rejects.toThrow();
+    await flushEvents();
+
+    expect(events).toHaveLength(1);
+    expect(events[0]?.exception?.values?.[0]?.value).toBe('no active keys for [email]');
+    expect(JSON.stringify(events[0])).not.toContain(address);
   });
 
   it('reports rate limiting, which is not a user typo', async () => {

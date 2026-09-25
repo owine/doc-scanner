@@ -1,4 +1,4 @@
-import type { Breadcrumb, ErrorEvent } from '@sentry/hono/node';
+import type { Breadcrumb, ErrorEvent, Event } from '@sentry/hono/node';
 
 /**
  * `beforeSend` scrubber. This app handles scanned personal documents and
@@ -70,20 +70,28 @@ export function scrubEvent(event: ErrorEvent): ErrorEvent | null {
  * capture site was handed) anywhere in the event. Complements the pattern
  * matching in scrubText, which cannot recognise an unquoted name with spaces.
  */
-export function redactExact<T>(event: T, values: readonly string[]): T {
-  const needles = values.filter((v) => v.length >= 3);
+export function redactExact<T extends Event>(event: T, values: readonly string[]): T {
+  // The stem too: the SDK can echo a de-duplicated candidate ("Name (2).pdf")
+  // that does not contain the original name.
+  const needles = [...new Set(values.flatMap((v) => [v, v.replace(/\.[^.\s]+$/, '')]))]
+    .filter((v) => v.length >= 3)
+    .sort((a, b) => b.length - a.length);
   if (needles.length === 0) return event;
-  const walk = (value: unknown): unknown => {
-    if (typeof value === 'string') {
-      return needles.reduce((text, needle) => text.split(needle).join('[filename]'), value);
-    }
-    if (Array.isArray(value)) return value.map(walk);
-    if (value && typeof value === 'object') {
-      for (const [key, inner] of Object.entries(value)) (value as Record<string, unknown>)[key] = walk(inner);
-    }
-    return value;
-  };
-  return walk(event) as T;
+  const redact = (text: string): string =>
+    needles.reduce((out, needle) => out.split(needle).join('[filename]'), text);
+
+  // Free text only. Tags, stack frames and the rest are ours or the SDK's;
+  // walking them would let a name like "upload" rewrite the drive.operation
+  // tag or a frame path and break grouping.
+  if (event.message) event.message = redact(event.message);
+  if (event.logentry?.message) event.logentry.message = redact(event.logentry.message);
+  for (const exception of event.exception?.values ?? []) {
+    if (exception.value) exception.value = redact(exception.value);
+  }
+  for (const crumb of event.breadcrumbs ?? []) {
+    if (crumb.message) crumb.message = redact(crumb.message);
+  }
+  return event;
 }
 
 /** Contexts the SDK fills from the runtime itself; they carry no user data. */
@@ -108,12 +116,16 @@ const EXT = '(?:pdf|jpe?g|png|heic|heif|webp|gif|tiff?|txt|docx?)';
 const QUOTED_FILENAME = new RegExp(`(["'\`“‘])[^"'\`”’\\n]+?\\.${EXT}\\1`, 'giu');
 const BARE_FILENAME = new RegExp(`[\\p{L}\\p{N}_(-][\\p{L}\\p{N}._()-]*\\.${EXT}\\b`, 'giu');
 const BEARER = /bearer\s+[^\s"',;]+/gi;
+// Proton addresses reach error messages (e.g. keys.ts on a key decrypt
+// failure); key-based redaction cannot see inside a message.
+const EMAIL = /[^\s@"'<>()[\]]+@[^\s@"'<>()[\]]+\.[a-z]{2,}/gi;
 const DATA_URL = /data:[\w/+.-]+;base64,[A-Za-z0-9+/=]+/g;
 
 function scrubText(text: string): string {
   return text
     .replace(DATA_URL, '[data-url]')
     .replace(BEARER, 'Bearer [redacted]')
+    .replace(EMAIL, '[email]')
     .replace(QUOTED_FILENAME, '$1[filename]$1')
     .replace(BARE_FILENAME, '[filename]');
 }
