@@ -71,12 +71,21 @@ const DATA_URL = /data:[\w/+.-]+;base64,[A-Za-z0-9+/=]+/g;
 // unbroken token (base64, PGP armor, a JSON body) that would make unbounded
 // patterns quadratic — tens of seconds for 100 KB.
 const MAX_TEXT = 2000;
+// Redact over a slightly larger window than we keep, so a quoted name that
+// straddles the cut is removed whole instead of losing only its tail. Still
+// bounded, so still fast.
+const SCRUB_WINDOW = MAX_TEXT + 512;
 
 function scrubText(text: string): string {
-  if (text.length > MAX_TEXT) {
+  let out = redactPatterns(text.length > SCRUB_WINDOW ? text.slice(0, SCRUB_WINDOW) : text);
+  if (out.length > MAX_TEXT) {
     // Drop the token the cut splits, so no partial secret survives the cap.
-    text = `${text.slice(0, MAX_TEXT).replace(/\S*$/, '')}[truncated]`;
+    out = `${out.slice(0, MAX_TEXT).replace(/\S*$/, '')}[truncated]`;
   }
+  return out;
+}
+
+function redactPatterns(text: string): string {
   return text
     .replace(DATA_URL, '[data-url]')
     .replace(BEARER, 'Bearer [redacted]')

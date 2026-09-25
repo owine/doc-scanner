@@ -304,6 +304,18 @@ describe('scrubEvent on pathological input', () => {
     });
   }
 
+  it('stays fast at the worst case under the cap, where every pattern still runs', () => {
+    const started = performance.now();
+    scrubEvent({ type: undefined, message: '\u201c'.repeat(1999), extra: { note: 'a.p '.repeat(499) } });
+    expect(performance.now() - started).toBeLessThan(100);
+  });
+
+  it('redacts a quoted document name that straddles the cap, not just its tail', () => {
+    const out = scrubEvent({ type: undefined, message: `${'pad '.repeat(495)}upload "Lease Agreement.pdf" failed` });
+
+    expect(out?.message).not.toContain('Lease');
+  });
+
   it('drops a token cut by the length cap, so no partial secret survives', () => {
     // The cap at 2000 chars falls two characters into the address ("ja").
     const out = scrubEvent({ type: undefined, message: `${'x '.repeat(999)}jane.doe@proton.me` });
