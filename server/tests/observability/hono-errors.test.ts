@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { createApp } from '../../src/http/server.js';
 import { createTestDb } from '../helpers/test-db.js';
 import { flushEvents, initRecordingSentry } from '../helpers/sentry-transport.js';
+import { reportingDriveFailure } from '../../src/observability/report.js';
 
 // Sentry must be initialized before createApp, as it is in production
 // (instrument.ts is the first import of index.ts).
@@ -40,6 +41,26 @@ describe('Hono error reporting with Sentry initialized', () => {
       for (const value of [query, sid, token, body]) {
         expect(wire).not.toContain(value);
       }
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('reports a drive failure rethrown through a route once, keeping its tag', async () => {
+    const { db, cleanup } = createTestDb();
+    try {
+      const app = createApp({ db, encryptionKey: Buffer.alloc(32, 1).toString('base64') });
+      app.post('/api/upload-like', async () => {
+        await reportingDriveFailure('upload', async () => { throw new Error('drive down'); });
+        return new Response('unreachable');
+      });
+
+      const res = await app.request('/api/upload-like', { method: 'POST' });
+      await flushEvents();
+
+      expect(res.status).toBe(500);
+      expect(events).toHaveLength(1);
+      expect(events[0]?.tags).toMatchObject({ 'drive.operation': 'upload' });
     } finally {
       cleanup();
     }
