@@ -88,3 +88,27 @@ describe('scrubEvent (PWA)', () => {
     expect(scrubEvent(baseEvent({ tags: { 'api.operation': 'upload' } }))?.tags).toEqual({ 'api.operation': 'upload' });
   });
 });
+
+describe('scrubEvent on pathological input', () => {
+  // Error messages can embed base64, PGP armor or a JSON body. beforeSend runs
+  // synchronously on the main thread, so scrubbing must stay linear-ish.
+  for (const [label, token] of [
+    ['base64', 'QUJD'.repeat(25_000)],
+    ['one long word', 'a'.repeat(100_000)],
+    ['an @ with no TLD', `${'a'.repeat(50_000)}@${'a'.repeat(50_000)}`],
+  ] as const) {
+    it(`scrubs a 100 KB ${label} message quickly`, () => {
+      const started = performance.now();
+      scrubEvent({ type: undefined, message: token, exception: { values: [{ type: 'Error', value: token }] } });
+      expect(performance.now() - started).toBeLessThan(100);
+    });
+  }
+
+  it('drops a token cut by the length cap, so no partial secret survives', () => {
+    // The cap at 2000 chars falls two characters into the address ("ja").
+    const out = scrubEvent({ type: undefined, message: `${'x '.repeat(999)}jane.doe@proton.me` });
+
+    expect(out?.message).not.toContain('ja');
+    expect(out?.message?.endsWith('x [truncated]')).toBe(true);
+  });
+});

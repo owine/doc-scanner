@@ -61,12 +61,22 @@ const REDACTED = '[redacted]';
 
 const EXT = '(?:pdf|jpe?g|png|heic|heif|webp|gif|tiff?|txt|docx?)';
 const QUOTED_FILENAME = new RegExp(`(["'\`“‘])[^"'\`”’\\n]+?\\.${EXT}\\1`, 'giu');
-const BARE_FILENAME = new RegExp(`[\\p{L}\\p{N}_(-][\\p{L}\\p{N}._()-]*\\.${EXT}\\b`, 'giu');
+const BARE_FILENAME = new RegExp(`[\\p{L}\\p{N}_(-][\\p{L}\\p{N}._()-]{0,254}\\.${EXT}\\b`, 'giu');
 const BEARER = /bearer\s+[^\s"',;]+/gi;
-const EMAIL = /[^\s@"'<>()[\]]+@[^\s@"'<>()[\]]+\.[a-z]{2,}/gi;
+const EMAIL = /[^\s@"'<>()[\]]{1,64}@[^\s@"'<>()[\]]{1,255}\.[a-z]{2,24}/gi;
 const DATA_URL = /data:[\w/+.-]+;base64,[A-Za-z0-9+/=]+/g;
 
+// Quantifiers above are bounded and input is capped: beforeSend runs
+// synchronously on the main thread, and an error message can embed a long
+// unbroken token (base64, PGP armor, a JSON body) that would make unbounded
+// patterns quadratic — tens of seconds for 100 KB.
+const MAX_TEXT = 2000;
+
 function scrubText(text: string): string {
+  if (text.length > MAX_TEXT) {
+    // Drop the token the cut splits, so no partial secret survives the cap.
+    text = `${text.slice(0, MAX_TEXT).replace(/\S*$/, '')}[truncated]`;
+  }
   return text
     .replace(DATA_URL, '[data-url]')
     .replace(BEARER, 'Bearer [redacted]')
