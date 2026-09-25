@@ -17,7 +17,16 @@ COPY tsconfig.base.json ./
 COPY server ./server
 COPY pwa ./pwa
 RUN pnpm --filter @doc-scanner/server run typecheck
-RUN pnpm --filter @doc-scanner/pwa run build
+# Browser error reporting is compiled into the bundle, so its DSN is a build
+# arg (empty = off). A browser DSN is public by design — it ships in the JS —
+# so an ARG is fine here. Declared after typecheck to keep that layer cached.
+ARG SENTRY_BROWSER_DSN=
+ARG SENTRY_ENVIRONMENT=
+ARG GIT_SHA=dev
+RUN VITE_SENTRY_DSN="$SENTRY_BROWSER_DSN" \
+    VITE_SENTRY_ENVIRONMENT="$SENTRY_ENVIRONMENT" \
+    VITE_SENTRY_RELEASE="$GIT_SHA" \
+    pnpm --filter @doc-scanner/pwa run build
 
 FROM node:24.21.0-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 AS runtime
 WORKDIR /app
@@ -62,6 +71,8 @@ CMD ["sh", "-c", "cd server && exec node --import tsx src/index.ts"]
 ARG GIT_SHA=dev
 ARG BUILD_DATE=unknown
 ARG VERSION=dev
+# Server-side Sentry release; the SDK ignores the "dev" default.
+ENV SENTRY_RELEASE=${GIT_SHA}
 LABEL org.opencontainers.image.revision="${GIT_SHA}" \
       org.opencontainers.image.created="${BUILD_DATE}" \
       org.opencontainers.image.version="${VERSION}"
