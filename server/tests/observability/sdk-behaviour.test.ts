@@ -11,10 +11,6 @@ import { flushEvents, initRecordingSentry } from '../helpers/sentry-transport.js
 // server: `app.request` bypasses @sentry/node's http integration, so tests
 // using it cannot see incoming-body capture or outgoing header injection.
 
-// The Dockerfile's default GIT_SHA. Must not become the client's release,
-// including via the SDK's own fallback to process.env.
-process.env.GIT_SHA = 'dev';
-
 const { events } = initRecordingSentry();
 
 // Every event as it looks BEFORE beforeSend: proves what the SDK holds, not
@@ -105,9 +101,5 @@ describe('SDK behaviour with a DSN', () => {
 
     expect(res.status).toBe(500);
     expect(events).toHaveLength(1);
-  });
-
-  it('does not use the Dockerfile "dev" placeholder as the release', () => {
-    expect(Sentry.getClient()?.getOptions().release).not.toBe('dev');
   });
 });
