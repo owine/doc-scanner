@@ -17,6 +17,7 @@ import { CryptoCache } from './crypto-cache.js';
 import { EventIdStore } from './event-id-store.js';
 import { getOrCreateClientUid } from './client-uid.js';
 import { getOpenPGPModule } from './crypto-module.js';
+import { reportingDriveFailure } from '../observability/report.js';
 
 /** Proton's production Drive API host. The SDK config wants a host, not a URL. */
 const DEFAULT_DRIVE_HOST = 'drive-api.proton.me';
@@ -112,11 +113,13 @@ export class DriveClient {
     const httpClient = new DriveHttpClient({
       appVersion: cfg.appVersion,
       getSession: () => this.session,
-      refreshSession: async () => {
+      // The HTTP adapter swallows a failed refresh and hands the SDK the
+      // original 401, so this is the only place that failure is visible.
+      refreshSession: () => reportingDriveFailure('session-refresh', async () => {
         this.session = await cfg.protonAuth.refresh(this.session);
         cfg.onSessionRefreshed?.(this.session);
         return this.session;
-      },
+      }),
     });
 
     this.sdk = new ProtonDriveClient({
@@ -159,35 +162,42 @@ export class DriveClient {
   }
 
   async uploadFile(name: string, bytes: Uint8Array, mimeType: string): Promise<UploadResult> {
-    const root = await this.sdk.getMyFilesRootFolder();
+    // Failures are reported by stage (a failed upload is a lost document).
+    // The name is passed as sensitive so it is redacted wherever the SDK
+    // echoes it; the bytes are never handed to the reporter at all.
+    const { root, availableName } = await reportingDriveFailure('folder-lookup', async () => {
+      const root = await this.sdk.getMyFilesRootFolder();
+      // `getFileUploader` rejects outright when the name is taken, so resolve
+      // a free name first ("scan.pdf" -> "scan (1).pdf") instead of surfacing
+      // a collision as an upload failure.
+      const availableName = await this.sdk.getAvailableName(root.uid, name);
+      return { root, availableName };
+    }, [name]);
 
-    // `getFileUploader` rejects outright when the name is taken, so resolve a
-    // free name first ("scan.pdf" -> "scan (1).pdf") instead of surfacing a
-    // collision as an upload failure.
-    const availableName = await this.sdk.getAvailableName(root.uid, name);
+    const { nodeUid } = await reportingDriveFailure('upload', async () => {
+      const uploader = await this.sdk.getFileUploader(root.uid, availableName, {
+        mediaType: mimeType,
+        expectedSize: bytes.byteLength,
+        // We hold the whole buffer, so let the SDK verify what it uploaded
+        // against a hash we computed independently.
+        expectedSha1: createHash('sha1').update(bytes).digest('hex'),
+        modificationTime: new Date(),
+      });
 
-    const uploader = await this.sdk.getFileUploader(root.uid, availableName, {
-      mediaType: mimeType,
-      expectedSize: bytes.byteLength,
-      // We hold the whole buffer, so let the SDK verify what it uploaded
-      // against a hash we computed independently.
-      expectedSha1: createHash('sha1').update(bytes).digest('hex'),
-      modificationTime: new Date(),
-    });
+      // Wrap the flat byte buffer as a single-chunk ReadableStream. The SDK
+      // streams blocks, but a one-shot enqueue is well-defined and the
+      // smallest possible adapter for callers that already have the bytes
+      // resident in memory.
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(bytes);
+          controller.close();
+        },
+      });
 
-    // Wrap the flat byte buffer as a single-chunk ReadableStream. The SDK
-    // streams blocks, but a one-shot enqueue is well-defined and the
-    // smallest possible adapter for callers that already have the bytes
-    // resident in memory.
-    const stream = new ReadableStream<Uint8Array>({
-      start(controller) {
-        controller.enqueue(bytes);
-        controller.close();
-      },
-    });
-
-    const controller = await uploader.uploadFromStream(stream, []);
-    const { nodeUid } = await controller.completion();
+      const controller = await uploader.uploadFromStream(stream, []);
+      return controller.completion();
+    }, [name, availableName]);
 
     let driveUrl: string;
     try {

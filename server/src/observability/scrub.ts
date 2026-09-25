@@ -65,6 +65,27 @@ export function scrubEvent(event: ErrorEvent): ErrorEvent | null {
   return event;
 }
 
+/**
+ * Replaces every occurrence of the given values (e.g. the document name a
+ * capture site was handed) anywhere in the event. Complements the pattern
+ * matching in scrubText, which cannot recognise an unquoted name with spaces.
+ */
+export function redactExact<T>(event: T, values: readonly string[]): T {
+  const needles = values.filter((v) => v.length >= 3);
+  if (needles.length === 0) return event;
+  const walk = (value: unknown): unknown => {
+    if (typeof value === 'string') {
+      return needles.reduce((text, needle) => text.split(needle).join('[filename]'), value);
+    }
+    if (Array.isArray(value)) return value.map(walk);
+    if (value && typeof value === 'object') {
+      for (const [key, inner] of Object.entries(value)) (value as Record<string, unknown>)[key] = walk(inner);
+    }
+    return value;
+  };
+  return walk(event) as T;
+}
+
 /** Contexts the SDK fills from the runtime itself; they carry no user data. */
 const SDK_CONTEXTS = new Set(['app', 'cloud_resource', 'culture', 'device', 'os', 'runtime', 'trace']);
 
