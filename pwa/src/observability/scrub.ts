@@ -63,12 +63,14 @@ const EXT = '(?:pdf|jpe?g|png|heic|heif|webp|gif|tiff?|txt|docx?)';
 const QUOTED_FILENAME = new RegExp(`(["'\`“‘])[^"'\`”’\\n]+?\\.${EXT}\\1`, 'giu');
 const BARE_FILENAME = new RegExp(`[\\p{L}\\p{N}_(-][\\p{L}\\p{N}._()-]*\\.${EXT}\\b`, 'giu');
 const BEARER = /bearer\s+[^\s"',;]+/gi;
+const EMAIL = /[^\s@"'<>()[\]]+@[^\s@"'<>()[\]]+\.[a-z]{2,}/gi;
 const DATA_URL = /data:[\w/+.-]+;base64,[A-Za-z0-9+/=]+/g;
 
 function scrubText(text: string): string {
   return text
     .replace(DATA_URL, '[data-url]')
     .replace(BEARER, 'Bearer [redacted]')
+    .replace(EMAIL, '[email]')
     .replace(QUOTED_FILENAME, '$1[filename]$1')
     .replace(BARE_FILENAME, '[filename]');
 }

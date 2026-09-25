@@ -20,6 +20,8 @@ export function buildSentryOptions(env: SentryEnv): Sentry.BrowserOptions | null
     // Errors only: no tracing integration and no replay are added, and this
     // keeps tracing off even if one ever were.
     tracesSampleRate: 0,
+    // Never stamp sentry-trace/baggage on outgoing requests.
+    tracePropagationTargets: [],
     sendDefaultPii: false,
     beforeSend: (event) => scrubEvent(event),
   };

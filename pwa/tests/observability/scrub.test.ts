@@ -50,6 +50,12 @@ describe('scrubEvent (PWA)', () => {
     for (const s of ['Lease Agreement', 'Passport', 'Insurance card', 'Payslip']) expect(wire(out)).not.toContain(s);
   });
 
+  it('redacts email addresses embedded in messages', () => {
+    const out = scrubEvent(baseEvent({ exception: { values: [{ type: 'Error', value: 'login failed for jane.doe@proton.me' }] } }));
+
+    expect(out?.exception?.values?.[0]?.value).toBe('login failed for [email]');
+  });
+
   it('removes credentials and tokens from extra', () => {
     const out = scrubEvent(baseEvent({ extra: { password: 'SECRET-PW', totp: 'SECRET-TOTP', email: 'SECRET@example.test' } }));
 

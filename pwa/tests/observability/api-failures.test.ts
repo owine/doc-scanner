@@ -49,6 +49,27 @@ describe('API request failure reporting', () => {
     expect(tagsOf(0)).toMatchObject({ 'api.operation': 'upload', 'api.failure': 'http', 'api.status': '502' });
   });
 
+  it('reports a 5xx with a non-JSON body (a proxy error page when the server is down)', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('<html><body>502 Bad Gateway</body></html>', { status: 502 })));
+
+    await expect(request('/api/upload', { method: 'POST' }, { reportAs: 'upload' })).rejects.toThrow();
+    await Sentry.flush(1000);
+
+    expect(events).toHaveLength(1);
+    expect(tagsOf(0)).toMatchObject({ 'api.operation': 'upload', 'api.failure': 'http', 'api.status': '502' });
+  });
+
+  it('reports a connection that drops while the response body is read as a network failure', async () => {
+    const broken = new ReadableStream({ start(controller) { controller.error(new TypeError('network connection was lost')); } });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(broken, { status: 200 })));
+
+    await expect(request('/api/upload', { method: 'POST' }, { reportAs: 'upload' })).rejects.toThrow();
+    await Sentry.flush(1000);
+
+    expect(events).toHaveLength(1);
+    expect(tagsOf(0)).toMatchObject({ 'api.operation': 'upload', 'api.failure': 'network' });
+  });
+
   it('does not report 4xx responses, which the UI handles', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{"error":"not_authenticated"}', { status: 401 })));
 

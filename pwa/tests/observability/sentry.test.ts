@@ -23,8 +23,12 @@ describe('buildSentryOptions (PWA)', () => {
     expect(options?.release).toBeUndefined();
   });
 
-  it('disables tracing and default PII', () => {
-    expect(buildSentryOptions({ VITE_SENTRY_DSN: DSN })).toMatchObject({ tracesSampleRate: 0, sendDefaultPii: false });
+  it('disables tracing, trace propagation and default PII', () => {
+    expect(buildSentryOptions({ VITE_SENTRY_DSN: DSN })).toMatchObject({
+      tracesSampleRate: 0,
+      tracePropagationTargets: [],
+      sendDefaultPii: false,
+    });
   });
 
   it('wires the scrubber in as beforeSend', () => {
