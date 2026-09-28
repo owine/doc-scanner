@@ -6,12 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A personal-use, self-hosted PWA for scanning paper documents from a phone camera and uploading them to Proton Drive. A phone-facing Preact PWA captures/crops pages; a small TypeScript server authenticates against Proton's SRP flow on the user's behalf and proxies **end-to-end-encrypted** uploads through the official Proton Drive SDK.
 
-> The root `README.md` is stale (it describes a pre-implementation Phase 1 on Node 20 / npm / better-sqlite3). Trust the code and this file, not the README, for stack and status.
-
 ## Toolchain (strict)
 
-- **Node `24.20.0`** (pinned in `.nvmrc`, enforced by `engineStrict` — `pnpm install` **fails** on any other version). Run `fnm use` / `nvm use` first. Node 26 breaks some happy-dom tests — that's an environment mismatch, not a real failure.
-- **pnpm `12.3.4`** via Corepack. This is a pnpm workspace; **do not use npm**.
+- **Node `24.21.0`** (pinned in `.nvmrc`, enforced by `engineStrict` — `pnpm install` **fails** on any other version). Run `fnm use` / `nvm use` first. Node 26 breaks some happy-dom tests — that's an environment mismatch, not a real failure.
+- **pnpm `12.6.0`** via Corepack. This is a pnpm workspace; **do not use npm**.
 - Install with `pnpm install`. All pnpm settings live in **`pnpm-workspace.yaml`**, not `.npmrc` — pnpm reads only auth/registry keys from `.npmrc` and silently ignores the rest, so anything put there looks enforced while doing nothing (pnpm 12 does now reject an unknown key in `pnpm-workspace.yaml` itself, with `ERR_PNPM_UNRECOGNIZED_WORKSPACE_SETTINGS`). The hardening block sets a 7-day `minimumReleaseAge`, exact pins, strict engines, and gates package build scripts through `allowBuilds`. `minimumReleaseAgeStrict` and `trustLockfile` are load-bearing for different reasons; the comments in that file are the canonical explanation, so read them before changing anything in the block.
 
 ## Common commands
@@ -22,7 +20,8 @@ Run from the repo root (they fan out across workspaces via `pnpm -r`):
 pnpm dev            # server (tsx watch) + pwa (vite) in parallel
 pnpm test           # all workspace tests
 pnpm build          # pwa build (server has no build step — see below)
-pnpm test:integration  # sets INTEGRATION=1; runs *.integration.test.ts (needs real Proton creds)
+pnpm test:integration  # sets INTEGRATION=1 but runs only unit tests (server default config excludes *.integration.test.ts)
+INTEGRATION=1 pnpm --filter @doc-scanner/server run test:integration  # the real integration run (needs real Proton creds)
 ```
 
 Per-workspace (`@doc-scanner/server`, `@doc-scanner/pwa`):
