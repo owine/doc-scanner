@@ -9,7 +9,7 @@ import { SessionStore } from '../../src/auth/session-store.js';
 import type { ProtonAuth } from '../../src/auth/srp.js';
 import type { DecryptedUserKey } from '../../src/auth/keys.js';
 import type { DriveClient, UploadResult } from '../../src/drive/client.js';
-import { UploadCollisionExhausted } from '../../src/drive/client.js';
+import { ServerError } from '@protontech/drive-sdk';
 import type { FolderCache } from '../../src/drive/folder-cache.js';
 
 const KEY = Buffer.alloc(32, 1).toString('base64');
@@ -43,7 +43,7 @@ function setupAuthed(opts: SetupOpts = {}): { app: Hono; cookie: string } {
   const uploadFile = opts.uploadFile ?? vi.fn().mockResolvedValue({
     nodeUid: 'node-1',
     driveUrl: 'https://drive.example/node-1',
-    finalName: 'Receipt',
+    name: 'Receipt',
   } satisfies UploadResult);
   lastUploadFile = uploadFile;
 
@@ -106,32 +106,38 @@ describe('POST /api/upload', () => {
     expect(detail).toMatchObject({ scanFinalName: 'Receipt', folderLinkId: 'f-tax', folderPath: '/Tax', driveNodeUid: 'node-1' });
   });
 
-  it('surfaces collision-suffixed finalName when wrapper returns " (2)"', async () => {
+  it('returns the de-duplicated name the Drive client actually used', async () => {
     const uploadFile = vi.fn().mockResolvedValue({
       nodeUid: 'node-2',
       driveUrl: 'https://drive.example/node-2',
-      finalName: 'Receipt (2)',
+      name: 'Receipt (1)',
     } satisfies UploadResult);
     const { app, cookie } = setupAuthed({ uploadFile });
     const res = await app.request('/api/upload', { method: 'POST', body: uploadFd(), headers: { cookie } });
     expect(res.status).toBe(200);
-    expect((await res.json()).finalName).toBe('Receipt (2)');
+    expect((await res.json()).finalName).toBe('Receipt (1)');
   });
 
-  it('returns 409 with collision_exhausted on UploadCollisionExhausted', async () => {
-    const uploadFile = vi.fn().mockRejectedValue(new UploadCollisionExhausted('exhausted'));
-    const { app, cookie } = setupAuthed({ uploadFile });
-    const res = await app.request('/api/upload', { method: 'POST', body: uploadFd(), headers: { cookie } });
-    expect(res.status).toBe(409);
-    expect(await res.json()).toEqual({ error: 'collision_exhausted', collision_exhausted: true });
-  });
-
-  it('returns 401 with reauth_required on auth-style SDK error', async () => {
-    const uploadFile = vi.fn().mockRejectedValue(new Error('401 unauthorized: token expired'));
+  // Both shapes the SDK's apiErrorFactory produces for a 401: a JSON body
+  // (APICodeError, `code`) and no body (APIHTTPError, `statusCode`).
+  it.each([
+    ['body Code', { code: 401 }],
+    ['HTTP status', { statusCode: 401 }],
+  ])('returns 401 with reauth_required on an SDK 401 (%s)', async (_label, fields) => {
+    const uploadFile = vi.fn().mockRejectedValue(Object.assign(new ServerError('Invalid access token'), fields));
     const { app, cookie } = setupAuthed({ uploadFile });
     const res = await app.request('/api/upload', { method: 'POST', body: uploadFd(), headers: { cookie } });
     expect(res.status).toBe(401);
     expect(await res.json()).toEqual({ error: 'reauth_required', reauth_required: true });
+  });
+
+  it('does not treat an error that merely mentions "auth" as a 401', async () => {
+    // The ported route used to sniff messages for "auth"/"token", which also
+    // matches crypto failures and would bounce the user to the login screen.
+    const uploadFile = vi.fn().mockRejectedValue(new Error('authentication tag mismatch'));
+    const { app, cookie } = setupAuthed({ uploadFile });
+    const res = await app.request('/api/upload', { method: 'POST', body: uploadFd(), headers: { cookie } });
+    expect(res.status).toBe(502);
   });
 
   it('returns 502 on a generic SDK failure (network/quota etc.)', async () => {

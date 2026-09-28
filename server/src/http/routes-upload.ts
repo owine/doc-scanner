@@ -3,7 +3,7 @@ import { bodyLimit } from 'hono/body-limit';
 import { sessionMiddleware, type AuthContext } from './middleware.js';
 import type { DB } from '../db.js';
 import type { SessionStore } from '../auth/session-store.js';
-import { UploadCollisionExhausted } from '../drive/client.js';
+import { ServerError } from '@protontech/drive-sdk';
 import { logger } from '../logger.js';
 
 interface History {
@@ -28,17 +28,15 @@ type Env = { Variables: { auth?: AuthContext } };
 const NAME_REGEX = /^[a-zA-Z0-9 .,'_-]{1,80}$/;
 const MAX_BODY_BYTES = 50 * 1024 * 1024;
 
-// Heuristic for "session expired / re-auth needed". The Proton SDK's exact
-// shape for 401-style errors during upload is unverified — same situation
-// as the collision detector. Until empirical testing pins it down, we
-// treat any error message that mentions "401", "auth", "unauthorized", or
-// "token" as a re-auth signal. A future task will tighten this once we've
-// observed the real shape.
-function looksLikeAuthError(err: unknown): boolean {
-  if (!(err instanceof Error)) return false;
-  const msg = err.message.toLowerCase();
-  return msg.includes('401') || msg.includes('unauthorized')
-    || msg.includes('auth') || msg.includes('token');
+// DriveHttpClient already refreshes the access token on a 401 and replays the
+// request, so a 401 that still reaches the SDK means the refresh token is dead
+// too. The SDK's apiErrorFactory turns it into a ServerError one of two ways:
+// with a JSON body, an APICodeError whose `code` is the body's Code (401 for an
+// invalid token); without one, an APIHTTPError whose `statusCode` is 401.
+// The body shape is taken from the SDK source, not yet observed on a live
+// expired session.
+function isAuthExpired(err: unknown): boolean {
+  return err instanceof ServerError && (err.statusCode === 401 || err.code === 401);
 }
 
 export function uploadRoutes(deps: Deps): Hono<Env> {
@@ -82,7 +80,7 @@ export function uploadRoutes(deps: Deps): Hono<Env> {
           `INSERT INTO audit_log (event, detail, remote_user) VALUES ('drive_upload', ?, ?)`,
         ).run(
           JSON.stringify({
-            scanFinalName: result.finalName,
+            scanFinalName: result.name,
             requestedName: name,
             folderLinkId,
             folderPath: folder.path,
@@ -97,30 +95,24 @@ export function uploadRoutes(deps: Deps): Hono<Env> {
         // visible success is not gated on history.
         deps.history?.recordSave({
           ocrText: ocrTextString,
-          finalName: result.finalName,
+          finalName: result.name,
           folderLinkId,
           folderPath: folder.path,
           driveNodeUid: result.nodeUid,
         });
         logger.info(
-          { email: auth.email, finalName: result.finalName, driveNodeUid: result.nodeUid },
+          { email: auth.email, finalName: result.name, driveNodeUid: result.nodeUid },
           'drive upload succeeded',
         );
         return c.json({
           driveNodeUid: result.nodeUid,
           driveWebUrl: result.driveUrl,
-          finalName: result.finalName,
+          finalName: result.name,
         });
       } catch (err) {
-        if (err instanceof UploadCollisionExhausted) {
-          logger.warn({ name }, 'drive upload exhausted collision retries');
-          return c.json({ error: 'collision_exhausted', collision_exhausted: true }, 409);
-        }
-        if (looksLikeAuthError(err)) {
-          // TODO(slice-2 follow-up): try protonAuth.refresh + rebuild
-          // DriveClient with new tokens, retry once. Until then we bounce
-          // the user to re-login. PWA scan stays in pending_upload so a
-          // later session can drain it.
+        if (isAuthExpired(err)) {
+          // The PWA scan stays in pending_upload so the outbox drains it after
+          // the user logs in again.
           logger.warn({ err: (err as Error).message }, 'drive upload auth-style error');
           return c.json({ error: 'reauth_required', reauth_required: true }, 401);
         }
