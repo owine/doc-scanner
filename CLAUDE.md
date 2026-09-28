@@ -60,12 +60,13 @@ The server runs its TypeScript **source** under `tsx` in dev, prod, and Docker (
 - **Auth (`auth/`)** — `ProtonAuth.login` runs Proton's SRP handshake (via the vendored code), then fetches and decrypts the user's PGP user key and every active address key (`keys.ts`). Sessions are AES-GCM-encrypted at rest in SQLite (`session-store.ts`); a `LiveSession` holding the decrypted keys + a constructed `DriveClient` lives in-process for the cookie's lifetime (`live-session.ts`).
 - **Drive (`drive/`)** — a **ports-and-adapters** integration with `@protontech/drive-sdk`. `DriveClient` (`client.ts`) is a thin facade that constructs `ProtonDriveClient` by injecting ~6 adapters we own: `DriveAccount` (exposes decrypted keys — note `keys[].id` is the address *key* ID, not the address ID), `DriveHttpClient` (fetch + 401-refresh-and-replay), `DriveSrpModule`, `EntitiesCache` (SQLite, encrypted), `CryptoCache` (memory-only — decrypted key material must never touch disk), `EventIdStore`, plus an OpenPGP crypto module (`crypto-module.ts`, an `openpgp`-backed CryptoProxy shim). **Keep `client.ts` thin** — it's the re-port surface when the SDK bumps.
 - **DB (`db.ts`)** — `node:sqlite` `DatabaseSync`; forward-only numbered SQL migrations in `migrations/` applied on open.
-- **HTTP (`http/`)** — Hono routes + session middleware.
+- **Classify (`classify/`)** — Phase 5 vision pipeline: `image.ts` normalises page images with `sharp`, `haiku.ts` sends them to Claude Haiku 4.5 with a forced tool call that returns per-page OCR (text + normalised word boxes) and a filename/folder suggestion, and `history.ts` records confirmed saves in an FTS5 table (migration `004`) whose recent rows become few-shot examples.
+- **HTTP (`http/`)** — Hono routes + session middleware. Phase 5 adds `POST /api/classify`, `POST /api/upload` (files into a chosen folder), and `GET /api/drive/folders` (a per-session folder-tree cache, `drive/folder-cache.ts`).
 - **Vendor (`vendor/proton-srp/`)** — a pinned MIT subset of Proton's SRP/crypto. Never edited or auto-updated (Renovate-blocked); re-vendoring is manual. Has its own tsconfig project.
 
 ### PWA (`pwa/src/`)
 
-`scanner/` (camera capture + auto-crop), `ocr/`, `pdf/` (`@cantoo/pdf-lib`), `ui/`, `theme/`; `api.ts` talks to the server; local state via `idb`. Tesseract.js assets are copied in by a `predev`/`prebuild` script.
+`scanner/` (camera capture + auto-crop; `scans-store.ts` also tracks each scan's `uploadStatus`), `pdf/` (`@cantoo/pdf-lib`, with the OCR text layer from the server), `ui/` (including `ConfirmCard`), `theme/`; `api.ts` talks to the server; local state via `idb`. `outbox-drain.ts` retries pending classify/upload work, triggered by the service worker's sync and on visibility change. There is no client-side OCR: Phase 5 removed Tesseract.js.
 
 ## Drive SDK version gate (read before bumping)
 

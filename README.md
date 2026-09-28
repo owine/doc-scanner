@@ -2,7 +2,7 @@
 
 A personal-use, self-hosted PWA for scanning paper documents from a phone camera and uploading them to Proton Drive. The server is a small TypeScript service that authenticates against Proton's SRP flow on the user's behalf and proxies end-to-end-encrypted uploads through the official Proton Drive SDK.
 
-> **Status:** Phases 1–4 are merged to `main`: Proton SRP login with encrypted-at-rest sessions, Drive upload via `@protontech/drive-sdk`, the camera scanner pipeline (auto-capture + crop), and client-side OCR with searchable-PDF assembly. The client-side Tesseract OCR from Phase 4 doesn't work on iOS Safari, so **Phase 5** replaces it with server-side Claude Haiku vision that OCRs a scan and suggests a filename and folder in one call. It also adds confirm-and-upload and an offline outbox. Phase 5 is designed ([spec](docs/superpowers/specs/2026-05-08-phase-5-ai-organize-design.md), [plan](docs/superpowers/plans/2026-05-08-phase-5-ai-organize.md)) and partly built on the unmerged `phase-5-ai-organize` branch, but none of it is on `main` yet. The app isn't deployed anywhere yet. CI builds the Docker image but doesn't push it.
+> **Status:** Phases 1–5 are on `main`. Phases 1–4 built Proton SRP login with encrypted-at-rest sessions, Drive upload via `@protontech/drive-sdk`, and the camera scanner pipeline (auto-capture + crop). Phase 5 ([spec](docs/superpowers/specs/2026-05-08-phase-5-ai-organize-design.md), [plan](docs/superpowers/plans/2026-05-08-phase-5-ai-organize.md)) replaced Phase 4's client-side Tesseract OCR, which didn't work on iOS Safari. Now the server sends page images to Claude Haiku 4.5, which returns OCR text plus a suggested filename and Drive folder in one call. You confirm or edit the suggestion, the PWA assembles a searchable PDF, and it uploads to the chosen folder. Past filings are kept in a SQLite FTS5 table and fed back as examples, and an offline outbox retries uploads in the background. Phase 5 hasn't had its on-device smoke test yet. The app isn't deployed anywhere: CI builds the Docker image but doesn't push it.
 
 ## Quickstart
 
@@ -40,7 +40,7 @@ For a containerised run, `docker compose up --build` reads `.env` for interpolat
 The repo is a pnpm workspace (`pnpm-workspace.yaml`) with two packages:
 
 - `server/` (`@doc-scanner/server`) is a Hono HTTP API in TypeScript, using Node's built-in `node:sqlite` for storage (forward-only SQL migrations applied on open). It runs from TypeScript source under `tsx` in dev and in production, with no compiled `dist/`. `@protontech/crypto`, a peer of the Drive SDK, ships raw `.ts` files that plain `node` refuses to load from `node_modules`. When `PWA_DIST_PATH` is set, the server also serves the built PWA.
-- `pwa/` (`@doc-scanner/pwa`) is a Preact + Vite PWA covering camera capture and auto-crop (jscanify), OCR (Tesseract.js, being replaced in Phase 5), searchable PDF assembly (`@cantoo/pdf-lib`), and local scan storage in IndexedDB (`idb`).
+- `pwa/` (`@doc-scanner/pwa`) is a Preact + Vite PWA covering camera capture and auto-crop (jscanify), the confirm-and-file card, searchable PDF assembly (`@cantoo/pdf-lib`), local scan storage in IndexedDB (`idb`), and an outbox that retries uploads from the service worker.
 
 ## Environment variables
 
@@ -49,7 +49,7 @@ The repo is a pnpm workspace (`pnpm-workspace.yaml`) with two packages:
 | Variable                 | Purpose                                                                                                                                      |
 | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
 | `SESSION_ENCRYPTION_KEY` | **Required.** 32 random bytes, base64-encoded. Encrypts Proton session tokens at rest.                                                       |
-| `ANTHROPIC_API_KEY`      | **Required** at startup. Reserved for Phase 5's server-side vision OCR/classify; nothing on `main` calls the Claude API yet.                 |
+| `ANTHROPIC_API_KEY`      | **Required.** Used by `/api/classify` to send page images to Claude Haiku 4.5 for OCR and filing suggestions. The spec estimates about $0.01 per five-page scan. |
 | `DB_PATH`                | Path to the SQLite database file (default `./data/app.db`, relative to the server's working directory).                                      |
 | `PORT`                   | HTTP port the server listens on (default `3000`).                                                                                            |
 | `LOG_LEVEL`              | Pino log level: `debug`, `info` (default), `warn`, or `error`.                                                                               |

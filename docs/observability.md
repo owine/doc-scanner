@@ -38,7 +38,7 @@ doc-scanner isn't deployed yet: CI builds the image but doesn't push it, and no 
 | `POST /api/auth/login` | Proton accepted the login, but setting up the session failed (session store, cookie, `DriveClient`). | `auth.operation: login`, `auth.stage: session` |
 | PWA `request(…, { reportAs })` | Network failure (including a connection that drops mid-body) or 5xx on a request that opted in. A non-JSON error page from the reverse proxy counts as 5xx. Opt-in, because only a lost upload is worth hearing about, and a phone going offline would otherwise report every call. | `api.operation`, `api.path`, `api.failure: network \| http`, `api.status`, `network.online` |
 
-**No PWA endpoint opts in yet.** The scan upload call doesn't exist until Phase 5 (plan Task 14). When it lands, it must pass `reportAs: 'upload'`. Server-side, the Phase 5 upload route goes through `DriveClient.uploadFile`, so it is covered already.
+**Only the scan upload opts in.** `api.upload` passes `reportAs: 'upload'`. The outbox drain posts uploads with its own `fetch`, so it reports directly with the same tags, but only once per scan, when retries run out and the scan moves to `needs_attention`. Reporting every attempt would flood the tracker from a phone that's offline. Server-side, the Phase 5 upload route goes through `DriveClient.uploadFile`, so it is covered already.
 
 A failure reported by `DriveClient` and then rethrown through a route produces **one** event: the SDK marks a captured error and drops a second capture of the same object.
 
