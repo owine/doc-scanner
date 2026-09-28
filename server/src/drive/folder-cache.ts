@@ -1,4 +1,4 @@
-import type { ProtonDriveClient } from '@protontech/drive-sdk';
+import { NodeType, type ProtonDriveClient } from '@protontech/drive-sdk';
 
 export interface FolderEntry {
   linkId: string;
@@ -6,11 +6,6 @@ export interface FolderEntry {
 }
 
 type SdkFolderApi = Pick<ProtonDriveClient, 'getMyFilesRootFolder' | 'iterateFolderChildren'>;
-
-function unwrap<T>(maybe: { ok: true; value: T } | { ok: false }): T {
-  if (!maybe.ok) throw new Error('SDK returned non-ok result');
-  return maybe.value;
-}
 
 /**
  * Per-session walk of the Drive folder tree. Holds a flattened list of
@@ -32,18 +27,21 @@ export class FolderCache {
   }
 
   async refresh(): Promise<void> {
-    const root = unwrap(await this.sdk.getMyFilesRootFolder());
+    const root = await this.sdk.getMyFilesRootFolder();
     const out: FolderEntry[] = [{ linkId: root.uid, path: '/' }];
     await this.walk(root.uid, '/', out);
     this.tree = out;
   }
 
   private async walk(folderUid: string, parentPath: string, out: FolderEntry[]): Promise<void> {
-    for await (const childMaybe of this.sdk.iterateFolderChildren(folderUid)) {
-      if (!childMaybe.ok) continue;
-      const child = childMaybe.value;
-      if (String(child.type) !== 'folder') continue;
-      const path = parentPath === '/' ? `/${child.name}` : `${parentPath}/${child.name}`;
+    for await (const child of this.sdk.iterateFolderChildren(folderUid, { type: NodeType.Folder })) {
+      // The filter is a server-side hint; keep the check so a non-folder can never
+      // become a filing target.
+      if (child.type !== NodeType.Folder) continue;
+      // A folder whose name can't be decrypted has no usable path, so it and its
+      // subtree are left out of the picker rather than shown as a placeholder.
+      if (!child.name.ok) continue;
+      const path = parentPath === '/' ? `/${child.name.value}` : `${parentPath}/${child.name.value}`;
       out.push({ linkId: child.uid, path });
       await this.walk(child.uid, path, out);
     }

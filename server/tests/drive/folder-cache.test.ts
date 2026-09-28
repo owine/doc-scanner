@@ -1,22 +1,24 @@
 import { describe, it, expect, vi } from 'vitest';
 import { FolderCache } from '../../src/drive/folder-cache.js';
 
-interface FakeNode { uid: string; name: string; type: string; }
+// `name: null` stands in for a name the SDK could not decrypt.
+interface FakeNode { uid: string; name: string | null; type: string; }
 
-function fakeSdk(tree: Record<string, FakeNode[]>): {
-  getMyFilesRootFolder: () => Promise<{ ok: true; value: FakeNode } | { ok: false }>;
-  iterateFolderChildren: (uid: string) => AsyncGenerator<{ ok: true; value: FakeNode } | { ok: false }>;
-} {
+// drive-sdk >= 0.17 returns nodes unwrapped, with `name` itself a Result.
+function toSdkNode(n: FakeNode) {
+  return {
+    uid: n.uid,
+    type: n.type,
+    name: n.name === null ? { ok: false as const, error: new Error('undecryptable') } : { ok: true as const, value: n.name },
+  };
+}
+
+function fakeSdk(tree: Record<string, FakeNode[]>) {
   async function* iter(uid: string) {
-    for (const child of tree[uid] ?? []) {
-      yield { ok: true as const, value: child };
-    }
+    for (const child of tree[uid] ?? []) yield toSdkNode(child);
   }
   return {
-    getMyFilesRootFolder: vi.fn().mockResolvedValue({
-      ok: true,
-      value: { uid: 'root', name: 'My Files', type: 'folder' },
-    }),
+    getMyFilesRootFolder: vi.fn().mockResolvedValue(toSdkNode({ uid: 'root', name: 'My Files', type: 'folder' })),
     iterateFolderChildren: iter,
   };
 }
@@ -82,6 +84,21 @@ describe('FolderCache', () => {
       { linkId: 'root', path: '/' },
       { linkId: 'f-tax', path: '/Tax' },
       { linkId: 'f-2026', path: '/Tax/2026' },
+    ]);
+  });
+
+  it('skips a folder with an undecryptable name, along with its subtree', async () => {
+    const cache = new FolderCache(fakeSdk({
+      root: [
+        { uid: 'f-bad', name: null, type: 'folder' },
+        { uid: 'f-tax', name: 'Tax', type: 'folder' },
+      ],
+      'f-bad': [{ uid: 'f-hidden', name: 'Hidden', type: 'folder' }],
+    }) as never);
+    await cache.refresh();
+    expect(cache.getTree()).toEqual([
+      { linkId: 'root', path: '/' },
+      { linkId: 'f-tax', path: '/Tax' },
     ]);
   });
 
