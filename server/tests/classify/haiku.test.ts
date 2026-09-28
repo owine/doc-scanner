@@ -134,6 +134,17 @@ describe('classify (haiku vision)', () => {
     expect(result).toBeNull();
   });
 
+  it('returns null when the response stopped at max_tokens', async () => {
+    // A truncated tool call: the input may parse but is incomplete.
+    mockCreate.mockResolvedValue({
+      stop_reason: 'max_tokens',
+      content: [{ type: 'tool_use', name: 'extract_and_suggest', input: { suggestedName: 'Tax' } }],
+      usage: { input_tokens: 9000, output_tokens: 4000 },
+    });
+    const result = await classify({ pages: [TINY_JPEG], folders: [{ linkId: 'f', path: '/' }] });
+    expect(result).toBeNull();
+  });
+
   it('returns null on Anthropic SDK error', async () => {
     mockCreate.mockRejectedValue(new Error('connection refused'));
     const result = await classify({

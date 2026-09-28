@@ -130,6 +130,17 @@ export async function classify(input: ClassifyInput): Promise<ClassifyResult | n
     return null;
   }
 
+  // Word boxes for every page share one output budget, so a dense multi-page
+  // scan can run out mid-call. The tool input is then truncated JSON, which
+  // would otherwise be indistinguishable from a malformed answer in the logs.
+  if (response.stop_reason === 'max_tokens') {
+    logger.warn(
+      { pages: input.pages.length, outputTokens: response.usage?.output_tokens },
+      'classify: hit max_tokens, tool input truncated',
+    );
+    return null;
+  }
+
   const block = (response.content as Array<{ type: string }>).find((b) => b.type === 'tool_use') as
     | { type: 'tool_use'; input: Record<string, unknown> }
     | undefined;
