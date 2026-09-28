@@ -141,11 +141,6 @@ export function App() {
             if (err instanceof ApiError && err.code === 'reauth_required') {
               window.alert('Session expired. Please log in again.');
               setEmail(null);
-            } else if (err instanceof ApiError && err.code === 'collision_exhausted') {
-              window.alert('A file with that name (and 3 suffix variants) already exists in that folder. Please rename and retry.');
-              await store.setUploadStatus(activeScan.id, 'idle').catch(() => {});
-              setActiveScanId(null);
-              setActiveScan(null);
             } else {
               window.alert(`Upload failed: ${(err as Error).message ?? 'unknown'}`);
             }

@@ -168,17 +168,6 @@ describe('api.upload', () => {
     });
   });
 
-  it('throws ApiError with code collision_exhausted on 409', async () => {
-    const fetchSpy = vi.fn().mockResolvedValue(new Response(
-      JSON.stringify({ error: 'collision_exhausted', collision_exhausted: true }),
-      { status: 409, headers: { 'content-type': 'application/json' } },
-    ));
-    vi.stubGlobal('fetch', fetchSpy);
-    await expect(api.upload(pdfBlob(), 'X', 'f', '')).rejects.toMatchObject({
-      status: 409, code: 'collision_exhausted',
-    });
-  });
-
   it('throws PreflightError before fetch when pdf exceeds 50MB', async () => {
     const fetchSpy = vi.fn();
     vi.stubGlobal('fetch', fetchSpy);

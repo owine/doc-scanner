@@ -24,7 +24,7 @@ export const UPLOAD_MAX_PDF_BYTES = 50 * 1024 * 1024;
 export interface UploadResponse {
   driveNodeUid: string;
   driveWebUrl: string;
-  /** Final name Drive accepted (may include " (2)" suffix on collision). */
+  /** Final name Drive accepted (the server de-duplicates, e.g. "Receipt (1)"). */
   finalName: string;
 }
 
@@ -134,9 +134,7 @@ export const api = {
  * user sees a fast error rather than a 413 after a long upload.
  *
  * 401 → throws ApiError with code 'reauth_required' so the caller can
- * route the user back to login. 409 → throws ApiError with code
- * 'collision_exhausted' so the caller can prompt for a name edit + retry.
- * Other non-2xx throws ApiError with whatever the server returned.
+ * route the user back to login. Other non-2xx throws ApiError with whatever the server returned.
  */
 async function uploadMultipart(
   pdf: Blob, name: string, folderLinkId: string, ocrText: string,
