@@ -20,8 +20,7 @@ Run from the repo root (they fan out across workspaces via `pnpm -r`):
 pnpm dev            # server (tsx watch) + pwa (vite) in parallel
 pnpm test           # all workspace tests
 pnpm build          # pwa build (server has no build step — see below)
-pnpm test:integration  # sets INTEGRATION=1 but runs only unit tests (server default config excludes *.integration.test.ts)
-INTEGRATION=1 pnpm --filter @doc-scanner/server run test:integration  # the real integration run (needs real Proton creds)
+pnpm test:integration  # sets INTEGRATION=1; runs *.integration.test.ts (needs real Proton creds)
 ```
 
 Per-workspace (`@doc-scanner/server`, `@doc-scanner/pwa`):
