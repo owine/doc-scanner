@@ -56,7 +56,8 @@ The repo is a pnpm workspace (`pnpm-workspace.yaml`) with two packages:
 | `LOG_LEVEL`              | Pino log level: `debug`, `info` (default), `warn`, or `error`.                                                                               |
 | `TRUST_PROXY`            | Parsed as a boolean (default `true`), but no code reads it yet.                                                                              |
 | `INSECURE_COOKIES`       | Default `false`. Set `true` **only** for local `http://` development: it drops the `Secure` flag from the session cookie. Deployments must use HTTPS. |
-| `SENTRY_DSN`, `SENTRY_ENVIRONMENT` | Optional server-side error reporting to GlitchTip. Disabled when unset. See [`docs/observability.md`](docs/observability.md).     |
+| `SENTRY_DSN`             | Optional server-side error reporting to GlitchTip. Disabled when unset. See [`docs/observability.md`](docs/observability.md).               |
+| `SENTRY_ENVIRONMENT`     | Optional environment tag, used in two places. At runtime it tags server events. Compose also passes it as a Docker **build** arg, which compiles it into the PWA bundle as the browser's environment tag. |
 | `SENTRY_BROWSER_DSN`     | Optional. A Docker **build** arg that compiles the browser DSN into the PWA bundle. See [`docs/observability.md`](docs/observability.md).    |
 
 `PWA_DIST_PATH` is also read. It points the server at the built PWA, and `compose.yml` sets it for the container, so you normally don't set it yourself.
