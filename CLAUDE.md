@@ -6,8 +6,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A personal-use, self-hosted PWA for scanning paper documents from a phone camera and uploading them to Proton Drive. A phone-facing Preact PWA captures/crops pages; a small TypeScript server authenticates against Proton's SRP flow on the user's behalf and proxies **end-to-end-encrypted** uploads through the official Proton Drive SDK.
 
-> The root `README.md` is stale (it describes a pre-implementation Phase 1 on Node 20 / npm / better-sqlite3). Trust the code and this file, not the README, for stack and status.
-
 ## Toolchain (strict)
 
 - **Node `24.20.0`** (pinned in `.nvmrc`, enforced by `engineStrict` — `pnpm install` **fails** on any other version). Run `fnm use` / `nvm use` first. Node 26 breaks some happy-dom tests — that's an environment mismatch, not a real failure.
