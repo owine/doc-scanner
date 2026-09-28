@@ -27,13 +27,12 @@ Other root scripts, which fan out to both workspaces with `pnpm -r`:
 | ----------------------- | ------------------------------------------------------------------------------------------------ |
 | `pnpm test`             | Vitest in both workspaces.                                                                        |
 | `pnpm build`            | The PWA production build (`tsc && vite build`). The server has no build step; see below.         |
-| `pnpm test:integration` | The same `test` scripts with `INTEGRATION=1`. The server's default Vitest config excludes `*.integration.test.ts`, so in practice this runs only unit tests. |
+| `pnpm test:integration` | The server's `*.integration.test.ts` files against a real Proton account, with `INTEGRATION=1` set. Needs credentials; see below. |
 
-To run the Proton integration tests against a real account (they share one login in a single fork because Proton rate-limits logins):
+The integration tests share one login in a single fork, because Proton rate-limits logins:
 
 ```bash
-INTEGRATION=1 PROTON_TEST_EMAIL=... PROTON_TEST_PASSWORD=... \
-  pnpm --filter @doc-scanner/server run test:integration
+PROTON_TEST_EMAIL=... PROTON_TEST_PASSWORD=... pnpm test:integration
 ```
 
 For a containerised run, `docker compose up --build` reads `.env` for interpolation, serves the built PWA from the server on port `3000`, and persists the database under `./data` (mounted at `/data`, where the image points `DB_PATH`).

@@ -6,7 +6,7 @@
     "dev": "pnpm -r --parallel --if-present run dev",
     "build": "pnpm -r --if-present run build",
     "test": "pnpm -r --if-present run test",
-    "test:integration": "INTEGRATION=1 pnpm -r --if-present run test"
+    "test:integration": "INTEGRATION=1 pnpm -r --if-present run test:integration"
   },
   "engines": {
     "node": "24.21.0",
