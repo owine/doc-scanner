@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as Sentry from '@sentry/browser';
 import type { Event } from '@sentry/browser';
 import { buildSentryOptions } from '../../src/observability/sentry.js';
-import { request } from '../../src/api.js';
+import { api, request } from '../../src/api.js';
 
 // Real browser SDK, app options (scrubber included), recording transport.
 const events: Event[] = [];
@@ -47,6 +47,20 @@ describe('API request failure reporting', () => {
 
     expect(events).toHaveLength(1);
     expect(tagsOf(0)).toMatchObject({ 'api.operation': 'upload', 'api.failure': 'http', 'api.status': '502' });
+  });
+
+  it('api.upload opts in, and leaves the multipart content-type to the browser', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue(new Response('{"error":"upload_failed"}', { status: 502 }));
+    vi.stubGlobal('fetch', fetchSpy);
+
+    await expect(api.upload(new Blob([marker], { type: 'application/pdf' }), 'Receipt', 'f-tax', '')).rejects.toThrow();
+    await Sentry.flush(1000);
+
+    expect(events).toHaveLength(1);
+    expect(tagsOf(0)).toMatchObject({ 'api.operation': 'upload', 'api.path': '/api/upload', 'api.status': '502' });
+    const init = fetchSpy.mock.calls[0]![1] as RequestInit;
+    expect(init.body).toBeInstanceOf(FormData);
+    expect(init.headers).not.toHaveProperty('content-type');
   });
 
   it('reports a 5xx with a non-JSON body (a proxy error page when the server is down)', async () => {

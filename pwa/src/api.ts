@@ -51,8 +51,13 @@ export async function request<T>(path: string, init: RequestInit = {}, options: 
   try {
     res = await fetch(path, {
       credentials: 'same-origin',
-      headers: { 'content-type': 'application/json', ...(init.headers ?? {}) },
       ...init,
+      // A FormData body needs the browser-generated multipart content-type
+      // (with its boundary), so only default to JSON for everything else.
+      headers: {
+        ...(init.body instanceof FormData ? {} : { 'content-type': 'application/json' }),
+        ...(init.headers ?? {}),
+      },
     });
     // Inside the try: a connection can also drop while the body streams in.
     text = await res.text();
@@ -147,13 +152,8 @@ async function uploadMultipart(
   fd.set('name', name);
   fd.set('folderLinkId', folderLinkId);
   fd.set('ocrText', ocrText);
-  const res = await fetch('/api/upload', { method: 'POST', body: fd, credentials: 'same-origin' });
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    const body = text ? JSON.parse(text) : {};
-    throw new ApiError(body.error ?? 'request_failed', res.status, body.error);
-  }
-  return res.json() as Promise<UploadResponse>;
+  // A failed upload is a lost document, so it opts in to error reporting.
+  return request<UploadResponse>('/api/upload', { method: 'POST', body: fd }, { reportAs: 'upload' });
 }
 
 export { ApiError };

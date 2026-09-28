@@ -1,13 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { drain } from '../src/outbox-drain.js';
+import { captureRequestFailure } from '../src/observability/sentry.js';
 import { ScansStore } from '../src/scanner/scans-store.js';
 import type { Quad } from '../src/scanner/types.js';
 
 const Q: Quad = { tl: { x: 0, y: 0 }, tr: { x: 100, y: 0 }, bl: { x: 0, y: 100 }, br: { x: 100, y: 100 } };
 function blobOf(text: string): Blob { return new Blob([text], { type: 'image/jpeg' }); }
 
+vi.mock('../src/observability/sentry.js', () => ({ captureRequestFailure: vi.fn() }));
+
 let store: ScansStore;
 beforeEach(async () => {
+  vi.mocked(captureRequestFailure).mockClear();
   indexedDB.deleteDatabase('docscanner');
   store = new ScansStore();
   await store.open();
@@ -83,12 +87,18 @@ describe('outbox drain', () => {
     let scan = await store.getScan(id);
     expect(scan?.uploadStatus).toBe('pending_upload');
     expect(scan?.retryCount).toBe(3);
+    // Retries in progress are not reported; only a stuck document is.
+    expect(captureRequestFailure).not.toHaveBeenCalled();
 
     // Fourth failure (count > MAX_RETRIES=3) → needs_attention.
     await drainOnce();
     scan = await store.getScan(id);
     expect(scan?.uploadStatus).toBe('needs_attention');
     expect(scan?.uploadError).toMatch(/upload returned 502/);
+    expect(captureRequestFailure).toHaveBeenCalledOnce();
+    expect(vi.mocked(captureRequestFailure).mock.calls[0]![1]).toEqual({
+      operation: 'upload', path: '/api/upload', failure: 'http', status: 502,
+    });
   });
 
   it('upload succeeds on second attempt → done, retry counters cleared', async () => {

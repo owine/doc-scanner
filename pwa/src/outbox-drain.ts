@@ -1,6 +1,7 @@
 import type { ScansStore } from './scanner/scans-store.js';
 import type { Scan } from './scanner/types.js';
 import { buildSearchablePdf } from './pdf/build.js';
+import { captureRequestFailure } from './observability/sentry.js';
 
 const RETRY_WINDOW_MS = 24 * 60 * 60 * 1000;
 const MAX_RETRIES = 3;
@@ -115,8 +116,14 @@ async function uploadOne(deps: DrainDeps, scan: Scan, now: () => number, result:
   fd.set('folderLinkId', scan.finalFolderLinkId);
   fd.set('ocrText', ocrTextCombined);
 
+  let res: Response;
   try {
-    const res = await deps.fetch('/api/upload', { method: 'POST', body: fd, credentials: 'same-origin' });
+    res = await deps.fetch('/api/upload', { method: 'POST', body: fd, credentials: 'same-origin' });
+  } catch (err) {
+    await recordFailureAndMaybeFlag(deps.store, scan, now(), (err as Error).message, result, { failure: 'network' });
+    return;
+  }
+  try {
     if (res.ok) {
       const body = await res.json() as { driveNodeUid: string; driveWebUrl: string; finalName: string };
       await deps.store.setUploadStatus(scan.id, 'done', {
@@ -128,12 +135,16 @@ async function uploadOne(deps: DrainDeps, scan: Scan, now: () => number, result:
       result.succeeded++;
       return;
     }
-    // Non-2xx → count as a failed attempt below.
-    throw new Error(`upload returned ${res.status}`);
+    await recordFailureAndMaybeFlag(
+      deps.store, scan, now(), `upload returned ${res.status}`, result, { failure: 'http', status: res.status },
+    );
   } catch (err) {
-    await recordFailureAndMaybeFlag(deps.store, scan, now(), (err as Error).message, result);
+    // A 2xx whose body can't be read, or a store write that failed.
+    await recordFailureAndMaybeFlag(deps.store, scan, now(), (err as Error).message, result, { failure: 'network' });
   }
 }
+
+type UploadFailure = { failure: 'network' | 'http'; status?: number };
 
 async function recordFailureAndMaybeFlag(
   store: ScansStore,
@@ -141,6 +152,7 @@ async function recordFailureAndMaybeFlag(
   nowMs: number,
   errMsg: string,
   result: DrainResult,
+  failure: UploadFailure,
 ): Promise<void> {
   const firstAt = scan.retryFirstAt && (nowMs - scan.retryFirstAt) < RETRY_WINDOW_MS
     ? scan.retryFirstAt
@@ -148,6 +160,10 @@ async function recordFailureAndMaybeFlag(
   const newCount = (scan.retryCount ?? 0) + 1;
 
   if (newCount > MAX_RETRIES) {
+    // Report once, when retries run out and the document is stuck, rather than
+    // on every attempt: a phone that is offline for an afternoon would
+    // otherwise flood the tracker (see docs/observability.md).
+    captureRequestFailure(new Error(errMsg), { operation: 'upload', path: '/api/upload', ...failure });
     await markNeedsAttention(store, scan.id, errMsg);
     result.needsAttention++;
     return;
