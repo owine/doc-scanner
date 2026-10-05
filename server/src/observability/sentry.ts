@@ -24,7 +24,19 @@ export function buildSentryOptions(env: SentryEnv): Sentry.NodeOptions | null {
     environment: env.SENTRY_ENVIRONMENT || (env.NODE_ENV === 'production' ? 'production' : 'development'),
     // Errors only. GlitchTip gets no performance data from us.
     tracesSampleRate: 0,
-    sendDefaultPii: false,
+    // v11 replaced sendDefaultPii with dataCollection, and every field in it
+    // defaults to collecting. Turn each one off explicitly: beforeSend strips
+    // most of this from the wire, but none of it should be held at all —
+    // httpBodies would otherwise keep up to 10 KB of every incoming body (the
+    // login password, later scanned PDFs) on the request scope.
+    dataCollection: {
+      userInfo: false,
+      cookies: false,
+      httpHeaders: false,
+      httpBodies: [],
+      urlQueryParams: false,
+      stackFrameVariables: false,
+    },
     includeLocalVariables: false,
     // The loader hooks exist to auto-instrument imports for tracing, which is
     // off. Registering them anyway would put import-in-the-middle between tsx
@@ -39,10 +51,6 @@ export function buildSentryOptions(env: SentryEnv): Sentry.NodeOptions | null {
       // that only logs, which disables Node's crash-on-unhandled-rejection.
       // Keep the crash: report, then exit, as the process did before Sentry.
       Sentry.onUnhandledRejectionIntegration({ mode: 'strict' }),
-      // By default up to 10 KB of every incoming body is kept on the request
-      // scope: the login password, later scanned PDFs. beforeSend strips it
-      // from the wire, but it should never be held at all.
-      Sentry.httpIntegration({ ignoreIncomingRequestBody: () => true }),
     ],
     beforeSend: (event) => scrubEvent(event),
   };

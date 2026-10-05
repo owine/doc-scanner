@@ -42,12 +42,19 @@ describe('buildSentryOptions', () => {
     expect(buildSentryOptions({ SENTRY_DSN: DSN, SENTRY_RELEASE: 'dev' })?.release).toBeUndefined();
   });
 
-  it('disables tracing, default PII and local-variable capture', () => {
+  it('disables tracing, default data collection and local-variable capture', () => {
     const options = buildSentryOptions({ SENTRY_DSN: DSN });
 
     expect(options).toMatchObject({
       tracesSampleRate: 0,
-      sendDefaultPii: false,
+      dataCollection: {
+        userInfo: false,
+        cookies: false,
+        httpHeaders: false,
+        httpBodies: [],
+        urlQueryParams: false,
+        stackFrameVariables: false,
+      },
       includeLocalVariables: false,
     });
   });
