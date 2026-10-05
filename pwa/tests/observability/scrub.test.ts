@@ -104,6 +104,11 @@ describe('scrubEvent on pathological input', () => {
     });
   }
 
+  // This guards only against a catastrophic (e.g. exponential) pattern: under
+  // the cap even a quadratic one stays fast. Unbounding EMAIL's quantifiers
+  // measured ~35 ms here, still passing. Bounded input is what defends
+  // against quadratic patterns, and the 100 KB tests above enforce it: with
+  // the cap removed they take ~180 ms, ~30 s with an unbounded pattern too.
   it('stays fast at the worst case under the cap, where every pattern still runs', () => {
     const started = performance.now();
     scrubEvent({ type: undefined, message: '\u201c'.repeat(1999), extra: { note: 'a.p '.repeat(499) } });
