@@ -38,10 +38,11 @@ export function buildSentryOptions(env: SentryEnv): Sentry.NodeOptions | null {
       stackFrameVariables: false,
     },
     includeLocalVariables: false,
-    // The loader hooks exist to auto-instrument imports for tracing, which is
-    // off. Registering them anyway would put import-in-the-middle between tsx
-    // and the Drive SDK's raw-.ts crypto peer for no benefit.
-    registerEsmLoaderHooks: false,
+    // The module hooks exist to auto-instrument imports for tracing, which is
+    // off. Registering them anyway would put a Module.registerHooks
+    // resolve/load layer (v10: import-in-the-middle via registerEsmLoaderHooks)
+    // between tsx and the Drive SDK's raw-.ts crypto peer for no benefit.
+    enableRuntimeChannelInjection: false,
     // Tracing is off, but the SDK still stamps sentry-trace/baggage (public
     // key, release, environment) on every outgoing request unless told not
     // to. Proton and Anthropic have no business receiving them.

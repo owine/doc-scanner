@@ -59,8 +59,8 @@ describe('buildSentryOptions', () => {
     });
   });
 
-  it('does not register the ESM loader hooks (nothing to trace; tsx owns loading)', () => {
-    expect(buildSentryOptions({ SENTRY_DSN: DSN })?.registerEsmLoaderHooks).toBe(false);
+  it('does not register the module hooks (nothing to trace; tsx owns loading)', () => {
+    expect(buildSentryOptions({ SENTRY_DSN: DSN })?.enableRuntimeChannelInjection).toBe(false);
   });
 
   it('wires the scrubber in as beforeSend', () => {

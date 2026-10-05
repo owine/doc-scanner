@@ -91,6 +91,14 @@ describe('SDK behaviour with a DSN', () => {
     expect(received[0]).not.toHaveProperty('baggage');
   });
 
+  it('installs no module resolve/load hooks between tsx and the Drive SDK', () => {
+    // v11's NodeClient sets this marker once it has registered its
+    // diagnostics-channel injection hooks via Module.registerHooks.
+    const marker = (globalThis as { __SENTRY_ORCHESTRION__?: { runtime?: unknown } }).__SENTRY_ORCHESTRION__;
+
+    expect(marker?.runtime).toBeUndefined();
+  });
+
   it('reports a thrown error carrying a 4xx status (e.g. a ProtonApiError 429) that became a 500', async () => {
     const port = await startApp((app) => {
       app.get('/api/rate-limited', () => { throw Object.assign(new Error('Too many requests'), { status: 429 }); });
