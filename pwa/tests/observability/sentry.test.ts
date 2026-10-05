@@ -23,11 +23,18 @@ describe('buildSentryOptions (PWA)', () => {
     expect(options?.release).toBeUndefined();
   });
 
-  it('disables tracing, trace propagation and default PII', () => {
+  it('disables tracing, trace propagation and default data collection', () => {
     expect(buildSentryOptions({ VITE_SENTRY_DSN: DSN })).toMatchObject({
       tracesSampleRate: 0,
       tracePropagationTargets: [],
-      sendDefaultPii: false,
+      dataCollection: {
+        userInfo: false,
+        cookies: false,
+        httpHeaders: false,
+        httpBodies: [],
+        urlQueryParams: false,
+        stackFrameVariables: false,
+      },
     });
   });
 

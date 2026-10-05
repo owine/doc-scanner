@@ -22,7 +22,16 @@ export function buildSentryOptions(env: SentryEnv): Sentry.BrowserOptions | null
     tracesSampleRate: 0,
     // Never stamp sentry-trace/baggage on outgoing requests.
     tracePropagationTargets: [],
-    sendDefaultPii: false,
+    // v11 replaced sendDefaultPii with dataCollection, whose fields all
+    // default to collecting. Same block as the server's; keep them in step.
+    dataCollection: {
+      userInfo: false,
+      cookies: false,
+      httpHeaders: false,
+      httpBodies: [],
+      urlQueryParams: false,
+      stackFrameVariables: false,
+    },
     beforeSend: (event) => scrubEvent(event),
   };
 }

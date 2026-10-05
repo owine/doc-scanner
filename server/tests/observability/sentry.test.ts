@@ -42,18 +42,25 @@ describe('buildSentryOptions', () => {
     expect(buildSentryOptions({ SENTRY_DSN: DSN, SENTRY_RELEASE: 'dev' })?.release).toBeUndefined();
   });
 
-  it('disables tracing, default PII and local-variable capture', () => {
+  it('disables tracing, default data collection and local-variable capture', () => {
     const options = buildSentryOptions({ SENTRY_DSN: DSN });
 
     expect(options).toMatchObject({
       tracesSampleRate: 0,
-      sendDefaultPii: false,
+      dataCollection: {
+        userInfo: false,
+        cookies: false,
+        httpHeaders: false,
+        httpBodies: [],
+        urlQueryParams: false,
+        stackFrameVariables: false,
+      },
       includeLocalVariables: false,
     });
   });
 
-  it('does not register the ESM loader hooks (nothing to trace; tsx owns loading)', () => {
-    expect(buildSentryOptions({ SENTRY_DSN: DSN })?.registerEsmLoaderHooks).toBe(false);
+  it('does not register the module hooks (nothing to trace; tsx owns loading)', () => {
+    expect(buildSentryOptions({ SENTRY_DSN: DSN })?.enableRuntimeChannelInjection).toBe(false);
   });
 
   it('wires the scrubber in as beforeSend', () => {

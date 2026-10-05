@@ -52,15 +52,15 @@ Enforced by a `beforeSend` scrubber in each workspace (`server/src/observability
 - **File contents.** Binary values (`Uint8Array`, `ArrayBuffer`, `Blob`) and `data:` URLs are replaced. The upload path never hands the bytes to the reporter.
 - **Filenames and document names.** Filename-shaped strings are redacted in exception messages. `DriveClient` also redacts the exact document name it was given, since the SDK can echo it unquoted.
 - **Email addresses.** Redacted in free text as well as under keys, since Proton addresses can end up in error messages.
-- **User data.** `event.user` is dropped and `sendDefaultPii` is off, so no IP address is sent.
-- **Local variables.** `includeLocalVariables` is off, and any `vars` on stack frames are dropped.
+- **User data.** `event.user` is dropped and `dataCollection.userInfo` is off, so no IP address is sent.
+- **Local variables.** `includeLocalVariables` and `dataCollection.stackFrameVariables` are off, and any `vars` on stack frames are dropped.
 - **Console and form-input breadcrumbs.** Dropped outright. Other breadcrumbs keep only method / URL (no query) / status.
 
 Tracing is off (`tracesSampleRate: 0`), and there is no session replay.
 
 What the SDK would do on its own is also switched off, not just filtered on the way out:
 
-- **Incoming request bodies are never held.** `httpIntegration({ ignoreIncomingRequestBody })`. By default the SDK keeps up to 10 KB of each body, including the login password, on the request scope.
+- **Nothing from `dataCollection` is collected.** Sentry v11 replaced `sendDefaultPii` with a `dataCollection` object whose fields all default to **on**, so each is set explicitly in both workspaces: `userInfo`, `cookies`, `httpHeaders`, `urlQueryParams` and `stackFrameVariables` are `false`, and `httpBodies` is `[]`. The last is what keeps incoming request bodies from being held: by default the SDK keeps up to 10 KB of each body, including the login password, on the request scope.
 - **No trace headers on outgoing requests.** `tracePropagationTargets: []`. Otherwise every request to Proton and Anthropic carries `sentry-trace`/`baggage`, which include the GlitchTip public key, the release and the environment.
 
 `tests/observability/sdk-behaviour.test.ts` checks both through a real HTTP server, because `app.request` bypasses the integration that does this.
@@ -79,7 +79,7 @@ What the SDK would do on its own is also switched off, not just filtered on the 
 ## Implementation notes
 
 - `server/src/instrument.ts` is the **first import** of `server/src/index.ts`. ES modules evaluate in import order, so Sentry initializes before any other app module.
-- `registerEsmLoaderHooks: false`: the hooks exist to auto-instrument imports for tracing, which is off. Leaving them on would put `import-in-the-middle` between tsx and the Drive SDK's raw-`.ts` crypto peer for no benefit.
+- `enableRuntimeChannelInjection: false`: the hooks exist to auto-instrument imports for tracing, which is off. Leaving them on would put a `Module.registerHooks` resolve/load layer between tsx and the Drive SDK's raw-`.ts` crypto peer for no benefit. (v10 called this `registerEsmLoaderHooks` and used `import-in-the-middle`; v11 removed both and installs the new hooks from `Sentry.init` by default.)
 - Unhandled promise rejections still **crash** the server with a DSN set (`onUnhandledRejectionIntegration({ mode: 'strict' })`). The SDK's default `warn` mode only logs, which would silently swallow what Node 24 treats as fatal. `tests/observability/process-crash.test.ts` checks both cases in a child process.
 - The Hono middleware is mounted in `createApp` only when Sentry is initialized, because it `console.warn`s on every `createApp` otherwise. It reports any thrown error except Hono's own `HTTPException` below 500. The SDK default would also skip any error carrying a 4xx `status`, such as a `ProtonApiError` 429.
 - "Nothing initializes without a DSN" is about behaviour. *Importing* `@sentry/hono/node` does patch `Hono.prototype.route` with a pass-through proxy that tracks mounted sub-apps (a handful, at startup). Routing is unaffected.
