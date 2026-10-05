@@ -224,11 +224,11 @@ importers:
         specifier: 2.1.3
         version: 2.1.3(hono@4.13.12)
       '@protontech/crypto':
-        specifier: 2.1.3
-        version: 2.1.3(@types/node@25.9.9)(typescript@7.0.2)
+        specifier: 2.2.0
+        version: 2.2.0(@types/node@25.9.9)(typescript@7.0.2)
       '@protontech/drive-sdk':
-        specifier: 0.21.3
-        version: 0.21.3(@protontech/crypto@2.1.3(@types/node@25.9.9)(typescript@7.0.2))
+        specifier: 0.22.2
+        version: 0.22.2(@protontech/crypto@2.2.0(@types/node@25.9.9)(typescript@7.0.2))
       '@sentry/hono':
         specifier: 10.75.3
         version: 10.75.3(@hono/node-server@2.1.3(hono@4.13.12))(@sentry/node@10.75.3(@opentelemetry/core@2.11.0(@opentelemetry/api@1.9.1))(supports-color@7.2.0))(hono@4.13.12)
@@ -368,6 +368,9 @@ packages:
   '@babel/types@7.29.8':
     resolution: {integrity: sha512-Vj1jF3cPfxg7OAfoI7QnVKLoILlm2JF9pnVHrX8qx7AHMiYWT+NDAA7jChlNgRS4WTLc/fD1lXLmPixluj+3Gg==}
     engines: {node: '>=6.9.0'}
+
+  '@boltffi/runtime@0.31.0':
+    resolution: {integrity: sha512-nxht21tsG0KLzkdN2gHqSAZv7Ainht5v/Q6ZGVT8xXAmJKdewk4PwwryLeQR4xrejwDOtuWRD7p7OGkKGw8JIQ==}
 
   '@cantoo/pdf-lib@2.11.1':
     resolution: {integrity: sha512-lYuRJFfXgoP8WVE8HYSeoLfDcnSXmjMLmdZS7YvmYHngbcZfiqDOruHrZBqjYizkrNa4ad1yW4WCrPYyb26T3Q==}
@@ -645,11 +648,11 @@ packages:
       preact: ^10.4.0 || ^11.0.0-0
       vite: '>=2.0.0'
 
-  '@protontech/crypto@2.1.3':
-    resolution: {integrity: sha512-Sbf/7yqwIE40L7AzZvRPfCWvDaHJ3GzELF3BhvhoVpGPImUxkbjRsJscGq/+Amglh3zAWaN1z2mCPoC1uUl2ZA==}
+  '@protontech/crypto@2.2.0':
+    resolution: {integrity: sha512-WjoNBMn07LxnYE6QLgniEnNfP0Apmvqgi8P48udFtvAxhSnVwiHqmXxMaVHJxBRaJev/DlOKJ67OGYj+3yGYPA==}
 
-  '@protontech/drive-sdk@0.21.3':
-    resolution: {integrity: sha512-VQMrlgJWXmXjjXTCnhuHfSq6bc1ggeKgATM8hw9rdpfj0ZjAaoW/bBuePYYgwqoqgZaUimlaYPXESrFFMFdJIQ==}
+  '@protontech/drive-sdk@0.22.2':
+    resolution: {integrity: sha512-J5qM6SkQ2TsymagFJR3Al+f3TjFzwxb+eUUK6ZDMlzv52MOCDjNNaOIHF3+44uXI/Lka0g1kaSaTF2tFISL6tw==}
     peerDependencies:
       '@protontech/crypto': ^2.0.0
 
@@ -2171,6 +2174,8 @@ snapshots:
       '@babel/helper-string-parser': 7.29.7
       '@babel/helper-validator-identifier': 7.29.7
 
+  '@boltffi/runtime@0.31.0': {}
+
   '@cantoo/pdf-lib@2.11.1(html-entities@2.6.0)':
     dependencies:
       culori: 4.0.2
@@ -2377,7 +2382,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@protontech/crypto@2.1.3(@types/node@25.9.9)(typescript@7.0.2)':
+  '@protontech/crypto@2.2.0(@types/node@25.9.9)(typescript@7.0.2)':
     dependencies:
       '@noble/hashes': 2.4.0
       '@openpgp/web-stream-tools': 0.3.1(@types/node@25.9.9)(typescript@7.0.2)
@@ -2389,10 +2394,12 @@ snapshots:
       - '@types/node'
       - typescript
 
-  '@protontech/drive-sdk@0.21.3(@protontech/crypto@2.1.3(@types/node@25.9.9)(typescript@7.0.2))':
+  '@protontech/drive-sdk@0.22.2(@protontech/crypto@2.2.0(@types/node@25.9.9)(typescript@7.0.2))':
     dependencies:
+      '@boltffi/runtime': 0.31.0
       '@noble/hashes': 1.8.0
-      '@protontech/crypto': 2.1.3(@types/node@25.9.9)(typescript@7.0.2)
+      '@protontech/crypto': 2.2.0(@types/node@25.9.9)(typescript@7.0.2)
+      comlink: 4.4.2
       ttag: 1.8.12
     optionalDependencies:
       '@xmldom/xmldom': 0.9.12
