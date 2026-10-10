@@ -159,3 +159,45 @@ describe('DocumentSync', () => {
     expect(sync.loaded).toBe(false);
   });
 });
+
+describe('DocumentSync notifications', () => {
+  it('does not notify on an idle poll once loaded, and does when a document changes', async () => {
+    const doc = makeDoc({ seq: 1 });
+    const list = vi.fn()
+      .mockResolvedValueOnce({ documents: [doc], cursor: 1 })
+      .mockResolvedValueOnce({ documents: [], cursor: 1 })
+      .mockResolvedValueOnce({ documents: [], cursor: 1 })
+      .mockResolvedValueOnce({ documents: [{ ...doc, seq: 2, state: 'filed' }], cursor: 2 })
+      .mockResolvedValue({ documents: [], cursor: 2 });
+    const sync = new DocumentSync({ list });
+    await sync.poll();
+    const fn = vi.fn();
+    sync.subscribe(fn);
+    const before = sync.all();
+    await sync.poll();
+    expect(fn).not.toHaveBeenCalled();
+    expect(sync.all()).toBe(before);
+    await sync.poll();
+    expect(fn).toHaveBeenCalledTimes(1);
+    expect(sync.all()).not.toBe(before);
+  });
+
+  it('notifies when the error changes, and when it clears', async () => {
+    const boom = new TypeError('Load failed');
+    const list = vi.fn()
+      .mockResolvedValueOnce({ documents: [], cursor: 0 })
+      .mockRejectedValueOnce(boom)
+      .mockRejectedValueOnce(boom)
+      .mockResolvedValue({ documents: [], cursor: 0 });
+    const sync = new DocumentSync({ list });
+    await sync.poll();
+    const fn = vi.fn();
+    sync.subscribe(fn);
+    await sync.poll();
+    expect(fn).toHaveBeenCalledTimes(1);
+    await sync.poll();
+    expect(fn).toHaveBeenCalledTimes(1);
+    await sync.poll();
+    expect(fn).toHaveBeenCalledTimes(2);
+  });
+});

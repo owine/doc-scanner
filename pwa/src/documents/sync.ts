@@ -23,6 +23,7 @@ const MAX_PAGES = 20;
 export class DocumentSync {
   private readonly docs = new Map<string, DocumentView>();
   private readonly listeners = new Set<() => void>();
+  private snapshot: DocumentView[] | null = null;
   private cursor = 0;
   private inflight: Promise<void> | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
@@ -36,8 +37,9 @@ export class DocumentSync {
 
   constructor(private readonly o: DocumentSyncOptions) {}
 
+  /** A stable reference between changes, so consumers can compare it. */
   all(): DocumentView[] {
-    return [...this.docs.values()];
+    return (this.snapshot ??= [...this.docs.values()]);
   }
 
   subscribe(fn: () => void): () => void {
@@ -83,6 +85,7 @@ export class DocumentSync {
     this.generation++;
     this.inflight = null;
     this.docs.clear();
+    this.snapshot = null;
     this.cursor = 0;
     this.error = null;
     this.loaded = false;
@@ -93,16 +96,20 @@ export class DocumentSync {
     const held = this.docs.get(doc.id);
     if (held && held.seq > doc.seq) return false;
     this.docs.set(doc.id, doc);
+    this.snapshot = null;
     return true;
   }
 
   private async pull(): Promise<void> {
     const generation = this.generation;
+    const wasLoaded = this.loaded;
+    const wasError = this.error;
+    let changed = false;
     try {
       for (let page = 0; page < MAX_PAGES; page++) {
         const { documents, cursor } = await this.o.list(this.cursor);
         if (generation !== this.generation) return;
-        for (const d of documents) this.put(d);
+        for (const d of documents) if (this.put(d)) changed = true;
         this.cursor = Math.max(this.cursor, cursor);
         if (documents.length === 0) break;
       }
@@ -116,7 +123,8 @@ export class DocumentSync {
       }
     }
     this.loaded = true;
-    this.emit();
+    // Idle polls stay silent, so subscribers don't re-render every few seconds.
+    if (changed || !wasLoaded || this.error !== wasError) this.emit();
   }
 
   private readonly tick = (): void => {
