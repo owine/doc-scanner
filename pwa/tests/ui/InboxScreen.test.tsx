@@ -308,6 +308,21 @@ describe('InboxScreen', () => {
     expect(screen.queryByText(/failed, try again/i)).toBeNull();
   });
 
+  it('keeps its live region in place while the banners come and go', async () => {
+    const { sync } = setup([makeDoc()]);
+    const status = screen.getByRole('status');
+    expect(status).toBeEmptyDOMElement();
+    sync.error = new Error('offline');
+    act(() => sync.upsert(makeDoc({ state: 'awaiting_login' })));
+    await waitFor(() => expect(status).toHaveTextContent(/showing what was last loaded/i));
+    expect(status).toHaveTextContent(/1 document is waiting to be filed/i);
+    expect(screen.getByRole('status')).toBe(status);
+    sync.error = null;
+    act(() => sync.upsert(makeDoc()));
+    await waitFor(() => expect(status).not.toHaveTextContent(/can't reach/i));
+    expect(screen.getByRole('status')).toBe(status);
+  });
+
   it('opens the scanner, settings and saved scans', async () => {
     const { props } = setup([]);
     fireEvent.click(screen.getByRole('button', { name: 'Scan' }));

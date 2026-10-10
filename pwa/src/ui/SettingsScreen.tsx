@@ -198,7 +198,7 @@ export function SettingsScreen({ email, documents = documentsApi, onBack, onLogg
           <div class="field">
             <span class="field-label">Never file here</span>
             {draft.excludePaths.length === 0 && <p class="muted">No folders excluded.</p>}
-            <ul class="doc-list">
+            <ul class="doc-list" role="list">
               {draft.excludePaths.map((p) => (
                 <li key={p} class="doc-row">
                   <span class="doc-main">{p}</span>

@@ -24,6 +24,15 @@ const APPROVE_ERRORS: Record<string, string> = {
   conflict: 'This document has already moved on.',
 };
 
+/**
+ * Sets autocorrect="off" as an attribute. iOS Safari has a boolean
+ * `autocorrect` property, which Preact would set instead, and the string
+ * "off" is truthy there: it would turn autocorrect on.
+ */
+function noAutocorrect(el: HTMLInputElement | null) {
+  el?.setAttribute('autocorrect', 'off');
+}
+
 function sameFolder(a: FolderRef | null, b: FolderRef | null): boolean {
   if (!a || !b) return a === b;
   if (a.kind === 'existing') return b.kind === 'existing' && a.linkId === b.linkId;
@@ -87,7 +96,13 @@ export function ReviewCard({ doc, folders, onApprove, onDiscard }: ReviewCardPro
       </p>
       <label class="field">
         <span class="field-label">Name</span>
-        <input value={name} onInput={(e) => setName((e.target as HTMLInputElement).value)} />
+        <input
+          ref={noAutocorrect}
+          value={name}
+          autocapitalize="off"
+          spellcheck={false}
+          onInput={(e) => setName((e.target as HTMLInputElement).value)}
+        />
       </label>
       <div class="field" role="group" aria-labelledby={`folder-label-${doc.id}`}>
         <span class="field-label" id={`folder-label-${doc.id}`}>

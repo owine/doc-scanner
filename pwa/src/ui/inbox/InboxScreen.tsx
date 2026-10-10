@@ -123,31 +123,31 @@ export function InboxScreen({
         </div>
       </header>
 
-      {Boolean(error) && loaded && docs.length > 0 && (
-        <p class="warn" role="status">
-          Can't reach the server. Showing what was last loaded.
-        </p>
-      )}
-      {g.awaitingLogin > 0 && (
-        <div class="warn" role="status">
-          {g.awaitingLogin === 1 ? '1 document is' : `${g.awaitingLogin} documents are`} waiting to be filed. Sign in again to
-          give the server access to Drive.{' '}
-          <button class="btn btn-secondary btn-small" onClick={onSignInAgain}>
-            Sign in again
-          </button>
-        </div>
-      )}
+      {/* Always rendered: a live region added together with its text is often not announced. */}
+      <div role="status">
+        {Boolean(error) && loaded && (
+          <p class="warn">
+            {docs.length > 0 ? "Can't reach the server. Showing what was last loaded." : "Can't reach the server."}
+          </p>
+        )}
+        {g.awaitingLogin > 0 && (
+          <div class="warn">
+            {g.awaitingLogin === 1 ? '1 document is' : `${g.awaitingLogin} documents are`} waiting to be filed. Sign in again to
+            give the server access to Drive.{' '}
+            <button class="btn btn-secondary btn-small" onClick={onSignInAgain}>
+              Sign in again
+            </button>
+          </div>
+        )}
+      </div>
 
       <section aria-labelledby="h-review">
         <h2 id="h-review">Needs review{g.review.length ? ` (${g.review.length})` : ''}</h2>
         {!loaded ? (
           <p class="muted">Loading…</p>
         ) : g.review.length === 0 ? (
-          error && docs.length === 0 ? (
-            <p class="muted" role="status">
-              Can't reach the server.
-            </p>
-          ) : (
+          // With nothing loaded, the banner above says the server is unreachable.
+          error && docs.length === 0 ? null : (
             <p class="muted">Nothing to review.</p>
           )
         ) : (

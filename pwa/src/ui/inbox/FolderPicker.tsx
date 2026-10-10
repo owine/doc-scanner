@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { searchFolders } from '../../documents/folder-search.js';
+import { FOLDER_RESULTS_LIMIT, searchFolders } from '../../documents/folder-search.js';
 import type { FolderEntry, FolderRef } from '../../documents/types.js';
 import type { FoldersState } from '../../documents/use-folders.js';
 
@@ -59,16 +59,22 @@ export function FolderPicker({ folders, allowNew, allowRoot = true, onChoose, on
         value={query}
         onInput={(e) => setQuery((e.target as HTMLInputElement).value)}
       />
-      {folders.error && (
-        <p class="error-text" role="alert">
-          {folders.error}{' '}
-          <button type="button" class="btn btn-secondary btn-small" disabled={folders.busy} onClick={() => void folders.refresh()}>
-            {folders.busy ? 'Refreshing…' : 'Refresh'}
-          </button>
-        </p>
+      {/* Both regions are always rendered: one added together with its text is often not announced. */}
+      <div role="alert">
+        {folders.error && (
+          <p class="error-text">
+            {folders.error}{' '}
+            <button type="button" class="btn btn-secondary btn-small" disabled={folders.busy} onClick={() => void folders.refresh()}>
+              {folders.busy ? 'Refreshing…' : 'Refresh'}
+            </button>
+          </p>
+        )}
+      </div>
+      <div role="status">{folders.folders === null && !folders.error && <p class="muted">Loading folders…</p>}</div>
+      {query.trim() === '' && offered && offered.length > FOLDER_RESULTS_LIMIT && (
+        <p class="muted">Showing the first {FOLDER_RESULTS_LIMIT} — type to narrow</p>
       )}
-      {folders.folders === null && !folders.error && <p class="muted" role="status">Loading folders…</p>}
-      <ul class="folder-results">
+      <ul class="folder-results" role="list">
         {results.map((f) => (
           <li key={f.linkId}>
             <button type="button" class="folder-result" onClick={() => onChoose({ kind: 'existing', linkId: f.linkId, path: f.path })}>
@@ -81,7 +87,7 @@ export function FolderPicker({ folders, allowNew, allowRoot = true, onChoose, on
                   if (el) plusRefs.current.set(f.linkId, el);
                   else plusRefs.current.delete(f.linkId);
                 }}
-                class="btn btn-secondary btn-small"
+                class="btn btn-secondary btn-small btn-square"
                 aria-label={`New folder in ${f.path}`}
                 onClick={() => {
                   setNewIn(f);

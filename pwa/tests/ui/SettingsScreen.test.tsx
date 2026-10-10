@@ -160,6 +160,13 @@ describe('SettingsScreen', () => {
     await screen.findByText('Saved.');
   });
 
+  it('keeps list semantics on the excluded folders', async () => {
+    setup();
+    expect(await screen.findByText('/Archive')).toBeInTheDocument();
+    expect(screen.getByRole('list')).toHaveClass('doc-list');
+    expect(document.querySelectorAll('ul:not([role="list"])')).toHaveLength(0);
+  });
+
   it('does not offer the root folder as never-file-here', async () => {
     setup();
     fireEvent.click(await screen.findByRole('button', { name: /add folder/i }));

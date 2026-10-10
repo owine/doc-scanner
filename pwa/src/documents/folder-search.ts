@@ -1,5 +1,8 @@
 import type { FolderEntry } from './types.js';
 
+/** How many folders the picker shows at most. */
+export const FOLDER_RESULTS_LIMIT = 50;
+
 const fold = (s: string) => s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
 const byPath = (a: FolderEntry, b: FolderEntry) => a.path.localeCompare(b.path);
 
@@ -8,7 +11,7 @@ const byPath = (a: FolderEntry, b: FolderEntry) => a.path.localeCompare(b.path);
  * in the path. Folders whose own name (the last segment) has every word rank
  * first, then shorter paths, then alphabetically.
  */
-export function searchFolders(folders: readonly FolderEntry[], query: string, limit = 50): FolderEntry[] {
+export function searchFolders(folders: readonly FolderEntry[], query: string, limit = FOLDER_RESULTS_LIMIT): FolderEntry[] {
   const words = fold(query).split(/[\s/]+/).filter(Boolean);
   if (words.length === 0) return [...folders].sort(byPath).slice(0, limit);
   const scored: { f: FolderEntry; score: number }[] = [];

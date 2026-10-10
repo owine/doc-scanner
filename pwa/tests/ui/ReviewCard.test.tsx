@@ -93,6 +93,31 @@ describe('ReviewCard', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Approve' })).toBeEnabled());
   });
 
+  it('leaves the name to the user: no autocorrect, autocapitalize or spellcheck', () => {
+    // Browsers expose spellcheck, and iOS Safari autocorrect, as boolean
+    // properties that reflect to the attribute, and Preact sets them as
+    // properties. happy-dom has neither, so Preact would fall back to the
+    // attribute and drop a `false`: give it the browser's properties. (A
+    // string "off" set through such a property is truthy and turns it on.)
+    const reflect = (name: string, on: string, off: string) =>
+      Object.defineProperty(HTMLElement.prototype, name, {
+        configurable: true,
+        get(this: HTMLElement) { return this.getAttribute(name) !== off; },
+        set(this: HTMLElement, v: unknown) { this.setAttribute(name, v ? on : off); },
+      });
+    reflect('spellcheck', 'true', 'false');
+    reflect('autocorrect', 'on', 'off');
+    try {
+      renderCard();
+      const name = screen.getByRole('textbox', { name: 'Name' });
+      expect(name).toHaveAttribute('autocorrect', 'off');
+      expect(name).toHaveAttribute('autocapitalize', 'off');
+      expect(name).toHaveAttribute('spellcheck', 'false');
+    } finally {
+      for (const p of ['spellcheck', 'autocorrect']) delete (HTMLElement.prototype as unknown as Record<string, unknown>)[p];
+    }
+  });
+
   it('labels the folder control as a group named Folder', () => {
     renderCard();
     const group = screen.getByRole('group', { name: 'Folder' });

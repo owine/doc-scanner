@@ -99,6 +99,40 @@ describe('FolderPicker', () => {
     expect(screen.getByRole('textbox', { name: /new folder name/i })).toHaveFocus();
   });
 
+  it('keeps its live regions in place while their text changes', () => {
+    const { rerender } = render(<FolderPicker folders={folders({ folders: null })} allowNew={false} onChoose={() => {}} onCancel={() => {}} />);
+    const status = screen.getByRole('status');
+    const alert = screen.getByRole('alert');
+    expect(status).toHaveTextContent(/loading folders/i);
+    expect(alert).toBeEmptyDOMElement();
+    rerender(<FolderPicker folders={folders({ folders: null, error: 'Could not load the folder list.' })} allowNew={false} onChoose={() => {}} onCancel={() => {}} />);
+    expect(screen.getByRole('alert')).toBe(alert);
+    expect(alert).toHaveTextContent(/could not load/i);
+    expect(screen.getByRole('status')).toBe(status);
+    rerender(<FolderPicker folders={folders()} allowNew={false} onChoose={() => {}} onCancel={() => {}} />);
+    expect(screen.getByRole('status')).toBe(status);
+    expect(status).toBeEmptyDOMElement();
+  });
+
+  it('keeps list semantics on the results', () => {
+    render(<FolderPicker folders={folders()} allowNew={false} onChoose={() => {}} onCancel={() => {}} />);
+    expect(screen.getByRole('list')).toHaveClass('folder-results');
+    expect(document.querySelectorAll('ul:not([role="list"])')).toHaveLength(0);
+  });
+
+  it('says only the first results show until the search narrows them', () => {
+    const many = Array.from({ length: 51 }, (_, i) => ({ linkId: `L-${i}`, path: `/Projects/P${String(i).padStart(2, '0')}` }));
+    render(<FolderPicker folders={folders({ folders: many })} allowNew={false} onChoose={() => {}} onCancel={() => {}} />);
+    expect(screen.getByText('Showing the first 50 — type to narrow')).toBeInTheDocument();
+    fireEvent.input(screen.getByRole('searchbox', { name: /search folders/i }), { target: { value: 'P07' } });
+    expect(screen.queryByText(/showing the first/i)).toBeNull();
+  });
+
+  it('shows no limit hint when every folder fits', () => {
+    render(<FolderPicker folders={folders()} allowNew={false} onChoose={() => {}} onCancel={() => {}} />);
+    expect(screen.queryByText(/showing the first/i)).toBeNull();
+  });
+
   it('announces a load error and the loading state', () => {
     const { unmount } = render(<FolderPicker folders={folders({ folders: null, error: 'Could not load the folder list.' })} allowNew={false} onChoose={() => {}} onCancel={() => {}} />);
     expect(screen.getByRole('alert')).toHaveTextContent(/could not load/i);
