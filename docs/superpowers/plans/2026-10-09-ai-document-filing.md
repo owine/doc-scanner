@@ -37,7 +37,6 @@
 | `server/src/documents/types.ts` | `DocumentState`, `DocumentRow`, `Decision`, `FilingTarget` |
 | `server/src/documents/repo.ts` | All SQL for `documents`; compare-and-set transitions |
 | `server/src/documents/inbox-store.ts` | Encrypted blobs on disk, one per document and kind |
-| `server/src/documents/history.ts` | `FilingHistory.recordSave` (port of the branch's `ClassificationHistory`, recording only) |
 | `server/src/documents/extension.ts` | File extension for a MIME type |
 | `server/src/documents/view.ts` | `DocumentView`: the JSON shape the API returns |
 | `server/src/drive/folder-cache-store.ts` | Encrypted-at-rest copy of the walked folder tree |
@@ -1884,7 +1883,6 @@ import type { LiveSession } from '../auth/live-session.js';
 import type { FolderCacheStore } from '../drive/folder-cache-store.js';
 import type { DocumentStage } from '../observability/report.js';
 import type { EffectiveSettings, SettingsStore } from '../settings/settings-store.js';
-import type { FilingHistory } from './history.js';
 import type { InboxStore } from './inbox-store.js';
 import type { DocumentRepo } from './repo.js';
 
@@ -1893,7 +1891,6 @@ export interface PipelineDeps {
   db: DB;
   repo: DocumentRepo;
   inbox: InboxStore;
-  history: FilingHistory;
   settings: SettingsStore;
   folderCache: FolderCacheStore;
   analyzerFor: (settings: EffectiveSettings) => Analyzer;
@@ -1919,7 +1916,6 @@ import { createTestDb } from '../helpers/test-db.js';
 import { AtRestCipher } from '../../src/crypto/at-rest.js';
 import { DocumentRepo } from '../../src/documents/repo.js';
 import { InboxStore } from '../../src/documents/inbox-store.js';
-import { FilingHistory } from '../../src/documents/history.js';
 import { FolderCacheStore } from '../../src/drive/folder-cache-store.js';
 import { SettingsStore, type EffectiveSettings } from '../../src/settings/settings-store.js';
 import type { StageContext } from '../../src/documents/deps.js';
@@ -1989,7 +1985,6 @@ export function makeHarness(opts: { settings?: Partial<EffectiveSettings>; withT
     db,
     repo,
     inbox,
-    history: new FilingHistory(db),
     settings,
     folderCache,
     analyzerFor: () => ({ analyze }),
@@ -2318,8 +2313,8 @@ describe('fileStage', () => {
     expect(h.inbox.has(doc.id, 'original')).toBe(false);
     const audit = h.db.prepare(`SELECT detail FROM audit_log WHERE event = 'document_filed'`).get() as { detail: string };
     expect(JSON.parse(audit.detail)).toMatchObject({ documentId: doc.id, driveNodeUid: 'NODE1', autoFiled: true });
-    const hist = h.db.prepare('SELECT folder_path FROM classification_history').get() as { folder_path: string };
-    expect(hist.folder_path).toBe('/Bills');
+    // v1 records no filing history (it would be plaintext outside the encrypted stores).
+    expect((h.db.prepare('SELECT COUNT(*) AS n FROM classification_history').get() as { n: number }).n).toBe(0);
     const bills = h.ctx.folderCache.load()!.tree.find((f) => f.linkId === 'BILLS')!;
     expect(bills.files[0]!.name).toBe('Northwind Energy Sep 2026.pdf');
   });
@@ -2458,13 +2453,6 @@ export async function fileStage(doc: DocumentRow, ctx: StageContext): Promise<vo
       },
       KEEP_GOING,
     );
-    ctx.history.recordSave({
-      snippet: doc.analysis?.textSnippet ?? '',
-      finalName: doc.decision.name,
-      folderLinkId,
-      folderPath,
-      driveNodeUid: uploaded.nodeUid,
-    });
     ctx.db
       .prepare(`INSERT INTO audit_log (event, detail) VALUES ('document_filed', ?)`)
       .run(
@@ -2861,7 +2849,6 @@ import { FolderCacheStore } from '../drive/folder-cache-store.js';
 import { captureDocumentFailure } from '../observability/report.js';
 import { SettingsStore, type EffectiveSettings } from '../settings/settings-store.js';
 import { logger } from '../logger.js';
-import { FilingHistory } from './history.js';
 import { InboxStore } from './inbox-store.js';
 import { DocumentRepo } from './repo.js';
 import { DocumentWorker } from './worker.js';
@@ -2903,7 +2890,6 @@ export function createPipeline(o: PipelineOptions): Pipeline {
     db: o.db,
     repo,
     inbox,
-    history: new FilingHistory(o.db),
     settings,
     folderCache,
     analyzerFor: o.analyzerFor,

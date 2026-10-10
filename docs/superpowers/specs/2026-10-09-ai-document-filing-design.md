@@ -35,7 +35,7 @@ Two entrypoints get their own short follow-up specs because they are independent
 | Entrypoints | Picker/drag-drop and scanner now; share sheet and email-in as follow-up specs | All four post to one endpoint; the two follow-ups are independent plumbing. |
 | Confirmation | **Auto-file when confident**, review queue otherwise | Fewer taps; a misfile is cheap to fix in Drive, and the eval shows the high-confidence band is precise. |
 | What the AI may decide | Name + existing folder, **or propose a new folder** — a proposal always goes to review, and is created automatically when approved | Lets structure grow (a new year, a new kind of document) without the AI reshaping the tree unseen. |
-| Naming | **Learn from the user's own names**: each folder's five most recent filenames, no fixed template. FTS5 recall of similar past documents is recorded from day one but **switched on only once the eval shows it helps** | The user's conventions vary by folder; a template would fight them. Recent names alone gave 83% in the eval; recall has no pre-analysis text to search with yet (see §2). |
+| Naming | **Learn from the user's own names**: each folder's five most recent filenames, no fixed template. FTS5 recall of similar past documents is **not recorded or used in v1**: the history table would hold names, paths and document text in plaintext, so it starts collecting only when recall is built and the eval shows it helps | The user's conventions vary by folder; a template would fight them. Recent names alone gave 83% in the eval; recall has no pre-analysis text to search with yet (see §2). |
 | File types | PDF, images, Office documents, and anything else (metadata-only) | Every type gets filed; only the analysis depth varies. |
 | Scan output | Phone builds an **image-only PDF**; the **server adds the text layer** with `ocrmypdf` | Keeps OCR out of iOS Safari (the Phase 4 failure) and applies the same rule to any image-only PDF, whatever its source. |
 | Processing model | **SQLite job queue worked in-process**; every source returns `202` immediately | One code path for interactive and unattended sources; survives restarts; no long-held requests from iOS Safari. |
@@ -107,7 +107,7 @@ One Claude call per document: `createAnalyzer({ client, model, effort }).analyze
 **Prompt** (`prompt.ts`): a system prompt that is stable for a given threshold setting (changing the threshold just invalidates the prompt cache), then the user turn:
 
 1. **Folder list** with short IDs (`F1`, `F2`, …) — Drive's long link IDs stay out of the prompt and the answer — each with its **five most recent filenames** as the naming signal: `F12 /Bills/Utilities | recent: "Electric Sep 2026"; …`. This block carries the `cache_control` breakpoint, so a burst of documents reuses it. Folders on the user's **never-file-here** list (and everything under them) are left out entirely.
-2. **FTS5 examples** — *off in v1.* Every filing is recorded in the history table (`history.ts` from the Phase 5 branch, which today only has `findRecent`). Recalling *similar* documents needs text to search with **before** the analysis call, and for scans and image-only PDFs there is none until OCR. Turning recall on (querying with the original filename and source context, or with OCR text if OCR moves ahead of analysis) is a later change, made only if the eval shows it beats recent names alone. Note the field rename when porting: the branch's `ocrSnippet` is `snippet` here.
+2. **FTS5 examples** — *off in v1, and nothing is recorded.* Migration `004`'s history table exists but stays empty: it would store filed names, folder paths and document text in plaintext, outside the encrypted stores, for a feature that is switched off. Recalling *similar* documents needs text to search with **before** the analysis call, and for scans and image-only PDFs there is none until OCR. Turning recall on (querying with the original filename and source context, or with OCR text if OCR moves ahead of analysis) is a later change, made only if the eval shows it beats recent names alone. Note the field rename when porting: the branch's `ocrSnippet` is `snippet` here.
 3. The **document** content blocks.
 4. An **arrival** block: source, type, size, original filename, source context, and any note about what the model can or can't see.
 
@@ -146,7 +146,7 @@ The system prompt asks for the user's naming conventions, an existing folder unl
 
 1. Resolve the folder: an existing link ID, or for an approved new-folder proposal, **create the folder** under its parent, then refresh the folder cache.
 2. Upload via `DriveClient.uploadFile(name + ext, bytes, mime, { parentFolderUid })` (the branch's extension; collisions via the SDK's `getAvailableName`, e.g. `name (1).pdf`).
-3. Record the FTS5 history row and an `audit_log` entry, then delete the inbox blob.
+3. Record an `audit_log` entry (ids and flags only), then delete the inbox blob.
 
 **Folder cache**: `walkFolderTree` (built; lists 6 folders concurrently by default) runs at login, every 6 hours, on demand, and after a folder is created. The result — paths plus each folder's five recent filenames, nothing else — is cached **encrypted at rest** so analysis works while logged out.
 
@@ -168,7 +168,7 @@ Primary actions: **Add** and **Scan**. **Settings** sits behind a menu.
 
 Updates: the PWA polls `GET /api/documents?since=<cursor>` every few seconds while visible.
 
-**Edits teach the system**: when the user changes the name or folder before approving, *their* version is what gets filed, so it becomes one of that folder's recent filenames — the naming signal the next document in that folder sees. The history row also stores their version, for when recall is switched on.
+**Edits teach the system**: when the user changes the name or folder before approving, *their* version is what gets filed, so it becomes one of that folder's recent filenames — the naming signal the next document in that folder sees. 
 
 ### 6. Errors and observability
 
@@ -231,7 +231,7 @@ On `feat/ai-analyzer`, built and tested:
 - `server/src/drive/folder-tree.ts` — concurrent tree walk with recent filenames and never-file-here exclusion; `DriveClient.walkFolderTree` and `downloadFile`.
 - `server/evals/analyzer/` — the model eval.
 
-Carried over from `feat/phase-5-ai-organize` in implementation: `classify/history.ts` and its migration `004` (history recording; recall comes later), `uploadFile`'s `parentFolderUid`, `isAuthExpired`, `ConfirmCard` (→ review card), and `pdf/build.ts` without the OCR layer. Superseded: `routes-classify.ts`, `routes-upload.ts`, `classify/haiku.ts` (word-box OCR), `outbox-drain.ts`, the background-sync service-worker listeners.
+Carried over from `feat/phase-5-ai-organize` in implementation: the history migration `004` (table only; nothing writes to it until recall is built), `uploadFile`'s `parentFolderUid`, `isAuthExpired`, `ConfirmCard` (→ review card), and `pdf/build.ts` without the OCR layer. Superseded: `routes-classify.ts`, `routes-upload.ts`, `classify/haiku.ts` (word-box OCR), `outbox-drain.ts`, the background-sync service-worker listeners.
 
 ## Delivery slices
 
