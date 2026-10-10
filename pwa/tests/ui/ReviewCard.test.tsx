@@ -1,0 +1,90 @@
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { render, screen, fireEvent, waitFor } from '@testing-library/preact';
+import { ReviewCard } from '../../src/ui/inbox/ReviewCard.js';
+import { ApiError } from '../../src/api.js';
+import type { FoldersState } from '../../src/documents/use-folders.js';
+import { FOLDERS, makeDoc } from '../documents/fixtures.js';
+
+const folders: FoldersState = { folders: FOLDERS, error: null, busy: false, reload: async () => {}, refresh: async () => {} };
+const nativeConfirm = window.confirm;
+afterEach(() => { window.confirm = nativeConfirm; });
+
+function renderCard(doc = makeDoc(), handlers: Partial<{ onApprove: any; onDiscard: any }> = {}) {
+  const onApprove = handlers.onApprove ?? vi.fn(async () => {});
+  const onDiscard = handlers.onDiscard ?? vi.fn(async () => {});
+  render(<ReviewCard doc={doc} folders={folders} onApprove={onApprove} onDiscard={onDiscard} />);
+  return { onApprove, onDiscard };
+}
+
+describe('ReviewCard', () => {
+  it('shows the suggestion, confidence, reason and rationale', () => {
+    renderCard();
+    expect(screen.getByRole('textbox', { name: 'Name' })).toHaveValue('Northwind Energy Bill 2026-09');
+    expect(screen.getByText('/Bills/Energy')).toBeInTheDocument();
+    expect(screen.getByText(/60% confident · confidence 0.600 is below 0.80/)).toBeInTheDocument();
+    expect(screen.getByText(/energy bill from Northwind Energy/)).toBeInTheDocument();
+  });
+
+  it('approves as suggested with an empty body', async () => {
+    const { onApprove } = renderCard();
+    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+    await waitFor(() => expect(onApprove).toHaveBeenCalledWith({}));
+  });
+
+  it('sends an edited name and a changed folder', async () => {
+    const { onApprove } = renderCard();
+    fireEvent.input(screen.getByRole('textbox', { name: 'Name' }), { target: { value: 'Northwind Energy Bill 2026-09 (final)' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Change' }));
+    fireEvent.click(screen.getByRole('button', { name: '/Bills/Water' }));
+    expect(screen.getByRole('button', { name: 'Change' })).toHaveFocus();
+    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+    await waitFor(() =>
+      expect(onApprove).toHaveBeenCalledWith({
+        name: 'Northwind Energy Bill 2026-09 (final)',
+        folder: { kind: 'existing', linkId: 'L-water' },
+      }),
+    );
+  });
+
+  it('marks a proposed new folder and sends it unchanged as-is', async () => {
+    const doc = makeDoc({
+      analysis: { ...makeDoc().analysis!, folder: { kind: 'new', parentLinkId: 'L-bills', parentPath: '/Bills', name: 'Gas' } },
+    });
+    const { onApprove } = renderCard(doc);
+    expect(screen.getByText('New folder')).toBeInTheDocument();
+    expect(screen.getByText('/Bills/Gas')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+    await waitFor(() => expect(onApprove).toHaveBeenCalledWith({}));
+  });
+
+  it('needs a folder and a name before it can approve', () => {
+    renderCard(makeDoc({ analysis: { ...makeDoc().analysis!, folder: null } }));
+    expect(screen.getByRole('button', { name: 'Approve' })).toBeDisabled();
+    expect(screen.getByText(/no folder suggested/i)).toBeInTheDocument();
+  });
+
+  it('explains a server error', async () => {
+    renderCard(makeDoc(), { onApprove: vi.fn().mockRejectedValue(new ApiError('unknown_folder', 400, 'unknown_folder')) });
+    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(/no longer exists/i);
+  });
+
+  it('notes an analysis from file details only', () => {
+    renderCard(makeDoc({ analysis: { ...makeDoc().analysis!, contentSeen: false } }));
+    expect(screen.getByText(/file's details only/i)).toBeInTheDocument();
+  });
+
+  it('discards without asking, unless the document may already be in Drive', async () => {
+    const { onDiscard } = renderCard();
+    fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
+    await waitFor(() => expect(onDiscard).toHaveBeenCalledTimes(1));
+  });
+
+  it('asks before discarding a document that may be in Drive', async () => {
+    window.confirm = vi.fn().mockReturnValue(false);
+    const { onDiscard } = renderCard(makeDoc({ possiblyInDrive: true }));
+    fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
+    expect(window.confirm).toHaveBeenCalled();
+    expect(onDiscard).not.toHaveBeenCalled();
+  });
+});
