@@ -1,9 +1,8 @@
-import type { Analysis } from '../../analyze/types.js';
 import { isUnderAny } from '../../drive/folder-tree.js';
 import { logger } from '../../logger.js';
 import type { EffectiveSettings } from '../../settings/settings-store.js';
 import type { StageContext } from '../deps.js';
-import type { DocumentRow } from '../types.js';
+import type { DocumentRow, StoredAnalysis } from '../types.js';
 
 /**
  * Why this analysis can't be filed without the user, or null when it can:
@@ -12,7 +11,7 @@ import type { DocumentRow } from '../types.js';
  * switch is checked last so the reason names what the user would have to fix.
  * Reasons never contain document or folder names.
  */
-export function reviewReason(a: Analysis | null, s: EffectiveSettings): string | null {
+export function reviewReason(a: StoredAnalysis | null, s: EffectiveSettings): string | null {
   if (!a) return 'no analysis';
   if (a.folder === null) return 'no folder chosen';
   if (a.folder.kind === 'new') return 'new folder proposed';

@@ -22,7 +22,17 @@ describe('analyzeStage', () => {
     h = makeHarness();
     const doc = h.add();
     await analyzeStage(doc, h.ctx);
-    expect(h.repo.get(doc.id)).toMatchObject({ state: 'preparing', analysis: ANALYSIS });
+    const { textSnippet: _snippet, ...stored } = ANALYSIS;
+    expect(h.repo.get(doc.id)).toMatchObject({ state: 'preparing', analysis: stored });
+  });
+
+  it('does not store the text snippet, which nothing reads', async () => {
+    h = makeHarness();
+    const doc = h.add();
+    await analyzeStage(doc, h.ctx);
+    expect(h.repo.get(doc.id)?.analysis).not.toHaveProperty('textSnippet');
+    const raw = h.db.prepare('SELECT analysis FROM documents WHERE id = ?').get(doc.id) as { analysis: string };
+    expect(raw.analysis).not.toContain(ANALYSIS.textSnippet);
   });
 
   it('hides never-file-here folders from the model', async () => {

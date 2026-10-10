@@ -61,9 +61,12 @@ export async function analyzeStage(doc: DocumentRow, ctx: StageContext): Promise
     'document analysed',
   );
 
-  const moved =
-    outcome.status === 'ok'
-      ? ctx.repo.transition(doc.id, 'analyzing', 'preparing', { analysis: outcome.analysis, attempts: 0, error: null })
-      : ctx.repo.transition(doc.id, 'analyzing', 'needs_review', { reviewReason: `analysis ${outcome.status}: ${outcome.detail}`, attempts: 0, error: null });
+  let moved: boolean;
+  if (outcome.status === 'ok') {
+    const { textSnippet: _unused, ...analysis } = outcome.analysis;
+    moved = ctx.repo.transition(doc.id, 'analyzing', 'preparing', { analysis, attempts: 0, error: null });
+  } else {
+    moved = ctx.repo.transition(doc.id, 'analyzing', 'needs_review', { reviewReason: `analysis ${outcome.status}: ${outcome.detail}`, attempts: 0, error: null });
+  }
   if (!moved) ctx.repo.applyRequestedDiscard(doc.id);
 }

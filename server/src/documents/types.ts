@@ -21,6 +21,13 @@ export const RESTING_STATES: readonly DocumentState[] = ['received', 'ready', 'n
 /** States a pending discard may still be applied from; never 'filed' or 'discarded'. */
 export const DISCARDABLE_STATES: readonly DocumentState[] = [...RESTING_STATES, 'analyzing', 'preparing', 'filing'];
 
+/**
+ * The analysis as kept on the row: without the text snippet, which nothing
+ * reads back (history recall is off in v1) and which would only keep document
+ * text at rest for longer.
+ */
+export type StoredAnalysis = Omit<Analysis, 'textSnippet'>;
+
 /** What is being filed: the analysis's answer or the user's approved edit. */
 export interface Decision {
   name: string;
@@ -51,7 +58,7 @@ export interface DocumentRow {
   attempts: number;
   nextAttemptAt: string;
   error: string | null;
-  analysis: Analysis | null;
+  analysis: StoredAnalysis | null;
   preparedMime: string | null;
   decision: Decision | null;
   filingTarget: FilingTarget | null;
@@ -79,7 +86,7 @@ export interface DocumentPatch {
   attempts?: number;
   nextAttemptAt?: Date;
   error?: string | null;
-  analysis?: Analysis | null;
+  analysis?: StoredAnalysis | null;
   preparedMime?: string | null;
   decision?: Decision | null;
   filingTarget?: FilingTarget | null;
