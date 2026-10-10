@@ -326,3 +326,27 @@ describe('errors', () => {
     expect(JSON.stringify(log.mock.calls)).not.toContain('Northwind');
   });
 });
+
+describe('intake', () => {
+  function send(app: App, cookie: string, file: File, extra: Record<string, string> = {}) {
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('source', 'picker');
+    for (const [k, v] of Object.entries(extra)) fd.append(k, v);
+    return app.request('/api/documents', { method: 'POST', body: fd, headers: { cookie } });
+  }
+
+  it('stores the bare, lowercased MIME type', async () => {
+    const { app, cookie, pipeline } = await setup();
+    const res = await send(app, cookie, new File(['Northwind'], 'note.txt', { type: 'text/plain;charset=utf-8' }));
+    const { id } = (await res.json()) as { id: string };
+    expect(pipeline.repo.get(id)?.mime).toBe('text/plain');
+  });
+
+  it('works out a missing MIME type from the file name', async () => {
+    const { app, cookie, pipeline } = await setup();
+    const res = await send(app, cookie, new File(['not really a pdf'], 'statement.pdf', { type: '' }));
+    const { id } = (await res.json()) as { id: string };
+    expect(pipeline.repo.get(id)?.mime).toBe('application/pdf');
+  });
+});

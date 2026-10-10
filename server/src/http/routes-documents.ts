@@ -6,6 +6,7 @@ import type { SessionStore } from '../auth/session-store.js';
 import { sanitiseName } from '../analyze/resolve.js';
 import type { Pipeline } from '../documents/pipeline.js';
 import type { Decision, DocumentRow, DocumentState } from '../documents/types.js';
+import { intakeMime } from '../documents/extension.js';
 import { toView } from '../documents/view.js';
 import { isUnderAny } from '../drive/folder-tree.js';
 import { logger } from '../logger.js';
@@ -99,7 +100,7 @@ export function documentRoutes(deps: { store: SessionStore; pipeline: Pipeline }
       const doc = repo.insert({
         source: source as (typeof COOKIE_SOURCES)[number],
         originalName: typeof originalName === 'string' && originalName ? originalName : file.name || null,
-        mime: file.type || 'application/octet-stream',
+        mime: intakeMime(file.type, bytes, file.name || null),
         size: bytes.length,
         sha256,
         sourceContext: typeof sourceContext === 'string' && sourceContext ? sourceContext : null,
