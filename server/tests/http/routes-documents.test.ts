@@ -84,6 +84,8 @@ describe('document routes', () => {
       ['GET', '/api/documents/some-id'],
       ['POST', '/api/documents/some-id/approve'],
       ['POST', '/api/documents/some-id/discard'],
+      ['POST', '/api/documents/some-id/restore'],
+      ['POST', '/api/documents/some-id/retry'],
       ['GET', '/api/folders'],
       ['POST', '/api/folders/refresh'],
       ['GET', '/api/settings'],
