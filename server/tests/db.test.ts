@@ -23,7 +23,7 @@ describe('openDb', () => {
     cleanupFn = cleanup;
 
     const v = db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number };
-    expect(v.v).toBe(3);
+    expect(v.v).toBe(5);
   });
 
   it('migration 002 creates drive cache tables', () => {
@@ -37,7 +37,7 @@ describe('openDb', () => {
     expect(names).toContain('event_cursors');
 
     const v = db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number };
-    expect(v.v).toBe(3);
+    expect(v.v).toBe(5);
   });
 
   it('migration 003 keys event cursors by scope and adds app_settings', () => {
@@ -67,8 +67,53 @@ describe('openDb', () => {
     const secondCount = (db2.prepare('SELECT COUNT(*) AS c FROM schema_version').get() as { c: number }).c;
     db2.close();
 
-    expect(secondCount).toBe(3);
+    expect(secondCount).toBe(5);
     expect(secondCount).toBe(firstCount);
     expect(secondApplied).toBe(firstApplied);
+  });
+
+  it('creates the document pipeline tables', () => {
+    const { db, cleanup } = createTestDb();
+    try {
+      const names = (db.prepare(`SELECT name FROM sqlite_master WHERE type IN ('table')`).all() as { name: string }[]).map((r) => r.name);
+      expect(names).toEqual(expect.arrayContaining(['documents', 'document_seq', 'folder_cache', 'classification_history']));
+    } finally {
+      cleanup();
+    }
+  });
+
+  const insertDoc = (db: ReturnType<typeof createTestDb>['db'], state: string, discardedAt: string | null) =>
+    db.prepare(
+      `INSERT INTO documents (id, seq, created_at, updated_at, source, mime, size, sha256, state, next_attempt_at, discarded_at)
+       VALUES ('d1', 1, 't', 't', 'picker', 'application/pdf', 10, 'abc', ?, 't', ?)`,
+    ).run(state, discardedAt);
+
+  it('seeds document_seq at 0', () => {
+    const { db, cleanup } = createTestDb();
+    try {
+      expect(db.prepare('SELECT value FROM document_seq WHERE id = 1').get()).toEqual({ value: 0 });
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('rejects an unknown document state', () => {
+    const { db, cleanup } = createTestDb();
+    try {
+      expect(() => insertDoc(db, 'bogus', null)).toThrow();
+      expect(() => insertDoc(db, 'received', null)).not.toThrow();
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('rejects a discarded row without discarded_at', () => {
+    const { db, cleanup } = createTestDb();
+    try {
+      expect(() => insertDoc(db, 'discarded', null)).toThrow();
+      expect(() => insertDoc(db, 'discarded', 't')).not.toThrow();
+    } finally {
+      cleanup();
+    }
   });
 });

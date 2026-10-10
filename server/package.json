@@ -5,13 +5,19 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p src/vendor/tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p src/vendor/tsconfig.json && tsc -p evals/tsconfig.json",
     "start": "tsx src/index.ts",
     "test": "NODE_OPTIONS=--import=tsx vitest run",
     "test:watch": "NODE_OPTIONS=--import=tsx vitest",
-    "test:integration": "NODE_OPTIONS=--import=tsx vitest run --config vitest.integration.config.ts"
+    "test:integration": "NODE_OPTIONS=--import=tsx vitest run --config vitest.integration.config.ts",
+    "eval:analyzer:sample": "node --import tsx evals/analyzer/sample.ts",
+    "eval:analyzer": "node --env-file=../.env --import tsx evals/analyzer/run-eval.mjs",
+    "eval:analyzer:summary": "node --import tsx evals/analyzer/summarize.ts",
+    "eval:analyzer:judge-check": "node --env-file=../.env --import tsx evals/analyzer/judge-check.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "0.131.0",
+    "@cantoo/pdf-lib": "2.11.1",
     "@hono/node-server": "2.1.3",
     "@protontech/crypto": "2.2.0",
     "@protontech/drive-sdk": "0.22.2",
@@ -22,6 +28,7 @@
     "openpgp": "6.3.2",
     "pino": "10.4.0",
     "pino-pretty": "13.1.3",
+    "sharp": "0.35.5",
     "tsx": "4.23.15",
     "zod": "4.6.5"
   },

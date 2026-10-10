@@ -4,7 +4,8 @@ import { createApp } from '../../src/http/server.js';
 import { createTestDb } from '../helpers/test-db.js';
 import { ProtonAuth, TwoFactorRequiredError } from '../../src/auth/srp.js';
 import { _resetSids } from '../../src/http/middleware.js';
-import { _resetLiveSessions } from '../../src/auth/live-session.js';
+import { _resetLiveSessions, getAnyLiveSession } from '../../src/auth/live-session.js';
+import { DriveClient } from '../../src/drive/client.js';
 import { MailboxSecret } from '../../src/auth/secrets/mailbox-password.js';
 import type { DecryptedUserKey } from '../../src/auth/keys.js';
 
@@ -153,5 +154,49 @@ describe('POST /api/auth/logout', () => {
     expect(logout.status).toBe(200);
     const status = await app.request('/api/auth/status', { headers: { cookie } });
     expect(status.status).toBe(401);
+  });
+
+  it('logs out every login, not just the one that asked', async () => {
+    const { app, fakeAuth } = setup();
+    const loginOnce = async () => {
+      (fakeAuth.login as any).mockResolvedValue(makeLoginSuccess());
+      const res = await app.request('/api/auth/login', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email: 'e@x.test', password: 'p' }),
+      });
+      return res.headers.get('set-cookie')!.split(';')[0]!;
+    };
+    const cookieA = await loginOnce();
+    const cookieB = await loginOnce();
+    expect(getAnyLiveSession()).toBeDefined();
+
+    const logout = await app.request('/api/auth/logout', { method: 'POST', headers: { cookie: cookieA } });
+    expect(logout.status).toBe(200);
+
+    for (const cookie of [cookieA, cookieB]) {
+      const status = await app.request('/api/auth/status', { headers: { cookie } });
+      expect(status.status).toBe(401);
+    }
+    expect(getAnyLiveSession()).toBeUndefined();
+  });
+
+  it('still clears Drive caches when the logout request has no cookie', async () => {
+    const spy = vi.spyOn(DriveClient.prototype, 'clearCaches').mockResolvedValue(undefined);
+    try {
+      const { app, fakeAuth } = setup();
+      (fakeAuth.login as any).mockResolvedValue(makeLoginSuccess());
+      await app.request('/api/auth/login', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email: 'e@x.test', password: 'p' }),
+      });
+      const logout = await app.request('/api/auth/logout', { method: 'POST' });
+      expect(logout.status).toBe(200);
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(getAnyLiveSession()).toBeUndefined();
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

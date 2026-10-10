@@ -1,5 +1,20 @@
 import { z } from 'zod';
 
+// Shared with saved-settings validation. At least 0.5: below that the model
+// rates its own answer more likely wrong than right, and filing on it unseen
+// would defeat the review queue. At most two decimals: the analyzer prompt
+// prints the threshold with toFixed(2), so a finer value would show the model a
+// different number than the gate uses. Validates numbers only (no coercion, so a JSON
+// null/""/false can never become 0); the env wrapper below does the string coercion.
+export const autoFileThresholdSchema = z
+  .number()
+  .min(0.5, 'must be at least 0.5')
+  .max(1)
+  .refine((v) => Math.abs(v * 100 - Math.round(v * 100)) < 1e-9, 'must have at most two decimal places (e.g. 0.85)');
+
+// Compose forwards unset optional vars as '', and .default() only fires on undefined.
+const blankToUndefined = (v: unknown) => (typeof v === 'string' && v.trim() === '' ? undefined : v);
+
 const ConfigSchema = z.object({
   SESSION_ENCRYPTION_KEY: z
     .string({ message: 'SESSION_ENCRYPTION_KEY is required' })
@@ -29,6 +44,14 @@ const ConfigSchema = z.object({
     .default('false')
     .transform((v) => v === 'true' || v === '1'),
   PWA_DIST_PATH: z.string().optional(),
+  ANALYZER_MODEL: z.string().trim().min(1).default('claude-haiku-5-5'),
+  ANALYZER_EFFORT: z.enum(['low', 'medium', 'high']).default('medium'),
+  AUTO_FILE_THRESHOLD: z.preprocess(blankToUndefined, z.coerce.number().pipe(autoFileThresholdSchema).default(0.8)),
+  // Off until the analyzer's auto-file precision has been measured on real use; saved settings can override.
+  AUTO_FILE_ENABLED: z
+    .string()
+    .default('false')
+    .transform((v) => v === 'true' || v === '1'),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;

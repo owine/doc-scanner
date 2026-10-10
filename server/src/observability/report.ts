@@ -5,7 +5,7 @@ import { redactExact } from './scrub.js';
  * Drive operations we report on. A failure in any of these can mean a scan
  * never reaches Proton Drive, which is the one failure that must be heard.
  */
-export type DriveOperation = 'folder-lookup' | 'upload' | 'session-refresh';
+export type DriveOperation = 'folder-lookup' | 'folder-create' | 'folder-walk' | 'upload' | 'download' | 'session-refresh';
 
 /**
  * Reports a Drive failure tagged with its operation. `sensitive` lists values
@@ -44,4 +44,22 @@ export async function reportingDriveFailure<T>(
     captureDriveFailure(error, operation, sensitive);
     throw error;
   }
+}
+
+/** 'storage': a document row whose sealed details would not decrypt (see DocumentRepo). */
+export type DocumentStage = 'analyze' | 'prepare' | 'file' | 'storage';
+
+/**
+ * Reports a document that reached `failed`, tagged with the stage that
+ * broke. Names passed in `sensitive` (and their extension-less stems) are
+ * redacted wherever they appear in the event's free text. Callers must not
+ * throw errors that embed document content.
+ */
+export function captureDocumentFailure(error: unknown, stage: DocumentStage, sensitive: readonly string[] = []): void {
+  Sentry.withScope((scope) => {
+    scope.setTag('document.stage', stage);
+    const values = sensitive.filter((v) => v.length > 0);
+    if (values.length > 0) scope.addEventProcessor((event) => redactExact(event, values));
+    Sentry.captureException(error);
+  });
 }

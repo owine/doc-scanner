@@ -10,20 +10,34 @@ import type { DB } from '../../src/db.js';
 // everything else the real DriveClient wires (crypto module, feature flags)
 // comes from the actual SDK. This test lives in its own file so the module
 // mock does not weaken client.test.ts's real-construction check.
-const { mockSdk } = vi.hoisted(() => ({
+const { mockSdk, sdkErrors } = vi.hoisted(() => {
+  class ProtonDriveError extends Error {}
+  class ValidationError extends ProtonDriveError {}
+  class NodeWithSameNameExistsValidationError extends ValidationError {
+    constructor(message: string, readonly code: number, readonly existingNodeUid?: string) {
+      super(message);
+    }
+  }
+  class ServerError extends ProtonDriveError {}
+  class ConnectionError extends ProtonDriveError {}
+  class AbortError extends ProtonDriveError {}
+  return {
+  sdkErrors: { ProtonDriveError, NodeWithSameNameExistsValidationError, ServerError, ConnectionError, AbortError },
   mockSdk: {
     getMyFilesRootFolder: vi.fn(),
     getAvailableName: vi.fn(),
     getFileUploader: vi.fn(),
     experimental: { getNodeUrl: vi.fn() },
   },
-}));
+  };
+});
 
-// Stub the three value exports the DriveClient graph pulls from the SDK root.
+// Stub the value exports the DriveClient graph pulls from the SDK root (the
+// client, feature flags, crypto, NodeType and the error classes it matches on).
 // We deliberately do NOT importActual: that would load the real SDK, whose
 // crypto peer ships raw .ts that vitest's loader can't type-strip. uploadFile
-// only touches ProtonDriveClient (mocked below); the crypto module and feature
-// flag provider are constructed but never exercised on this path.
+// only touches ProtonDriveClient (mocked below); the rest is constructed or
+// referenced but never exercised on this path.
 vi.mock('@protontech/drive-sdk', () => ({
   // Regular function (not an arrow) so `new ProtonDriveClient(...)` works —
   // returning an object from a constructor call yields that object.
@@ -32,6 +46,12 @@ vi.mock('@protontech/drive-sdk', () => ({
   }),
   NullFeatureFlagProvider: vi.fn(),
   OpenPGPCryptoWithCryptoProxy: vi.fn(),
+  NodeType: { File: 'file', Folder: 'folder' },
+  ProtonDriveError: sdkErrors.ProtonDriveError,
+  NodeWithSameNameExistsValidationError: sdkErrors.NodeWithSameNameExistsValidationError,
+  ServerError: sdkErrors.ServerError,
+  ConnectionError: sdkErrors.ConnectionError,
+  AbortError: sdkErrors.AbortError,
 }));
 
 // Imported after the mock is registered (vi.mock is hoisted above imports).

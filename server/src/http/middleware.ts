@@ -3,7 +3,7 @@ import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import type { Context } from 'hono';
 import { randomBytes } from 'node:crypto';
 import type { SessionStore } from '../auth/session-store.js';
-import { getLiveSession, disposeLiveSession, type LiveSession } from '../auth/live-session.js';
+import { getLiveSession, disposeAllLiveSessions, type LiveSession } from '../auth/live-session.js';
 
 export const COOKIE_NAME = 'docscanner_sid';
 
@@ -42,12 +42,15 @@ export function issueSession(c: Context<Env>, secureCookie: boolean = true): str
   return sid;
 }
 
-export function revokeSession(c: Context<Env>): void {
-  const sid = getCookie(c, COOKIE_NAME);
-  if (sid) {
-    liveSids.delete(sid);
-    disposeLiveSession(sid);
-  }
+/**
+ * Logout. The session store holds a single row and logout clears it, so this
+ * means "logged out everywhere": every sid is forgotten and every live session
+ * is disposed, so nothing (the document worker included) can keep using, or
+ * refresh the tokens of, a login that no longer exists.
+ */
+export function revokeAllSessions(c: Context<Env>): void {
+  liveSids.clear();
+  disposeAllLiveSessions();
   deleteCookie(c, COOKIE_NAME, { path: '/' });
 }
 

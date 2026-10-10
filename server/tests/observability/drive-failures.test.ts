@@ -8,15 +8,29 @@ import type { DB } from '../../src/db.js';
 
 // Same seam as client-upload.test.ts: stub ProtonDriveClient only, so the
 // real DriveClient facade (and its failure reporting) runs against it.
-const { mockSdk, sdkConfigs } = vi.hoisted(() => ({
+const { mockSdk, sdkConfigs, sdkErrors } = vi.hoisted(() => {
+  class ProtonDriveError extends Error {}
+  class ValidationError extends ProtonDriveError {}
+  class NodeWithSameNameExistsValidationError extends ValidationError {
+    constructor(message: string, readonly code: number, readonly existingNodeUid?: string) {
+      super(message);
+    }
+  }
+  class ServerError extends ProtonDriveError {}
+  class ConnectionError extends ProtonDriveError {}
+  class AbortError extends ProtonDriveError {}
+  return {
+  sdkErrors: { ProtonDriveError, NodeWithSameNameExistsValidationError, ServerError, ConnectionError, AbortError },
   mockSdk: {
     getMyFilesRootFolder: vi.fn(),
     getAvailableName: vi.fn(),
     getFileUploader: vi.fn(),
+    createFolder: vi.fn(),
     experimental: { getNodeUrl: vi.fn() },
   },
   sdkConfigs: [] as Array<{ httpClient: { fetchJson: (req: unknown) => Promise<Response> } }>,
-}));
+  };
+});
 
 vi.mock('@protontech/drive-sdk', () => ({
   ProtonDriveClient: vi.fn(function (config: (typeof sdkConfigs)[number]) {
@@ -25,6 +39,12 @@ vi.mock('@protontech/drive-sdk', () => ({
   }),
   NullFeatureFlagProvider: vi.fn(),
   OpenPGPCryptoWithCryptoProxy: vi.fn(),
+  NodeType: { File: 'file', Folder: 'folder' },
+  ProtonDriveError: sdkErrors.ProtonDriveError,
+  NodeWithSameNameExistsValidationError: sdkErrors.NodeWithSameNameExistsValidationError,
+  ServerError: sdkErrors.ServerError,
+  ConnectionError: sdkErrors.ConnectionError,
+  AbortError: sdkErrors.AbortError,
 }));
 
 const { DriveClient } = await import('../../src/drive/client.js');
@@ -101,6 +121,31 @@ describe('Drive failure reporting', () => {
 
     expect(events).toHaveLength(1);
     expect(tagsOf(0)).toMatchObject({ 'drive.operation': 'folder-lookup' });
+  });
+
+  it('reports one event tagged folder-walk when the folder tree walk fails', async () => {
+    mockSdk.getMyFilesRootFolder.mockRejectedValue(new Error('volume not found'));
+    const client = await makeClient(db);
+
+    await expect(client.walkFolderTree()).rejects.toThrow('volume not found');
+    await flushEvents();
+
+    expect(events).toHaveLength(1);
+    expect(tagsOf(0)).toMatchObject({ 'drive.operation': 'folder-walk' });
+  });
+
+  it('reports a folder-create failure but not an expected name clash', async () => {
+    const client = await makeClient(db);
+    mockSdk.createFolder.mockRejectedValueOnce(new sdkErrors.NodeWithSameNameExistsValidationError('exists', 1, 'N1'));
+    await expect(client.createFolder('P', 'Water')).rejects.toThrow('a node with this name already exists');
+    await flushEvents();
+    expect(events).toHaveLength(0);
+
+    mockSdk.createFolder.mockRejectedValueOnce(new Error('quota exceeded'));
+    await expect(client.createFolder('P', 'Water')).rejects.toThrow('quota exceeded');
+    await flushEvents();
+    expect(events).toHaveLength(1);
+    expect(tagsOf(0)).toMatchObject({ 'drive.operation': 'folder-create' });
   });
 
   it('redacts the exact document name, even unquoted with spaces', async () => {
