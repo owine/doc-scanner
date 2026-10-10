@@ -2760,6 +2760,11 @@ export class DocumentWorker {
     return true;
   }
 
+  /**
+   * Errors reach GlitchTip via d.report with the document's names redacted;
+   * stages must never throw errors that embed document content (the analyzer's
+   * unusable answers become review reasons, not thrown errors).
+   */
   private retryOrFail(doc: DocumentRow, err: unknown): void {
     // A missing inbox blob can never come back: fail now instead of retrying.
     const attempts = err instanceof InboxBlobMissingError ? MAX_ATTEMPTS : doc.attempts + 1;
