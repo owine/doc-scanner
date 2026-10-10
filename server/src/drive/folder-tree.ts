@@ -19,7 +19,7 @@ export interface TreeFolder {
 
 export type TreeSdk = Pick<ProtonDriveClient, 'getMyFilesRootFolder' | 'iterateFolderChildrenNodeUids' | 'iterateNodes'>;
 
-function isNode(n: unknown): n is NodeEntity {
+export function isNode(n: unknown): n is NodeEntity {
   return typeof n === 'object' && n !== null && 'uid' in n;
 }
 

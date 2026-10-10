@@ -7,7 +7,17 @@ import type { DB } from '../../src/db.js';
 
 // Same SDK-mocking pattern as client-upload.test.ts, extended with the folder
 // iteration and creation calls the filing stage relies on.
-const { mockSdk } = vi.hoisted(() => ({
+const { mockSdk, sdkErrors } = vi.hoisted(() => {
+  class ProtonDriveError extends Error {}
+  class ValidationError extends ProtonDriveError {}
+  class NodeWithSameNameExistsValidationError extends ValidationError {
+    constructor(message: string, readonly code: number, readonly existingNodeUid?: string) {
+      super(message);
+    }
+  }
+  class ServerError extends ProtonDriveError {}
+  return {
+  sdkErrors: { ProtonDriveError, NodeWithSameNameExistsValidationError, ServerError },
   mockSdk: {
     getMyFilesRootFolder: vi.fn(),
     getAvailableName: vi.fn(),
@@ -17,7 +27,8 @@ const { mockSdk } = vi.hoisted(() => ({
     createFolder: vi.fn(),
     experimental: { getNodeUrl: vi.fn() },
   },
-}));
+  };
+});
 
 // Stub the three value exports the DriveClient graph pulls from the SDK root.
 // We deliberately do NOT importActual: that would load the real SDK, whose
@@ -33,10 +44,12 @@ vi.mock('@protontech/drive-sdk', () => ({
   NullFeatureFlagProvider: vi.fn(),
   OpenPGPCryptoWithCryptoProxy: vi.fn(),
   NodeType: { File: 'file', Folder: 'folder' },
+  ProtonDriveError: sdkErrors.ProtonDriveError,
+  NodeWithSameNameExistsValidationError: sdkErrors.NodeWithSameNameExistsValidationError,
 }));
 
 // Imported after the mock is registered (vi.mock is hoisted above imports).
-const { DriveClient } = await import('../../src/drive/client.js');
+const { DriveClient, FolderNameTakenError } = await import('../../src/drive/client.js');
 
 async function makeClient(db: DB) {
   const { privateKey } = await openpgp.generateKey({
@@ -70,11 +83,12 @@ async function* gen<T>(items: T[]) {
   for (const i of items) yield i;
 }
 
-function node(uid: string, type: 'file' | 'folder', name: string, sha1?: string) {
+function node(uid: string, type: 'file' | 'folder', name: string, sha1?: string, extra: object = {}) {
   return {
     uid,
     type,
     name: { ok: true, value: name },
+    ...extra,
     activeRevision: sha1 ? { claimedDigests: { sha1, sha1Verified: false } } : undefined,
   };
 }
@@ -138,4 +152,98 @@ describe('DriveClient filing helpers', () => {
       cleanup();
     }
   });
+
+  async function withClient<T>(fn: (c: Awaited<ReturnType<typeof makeClient>>) => Promise<T>): Promise<T> {
+    const { db, cleanup } = createTestDb();
+    try {
+      return await fn(await makeClient(db));
+    } finally {
+      cleanup();
+    }
+  }
+
+  it('asks the SDK for folders only when looking up a folder', () =>
+    withClient(async (client) => {
+      mockSdk.iterateFolderChildrenNodeUids.mockReturnValue(gen(['b']));
+      mockSdk.iterateNodes.mockReturnValue(gen([node('b', 'folder', 'Water')]));
+      await client.findChildFolder('P', 'Water');
+      expect(mockSdk.iterateFolderChildrenNodeUids).toHaveBeenCalledWith('P', { type: 'folder' });
+    }));
+
+  it('skips trashed, undecryptable and missing entries, and returns null when nothing matches', () =>
+    withClient(async (client) => {
+      mockSdk.iterateFolderChildrenNodeUids.mockReturnValue(gen(['t', 'u', 'm']));
+      mockSdk.iterateNodes.mockReturnValue(
+        gen([
+          node('t', 'folder', 'Water', undefined, { trashTime: new Date() }),
+          { ...node('u', 'folder', 'Water'), name: { ok: false, error: new Error('x') } },
+          { missingUid: 'm' },
+        ]),
+      );
+      expect(await client.findChildFolder('P', 'Water')).toBeNull();
+      mockSdk.iterateFolderChildrenNodeUids.mockReturnValue(gen(['t']));
+      mockSdk.iterateNodes.mockReturnValue(gen([node('t', 'file', 'x.pdf', 'aaa')]));
+      expect(await client.findFileBySha1('P', 'zzz')).toBeNull();
+    }));
+
+  it('does not fetch nodes for an empty folder', () =>
+    withClient(async (client) => {
+      mockSdk.iterateFolderChildrenNodeUids.mockReturnValue(gen([]));
+      expect(await client.findChildFolder('P', 'Water')).toBeNull();
+      expect(await client.findFileBySha1('P', 'aaa')).toBeNull();
+      expect(mockSdk.iterateNodes).not.toHaveBeenCalled();
+    }));
+
+  it('does not match a file that has no revision or SHA-1', () =>
+    withClient(async (client) => {
+      mockSdk.iterateFolderChildrenNodeUids.mockReturnValue(gen(['x']));
+      mockSdk.iterateNodes.mockReturnValue(gen([node('x', 'file', 'Bill.pdf')]));
+      expect(await client.findFileBySha1('P', 'undefined')).toBeNull();
+    }));
+
+  it('matches folder names across Unicode normalisation forms, case-sensitively', () =>
+    withClient(async (client) => {
+      const nfd = 'Cafe\u0301';
+      mockSdk.iterateFolderChildrenNodeUids.mockImplementation(() => gen(['a']));
+      mockSdk.iterateNodes.mockImplementation(() => gen([node('a', 'folder', nfd)]));
+      expect(await client.findChildFolder('P', 'Caf\u00e9')).toBe('a');
+      expect(await client.findChildFolder('P', 'caf\u00e9')).toBeNull();
+    }));
+
+  it('turns a name clash into FolderNameTakenError carrying the existing uid', () =>
+    withClient(async (client) => {
+      mockSdk.createFolder.mockRejectedValue(new sdkErrors.NodeWithSameNameExistsValidationError('exists', 2500, 'N7'));
+      const err = await client.createFolder('P', 'Water').catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(FolderNameTakenError);
+      expect((err as InstanceType<typeof FolderNameTakenError>).existingNodeUid).toBe('N7');
+    }));
+
+  it('propagates other createFolder errors', () =>
+    withClient(async (client) => {
+      mockSdk.createFolder.mockRejectedValue(new Error('boom'));
+      await expect(client.createFolder('P', 'Water')).rejects.toThrow('boom');
+    }));
+
+  it('tolerates the SDK reporting unloadable siblings, keeping what it yielded', () =>
+    withClient(async (client) => {
+      mockSdk.iterateFolderChildrenNodeUids.mockImplementation(() => gen(['a', 'b']));
+      async function* partial() {
+        yield node('a', 'folder', 'Water');
+        throw new sdkErrors.ProtonDriveError('Some items could not be loaded');
+      }
+      mockSdk.iterateNodes.mockImplementation(() => partial());
+      expect(await client.findChildFolder('P', 'Water')).toBe('a');
+      expect(await client.findChildFolder('P', 'Gas')).toBeNull();
+    }));
+
+  it('lets subclasses of ProtonDriveError (e.g. ServerError) propagate', () =>
+    withClient(async (client) => {
+      mockSdk.iterateFolderChildrenNodeUids.mockReturnValue(gen(['a']));
+      async function* failing() {
+        throw new sdkErrors.ServerError('401');
+        yield node('a', 'folder', 'Water');
+      }
+      mockSdk.iterateNodes.mockReturnValue(failing());
+      await expect(client.findChildFolder('P', 'Water')).rejects.toBeInstanceOf(sdkErrors.ServerError);
+    }));
 });

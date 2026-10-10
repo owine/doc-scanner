@@ -3,6 +3,8 @@ import {
   ProtonDriveClient,
   NullFeatureFlagProvider,
   NodeType,
+  ProtonDriveError,
+  NodeWithSameNameExistsValidationError,
   type ProtonDriveTelemetry,
   type Logger,
   type NodeEntity,
@@ -19,7 +21,8 @@ import { EventIdStore } from './event-id-store.js';
 import { getOrCreateClientUid } from './client-uid.js';
 import { getOpenPGPModule } from './crypto-module.js';
 import { reportingDriveFailure } from '../observability/report.js';
-import { walkFolderTree, type TreeFolder, type WalkOptions } from './folder-tree.js';
+import { logger } from '../logger.js';
+import { walkFolderTree, isNode, type TreeFolder, type WalkOptions } from './folder-tree.js';
 
 /** Proton's production Drive API host. The SDK config wants a host, not a URL. */
 const DEFAULT_DRIVE_HOST = 'drive-api.proton.me';
@@ -66,6 +69,17 @@ export interface UploadOptions {
   /** Folder to upload into; defaults to the root of My files. */
   parentFolderUid?: string;
 }
+
+/** createFolder found the name already taken (by a folder, file or undecryptable node). */
+export class FolderNameTakenError extends Error {
+  constructor(readonly existingNodeUid?: string) {
+    super('a node with this name already exists in the folder');
+    this.name = 'FolderNameTakenError';
+  }
+}
+
+/** A node whose name decrypted. */
+type NamedNode = NodeEntity & { name: { ok: true; value: string } };
 
 const NOOP_LOGGER: Logger = {
   debug: () => {},
@@ -224,29 +238,52 @@ export class DriveClient {
     return { nodeUid, driveUrl, name: availableName };
   }
 
-  /** A folder's children whose names decrypt; trashed nodes are skipped. */
-  private async *children(parentUid: string): AsyncGenerator<NodeEntity> {
+  /** A folder's live children whose names decrypt (trashed, missing and undecryptable ones are skipped). */
+  private async *children(parentUid: string, filter?: { type: NodeType }): AsyncGenerator<NamedNode> {
     const uids: string[] = [];
-    for await (const uid of this.sdk.iterateFolderChildrenNodeUids(parentUid)) uids.push(uid);
+    for await (const uid of this.sdk.iterateFolderChildrenNodeUids(parentUid, filter)) uids.push(uid);
     if (uids.length === 0) return;
-    for await (const n of this.sdk.iterateNodes(uids)) {
-      if ('uid' in n && !n.trashTime && n.name.ok) yield n;
+    try {
+      for await (const n of this.sdk.iterateNodes(uids)) {
+        if (isNode(n) && !n.trashTime && n.name.ok) yield n as NamedNode;
+      }
+    } catch (error) {
+      // The SDK yields every loadable node, then throws this exact base class
+      // for the ones it could not load. A broken sibling must not fail the
+      // lookup; subclasses (ServerError, ConnectionError, ...) still do.
+      if (error?.constructor !== ProtonDriveError) throw error;
+      logger.warn({ parentUid }, 'some folder children could not be loaded');
     }
   }
 
   /** The uid of `parentUid`'s child folder called `name`, if there is one. */
   async findChildFolder(parentUid: string, name: string): Promise<string | null> {
     return reportingDriveFailure('folder-lookup', async () => {
-      for await (const n of this.children(parentUid)) {
-        if (n.type === NodeType.Folder && nodeName(n) === name) return n.uid;
+      const wanted = name.normalize('NFC');
+      for await (const n of this.children(parentUid, { type: NodeType.Folder })) {
+        if (n.type === NodeType.Folder && n.name.value.normalize('NFC') === wanted) return n.uid;
       }
       return null;
     }, [name]);
   }
 
-  /** Creates a folder; the SDK throws if the name is taken, so look it up first. */
+  /**
+   * Creates a folder. Throws FolderNameTakenError when the name is taken (the
+   * SDK refuses), which is expected and so not reported as a Drive failure.
+   */
   async createFolder(parentUid: string, name: string): Promise<string> {
-    return reportingDriveFailure('folder-create', async () => (await this.sdk.createFolder(parentUid, name)).uid, [name]);
+    const result = await reportingDriveFailure('folder-create', async () => {
+      try {
+        return { uid: (await this.sdk.createFolder(parentUid, name)).uid };
+      } catch (error) {
+        if (error instanceof NodeWithSameNameExistsValidationError) {
+          return { taken: error.existingNodeUid };
+        }
+        throw error;
+      }
+    }, [name]);
+    if ('taken' in result) throw new FolderNameTakenError(result.taken);
+    return result.uid;
   }
 
   /**
@@ -257,7 +294,7 @@ export class DriveClient {
     return reportingDriveFailure('folder-lookup', async () => {
       for await (const n of this.children(parentUid)) {
         if (n.type === NodeType.File && n.activeRevision?.claimedDigests?.sha1 === sha1) {
-          return { uid: n.uid, name: nodeName(n) ?? '' };
+          return { uid: n.uid, name: n.name.value };
         }
       }
       return null;
