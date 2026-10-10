@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { PDFDocument } from '@cantoo/pdf-lib';
 import sharp from 'sharp';
 import { buildDocumentContent } from '../../src/analyze/content.js';
@@ -36,8 +36,23 @@ describe('preparePdf', () => {
   it('sends an encrypted PDF unchanged at any length, since its pages cannot be trimmed', async () => {
     const bytes = await pdfWithPages(MAX_ANALYZED_PAGES + 5, { encrypt: true });
     const out = await preparePdf(bytes);
-    expect(out).toMatchObject({ kind: 'readable', encrypted: true, totalPages: 25, sentPages: 25 });
-    if (out.kind === 'readable') expect(out.bytes).toBe(bytes);
+    expect(out).toEqual({ kind: 'readable', encrypted: true, bytes });
+  });
+
+  it('never walks the page tree of an encrypted PDF', async () => {
+    // Real e-signed PDFs keep the page tree in encrypted object streams, and
+    // pdf-lib throws on them ("Expected instance of PDFDict"); a PDF it
+    // encrypts itself doesn't reproduce that, so simulate the throw.
+    const bytes = await pdfWithPages(2, { encrypt: true });
+    const spy = vi.spyOn(PDFDocument.prototype, 'getPageCount').mockImplementation(() => {
+      throw new Error('Expected instance of PDFDict, but got instance of undefined');
+    });
+    try {
+      const out = await preparePdf(bytes);
+      expect(out.kind).toBe('readable');
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it('reports a corrupt PDF instead of throwing', async () => {

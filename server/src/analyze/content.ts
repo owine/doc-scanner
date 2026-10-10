@@ -41,7 +41,10 @@ export async function buildDocumentContent(bytes: Uint8Array, mimeType: string):
           source: { type: 'base64', media_type: 'application/pdf', data: Buffer.from(pdf.bytes).toString('base64') },
         },
       ],
-      note: pdf.sentPages < pdf.totalPages ? `showing the first ${pdf.sentPages} of ${pdf.totalPages} pages` : null,
+      note:
+        !pdf.encrypted && pdf.sentPages < pdf.totalPages
+          ? `showing the first ${pdf.sentPages} of ${pdf.totalPages} pages`
+          : null,
       mayBeUnopenable: pdf.encrypted,
     };
   }

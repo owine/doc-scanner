@@ -3,7 +3,10 @@ import { PDFDocument } from '@cantoo/pdf-lib';
 export const MAX_ANALYZED_PAGES = 20;
 
 export type PdfForAnalysis =
-  | { kind: 'readable'; bytes: Uint8Array; totalPages: number; sentPages: number; encrypted: boolean }
+  | { kind: 'readable'; bytes: Uint8Array; totalPages: number; sentPages: number; encrypted: false }
+  // Page count unknown: an encrypted PDF's page tree often sits in encrypted
+  // object streams that pdf-lib can't parse.
+  | { kind: 'readable'; bytes: Uint8Array; encrypted: true }
   | { kind: 'unreadable'; reason: 'corrupt' };
 
 /**
@@ -24,9 +27,12 @@ export async function preparePdf(bytes: Uint8Array): Promise<PdfForAnalysis> {
   } catch {
     return { kind: 'unreadable', reason: 'corrupt' };
   }
+  // Checked before anything walks the page tree, which throws on many
+  // encrypted files (found on a real e-signed contract in the model eval).
+  if (doc.isEncrypted) return { kind: 'readable', bytes, encrypted: true };
   const totalPages = doc.getPageCount();
-  if (doc.isEncrypted || totalPages <= MAX_ANALYZED_PAGES) {
-    return { kind: 'readable', bytes, totalPages, sentPages: totalPages, encrypted: doc.isEncrypted };
+  if (totalPages <= MAX_ANALYZED_PAGES) {
+    return { kind: 'readable', bytes, totalPages, sentPages: totalPages, encrypted: false };
   }
   const head = await PDFDocument.create();
   const pages = await head.copyPages(doc, [...Array(MAX_ANALYZED_PAGES).keys()]);
