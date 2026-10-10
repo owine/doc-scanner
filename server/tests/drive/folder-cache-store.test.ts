@@ -87,4 +87,14 @@ describe('FolderCacheStore', () => {
     s.recordFiled('L', { uid: 'N', name: 'a.pdf', modified: new Date() });
     expect(s.load()!.walkedAt.toISOString()).toBe('2026-10-01T00:00:00.000Z');
   });
+
+  it('ranks a file with an invalid date last instead of failing', () => {
+    const t = createTestDb();
+    cleanup = t.cleanup;
+    const s = new FolderCacheStore(t.db, new AtRestCipher(Buffer.alloc(32, 4).toString('base64'), 'folder-cache'));
+    const files = Array.from({ length: 5 }, (_, i) => ({ uid: `F${i}`, name: `s${i}.pdf`, modified: new Date(Date.UTC(2026, 0, i + 1)) }));
+    files.push({ uid: 'BAD', name: 'bad.pdf', modified: new Date('nope') });
+    s.save([{ linkId: 'L', path: '/Bills', files }], new Date());
+    expect(s.load()!.tree[0].files.map((f) => f.uid)).toEqual(['F4', 'F3', 'F2', 'F1', 'F0']);
+  });
 });

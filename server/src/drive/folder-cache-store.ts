@@ -56,12 +56,16 @@ export class FolderCacheStore {
       | { encrypted_tree: Uint8Array; walked_at: string }
       | undefined;
     if (!row) return null;
+    // Fixed reasons only: a JSON.parse message can quote decrypted folder names.
+    let reason: 'open' | 'parse' = 'open';
     let tree: TreeFolder[];
     try {
-      const raw = JSON.parse(this.cipher.open(row.encrypted_tree).toString('utf8')) as TreeFolder[];
+      const plain = this.cipher.open(row.encrypted_tree).toString('utf8');
+      reason = 'parse';
+      const raw = JSON.parse(plain) as TreeFolder[];
       tree = raw.map((f) => ({ ...f, files: f.files.map((file) => ({ ...file, modified: new Date(file.modified) })) }));
-    } catch (err) {
-      logger.warn({ err: (err as Error).message }, 'folder cache unreadable; discarding it');
+    } catch {
+      logger.warn({ reason }, 'folder cache unreadable; discarding it');
       this.db.prepare('DELETE FROM folder_cache WHERE id = 1').run();
       return null;
     }
