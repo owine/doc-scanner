@@ -4,6 +4,9 @@ import {
   NullFeatureFlagProvider,
   NodeType,
   ProtonDriveError,
+  ServerError,
+  ConnectionError,
+  AbortError,
   NodeWithSameNameExistsValidationError,
   type ProtonDriveTelemetry,
   type Logger,
@@ -76,6 +79,22 @@ export class FolderNameTakenError extends Error {
     super('a node with this name already exists in the folder');
     this.name = 'FolderNameTakenError';
   }
+}
+
+/**
+ * The leaf errors behind an SDK wrapper: `cause` may be an error or an array
+ * of them, and wrappers can nest.
+ */
+function leafErrors(error: unknown): unknown[] {
+  const cause = (error as { cause?: unknown } | null)?.cause;
+  if (cause === undefined || cause === null) return [];
+  const out: unknown[] = [];
+  for (const c of Array.isArray(cause) ? cause : [cause]) {
+    const inner = leafErrors(c);
+    if (inner.length > 0) out.push(...inner);
+    else out.push(c);
+  }
+  return out;
 }
 
 /** A node whose name decrypted. */
@@ -238,20 +257,33 @@ export class DriveClient {
     return { nodeUid, driveUrl, name: availableName };
   }
 
-  /** A folder's live children whose names decrypt (trashed, missing and undecryptable ones are skipped). */
-  private async *children(parentUid: string, filter?: { type: NodeType }): AsyncGenerator<NamedNode> {
+  /**
+   * A folder's live children whose names decrypt (trashed, missing and
+   * undecryptable ones are skipped). The SDK yields every loadable node, then
+   * throws a base ProtonDriveError wrapping whatever failed. With
+   * `tolerateBrokenSiblings` that is swallowed when every cause is a
+   * per-node problem; a transport failure (ServerError incl. 401/429,
+   * ConnectionError, AbortError) always propagates.
+   */
+  private async *children(
+    parentUid: string,
+    opts: { filter?: { type: NodeType }; tolerateBrokenSiblings?: boolean } = {},
+  ): AsyncGenerator<NamedNode> {
     const uids: string[] = [];
-    for await (const uid of this.sdk.iterateFolderChildrenNodeUids(parentUid, filter)) uids.push(uid);
+    for await (const uid of this.sdk.iterateFolderChildrenNodeUids(parentUid, opts.filter)) uids.push(uid);
     if (uids.length === 0) return;
     try {
       for await (const n of this.sdk.iterateNodes(uids)) {
         if (isNode(n) && !n.trashTime && n.name.ok) yield n as NamedNode;
       }
     } catch (error) {
-      // The SDK yields every loadable node, then throws this exact base class
-      // for the ones it could not load. A broken sibling must not fail the
-      // lookup; subclasses (ServerError, ConnectionError, ...) still do.
-      if (error?.constructor !== ProtonDriveError) throw error;
+      if (!opts.tolerateBrokenSiblings || error?.constructor !== ProtonDriveError) throw error;
+      const leaves = leafErrors(error);
+      const transport = leaves.find(
+        (e) => e instanceof ServerError || e instanceof ConnectionError || e instanceof AbortError,
+      );
+      if (transport !== undefined) throw transport;
+      if (leaves.length === 0) throw error;
       logger.warn({ parentUid }, 'some folder children could not be loaded');
     }
   }
@@ -260,7 +292,7 @@ export class DriveClient {
   async findChildFolder(parentUid: string, name: string): Promise<string | null> {
     return reportingDriveFailure('folder-lookup', async () => {
       const wanted = name.normalize('NFC');
-      for await (const n of this.children(parentUid, { type: NodeType.Folder })) {
+      for await (const n of this.children(parentUid, { filter: { type: NodeType.Folder }, tolerateBrokenSiblings: true })) {
         if (n.type === NodeType.Folder && n.name.value.normalize('NFC') === wanted) return n.uid;
       }
       return null;
@@ -288,7 +320,8 @@ export class DriveClient {
 
   /**
    * A file in `parentUid` whose claimed SHA-1 matches: how filing tells,
-   * after a crash, whether its upload already happened.
+   * after a crash, whether its upload already happened. Does not tolerate
+   * broken siblings: a wrong null here means a duplicate upload, a retry is free.
    */
   async findFileBySha1(parentUid: string, sha1: string): Promise<{ uid: string; name: string } | null> {
     return reportingDriveFailure('folder-lookup', async () => {

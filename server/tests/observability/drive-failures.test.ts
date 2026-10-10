@@ -17,8 +17,10 @@ const { mockSdk, sdkConfigs, sdkErrors } = vi.hoisted(() => {
     }
   }
   class ServerError extends ProtonDriveError {}
+  class ConnectionError extends ProtonDriveError {}
+  class AbortError extends ProtonDriveError {}
   return {
-  sdkErrors: { ProtonDriveError, NodeWithSameNameExistsValidationError },
+  sdkErrors: { ProtonDriveError, NodeWithSameNameExistsValidationError, ServerError, ConnectionError, AbortError },
   mockSdk: {
     getMyFilesRootFolder: vi.fn(),
     getAvailableName: vi.fn(),
@@ -40,6 +42,9 @@ vi.mock('@protontech/drive-sdk', () => ({
   NodeType: { File: 'file', Folder: 'folder' },
   ProtonDriveError: sdkErrors.ProtonDriveError,
   NodeWithSameNameExistsValidationError: sdkErrors.NodeWithSameNameExistsValidationError,
+  ServerError: sdkErrors.ServerError,
+  ConnectionError: sdkErrors.ConnectionError,
+  AbortError: sdkErrors.AbortError,
 }));
 
 const { DriveClient } = await import('../../src/drive/client.js');

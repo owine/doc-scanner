@@ -8,7 +8,12 @@ import type { DB } from '../../src/db.js';
 // Same SDK-mocking pattern as client-upload.test.ts, extended with the folder
 // iteration and creation calls the filing stage relies on.
 const { mockSdk, sdkErrors } = vi.hoisted(() => {
-  class ProtonDriveError extends Error {}
+  class ProtonDriveError extends Error {
+    constructor(message?: string, options?: { cause?: unknown }) {
+      super(message);
+      if (options && 'cause' in options) this.cause = options.cause;
+    }
+  }
   class ValidationError extends ProtonDriveError {}
   class NodeWithSameNameExistsValidationError extends ValidationError {
     constructor(message: string, readonly code: number, readonly existingNodeUid?: string) {
@@ -16,8 +21,10 @@ const { mockSdk, sdkErrors } = vi.hoisted(() => {
     }
   }
   class ServerError extends ProtonDriveError {}
+  class ConnectionError extends ProtonDriveError {}
+  class AbortError extends ProtonDriveError {}
   return {
-  sdkErrors: { ProtonDriveError, NodeWithSameNameExistsValidationError, ServerError },
+  sdkErrors: { ProtonDriveError, NodeWithSameNameExistsValidationError, ServerError, ConnectionError, AbortError },
   mockSdk: {
     getMyFilesRootFolder: vi.fn(),
     getAvailableName: vi.fn(),
@@ -30,7 +37,7 @@ const { mockSdk, sdkErrors } = vi.hoisted(() => {
   };
 });
 
-// Stub the three value exports the DriveClient graph pulls from the SDK root.
+// Stub the value exports the DriveClient graph pulls from the SDK root.
 // We deliberately do NOT importActual: that would load the real SDK, whose
 // crypto peer ships raw .ts that vitest's loader can't type-strip. uploadFile
 // only touches ProtonDriveClient (mocked below); the crypto module and feature
@@ -46,6 +53,9 @@ vi.mock('@protontech/drive-sdk', () => ({
   NodeType: { File: 'file', Folder: 'folder' },
   ProtonDriveError: sdkErrors.ProtonDriveError,
   NodeWithSameNameExistsValidationError: sdkErrors.NodeWithSameNameExistsValidationError,
+  ServerError: sdkErrors.ServerError,
+  ConnectionError: sdkErrors.ConnectionError,
+  AbortError: sdkErrors.AbortError,
 }));
 
 // Imported after the mock is registered (vi.mock is hoisted above imports).
@@ -224,26 +234,51 @@ describe('DriveClient filing helpers', () => {
       await expect(client.createFolder('P', 'Water')).rejects.toThrow('boom');
     }));
 
-  it('tolerates the SDK reporting unloadable siblings, keeping what it yielded', () =>
+  /** Models the SDK's real wrapper, thrown after the loadable nodes were yielded. */
+  function wrapperAfterNode(cause: unknown[]) {
+    const wrapper = new sdkErrors.ProtonDriveError('Some items could not be loaded', { cause });
+    return async function* () {
+      yield node('a', 'folder', 'Water');
+      throw wrapper;
+    };
+  }
+
+  it('tolerates a wrapper whose causes are only per-node problems, keeping what it yielded', () =>
     withClient(async (client) => {
       mockSdk.iterateFolderChildrenNodeUids.mockImplementation(() => gen(['a', 'b']));
-      async function* partial() {
-        yield node('a', 'folder', 'Water');
-        throw new sdkErrors.ProtonDriveError('Some items could not be loaded');
-      }
-      mockSdk.iterateNodes.mockImplementation(() => partial());
+      mockSdk.iterateNodes.mockImplementation(() => wrapperAfterNode([new Error('cannot decrypt')])());
       expect(await client.findChildFolder('P', 'Water')).toBe('a');
       expect(await client.findChildFolder('P', 'Gas')).toBeNull();
     }));
 
-  it('lets subclasses of ProtonDriveError (e.g. ServerError) propagate', () =>
+  it('rethrows the ServerError leaf of a wrapper instead of swallowing it', () =>
+    withClient(async (client) => {
+      const leaf = new sdkErrors.ServerError('401');
+      mockSdk.iterateFolderChildrenNodeUids.mockReturnValue(gen(['a']));
+      mockSdk.iterateNodes.mockReturnValue(wrapperAfterNode([new Error('x'), leaf])());
+      await expect(client.findChildFolder('P', 'Gas')).rejects.toBe(leaf);
+    }));
+
+  it('finds a transport leaf inside nested wrappers', () =>
+    withClient(async (client) => {
+      const leaf = new sdkErrors.ConnectionError('z');
+      const nested = new sdkErrors.ProtonDriveError('y', { cause: [leaf] });
+      mockSdk.iterateFolderChildrenNodeUids.mockReturnValue(gen(['a']));
+      mockSdk.iterateNodes.mockReturnValue(wrapperAfterNode([nested])());
+      await expect(client.findChildFolder('P', 'Gas')).rejects.toBe(leaf);
+    }));
+
+  it('rethrows a wrapper with no cause at all', () =>
     withClient(async (client) => {
       mockSdk.iterateFolderChildrenNodeUids.mockReturnValue(gen(['a']));
-      async function* failing() {
-        throw new sdkErrors.ServerError('401');
-        yield node('a', 'folder', 'Water');
-      }
-      mockSdk.iterateNodes.mockReturnValue(failing());
-      await expect(client.findChildFolder('P', 'Water')).rejects.toBeInstanceOf(sdkErrors.ServerError);
+      mockSdk.iterateNodes.mockReturnValue(wrapperAfterNode([])());
+      await expect(client.findChildFolder('P', 'Gas')).rejects.toBeInstanceOf(sdkErrors.ProtonDriveError);
+    }));
+
+  it('does not tolerate any wrapper when finding a file by SHA-1', () =>
+    withClient(async (client) => {
+      mockSdk.iterateFolderChildrenNodeUids.mockReturnValue(gen(['a']));
+      mockSdk.iterateNodes.mockReturnValue(wrapperAfterNode([new Error('cannot decrypt')])());
+      await expect(client.findFileBySha1('P', 'aaa')).rejects.toBeInstanceOf(sdkErrors.ProtonDriveError);
     }));
 });
