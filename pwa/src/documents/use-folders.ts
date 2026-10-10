@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'preact/hooks';
+import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
 import { ApiError } from '../api.js';
 import type { DocumentsApi } from './api.js';
 import type { FolderEntry } from './types.js';
@@ -11,17 +11,31 @@ export interface FoldersState {
   refresh: () => Promise<void>;
 }
 
-/** The folder list (never-file-here folders already left out by the server). */
+/**
+ * The folder list (never-file-here folders already left out by the server).
+ * `api` must be stable, such as a module constant: an inline object is a new
+ * dependency on every render and would refetch the list each time.
+ */
 export function useFolders(api: Pick<DocumentsApi, 'folders' | 'refreshFolders'>): FoldersState {
   const [folders, setFolders] = useState<FolderEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   const reload = useCallback(async () => {
     try {
-      setFolders((await api.folders()).folders);
+      const { folders: loaded } = await api.folders();
+      if (!mounted.current) return;
+      setFolders(loaded);
       setError(null);
     } catch (err) {
+      if (!mounted.current) return;
       setError(
         err instanceof ApiError && err.code === 'folders_not_loaded'
           ? 'The folder list has not loaded from Drive yet.'
@@ -36,13 +50,14 @@ export function useFolders(api: Pick<DocumentsApi, 'folders' | 'refreshFolders'>
       await api.refreshFolders();
       await reload();
     } catch (err) {
+      if (!mounted.current) return;
       setError(
         err instanceof ApiError && err.code === 'not_logged_in'
           ? 'Sign in again to read your Drive folders.'
           : 'Could not refresh the folder list from Drive.',
       );
     } finally {
-      setBusy(false);
+      if (mounted.current) setBusy(false);
     }
   }, [api, reload]);
 
