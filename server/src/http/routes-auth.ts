@@ -6,7 +6,7 @@ import { issueSession, revokeAllSessions, sessionMiddleware, type AuthContext } 
 import { logger } from '../logger.js';
 import { captureAuthFailure } from '../observability/report.js';
 import { DriveClient } from '../drive/client.js';
-import { registerLiveSession } from '../auth/live-session.js';
+import { getAnyLiveSession, registerLiveSession } from '../auth/live-session.js';
 import type { DB } from '../db.js';
 
 const LoginSchema = z.object({
@@ -82,7 +82,8 @@ export function authRoutes(deps: {
     // Drop the SDK's persisted caches before the live session goes away. They
     // are not account-scoped, so leaving them behind would serve one account's
     // entities to whoever logs in next.
-    const driveClient = c.get('auth')?.liveSession?.driveClient;
+    // Fall back to any live session so a stale or missing cookie still clears them.
+    const driveClient = c.get('auth')?.liveSession?.driveClient ?? getAnyLiveSession()?.driveClient;
     if (driveClient) {
       try {
         await driveClient.clearCaches();

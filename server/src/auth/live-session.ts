@@ -52,12 +52,6 @@ export function getLiveSession(sid: string): LiveSession | undefined {
   return sessions.get(sid);
 }
 
-export function disposeLiveSession(sid: string): void {
-  const s = sessions.get(sid);
-  s?.mailboxSecret.dispose();
-  sessions.delete(sid);
-}
-
 /** Logout: dispose every live session. */
 export function disposeAllLiveSessions(): void {
   for (const s of sessions.values()) s.mailboxSecret.dispose();
