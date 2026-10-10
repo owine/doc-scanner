@@ -59,6 +59,13 @@ describe('toFolderContexts', () => {
     expect(ctx.find((f) => f.path === '/Bills/Northwind Energy')?.recentNames).toEqual(['Northwind Energy Sep 2026', 'Northwind Energy Aug 2026']);
   });
 
+  it('drops never-file-here folders and their subtrees, matching whole segments', async () => {
+    const tree = await walkFolderTree(fakeSdk(nodes));
+    expect(toFolderContexts(tree, { excludePaths: ['/Bills'] }).map((f) => f.path)).toEqual(['/']);
+    // "/Bil" is not a parent of "/Bills".
+    expect(toFolderContexts(tree, { excludePaths: ['/Bil'] })).toHaveLength(3);
+  });
+
   it('hides excluded files so a document never sees its own name', async () => {
     const ctx = toFolderContexts(await walkFolderTree(fakeSdk(nodes)), { excludeFileUids: new Set(['c2']) });
     expect(ctx.find((f) => f.path === '/Bills/Northwind Energy')?.recentNames).toEqual(['Northwind Energy Aug 2026', 'Northwind Energy Jul 2026']);

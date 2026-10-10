@@ -113,18 +113,26 @@ function stripExtension(name: string): string {
   return dot > 0 ? name.slice(0, dot) : name;
 }
 
+/** True when `path` is one of `prefixes` or inside one (whole path segments only). */
+export function isUnderAny(path: string, prefixes: readonly string[]): boolean {
+  return prefixes.some((p) => path === p || path.startsWith(p.endsWith('/') ? p : `${p}/`));
+}
+
 /**
  * The analyzer's view of the tree: each folder with the names of its most
- * recently filed documents as the naming signal. `excludeFileUids` hides
+ * recently filed documents as the naming signal. `excludePaths` are the
+ * user's "never file here" folders (an archive, closed projects); they and
+ * everything under them are left out entirely. `excludeFileUids` hides
  * specific files, which the eval uses so a document is never shown its own
  * name.
  */
 export function toFolderContexts(
   tree: TreeFolder[],
-  opts: { perFolder?: number; excludeFileUids?: ReadonlySet<string> } = {},
+  opts: { perFolder?: number; excludeFileUids?: ReadonlySet<string>; excludePaths?: readonly string[] } = {},
 ): FolderContext[] {
   const perFolder = opts.perFolder ?? RECENT_NAMES_PER_FOLDER;
-  return tree.map((f) => ({
+  const excludePaths = opts.excludePaths ?? [];
+  return tree.filter((f) => !isUnderAny(f.path, excludePaths)).map((f) => ({
     linkId: f.linkId,
     path: f.path,
     recentNames: f.files
