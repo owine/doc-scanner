@@ -20,6 +20,32 @@ const MAX_STEPS_PER_DRAIN = 1000;
 /** How far an unexpected worker error pushes the row it came from. */
 const POSTPONE_MS = 10 * 60_000;
 
+/** The wait before attempt `attempts + 1`: bounded by the table, ±20% jitter. */
+function backoffMs(attempts: number): number {
+  const base = BACKOFF_MS[Math.min(attempts - 1, BACKOFF_MS.length - 1)]!;
+  return Math.round(base * (0.8 + 0.4 * Math.random()));
+}
+
+type Folder = NonNullable<DocumentRow['decision']>['folder'] | NonNullable<DocumentRow['analysis']>['folder'] | undefined;
+
+function folderValues(f: Folder): string[] {
+  if (!f) return [];
+  return f.kind === 'new' ? [f.parentPath, f.name] : [f.path];
+}
+
+/** Everything in a failure report that could name the user's documents or folders. */
+function sensitiveValues(doc: DocumentRow): string[] {
+  const values = [
+    doc.originalName,
+    doc.decision?.name,
+    doc.analysis?.name,
+    ...folderValues(doc.decision?.folder),
+    ...folderValues(doc.analysis?.folder),
+  ];
+  // '/' alone names nothing, and redacting it would mangle every path in the event.
+  return [...new Set(values.filter((v): v is string => typeof v === 'string' && v !== '' && v !== '/'))];
+}
+
 function stageOf(state: DocumentState): DocumentStage {
   if (state === 'filing') return 'file';
   if (state === 'preparing') return 'prepare';
@@ -165,14 +191,8 @@ export class DocumentWorker {
     if (attempts >= MAX_ATTEMPTS) {
       // discardRequested cleared: a failed document is resting, discardable on request.
       if (this.d.repo.transition(doc.id, state, 'failed', { attempts, error, discardRequested: false }, opts)) {
-        const f = doc.decision?.folder;
         try {
-          this.d.report(err, stage, [
-            doc.originalName ?? '',
-            doc.decision?.name ?? '',
-            doc.analysis?.name ?? '',
-            f?.kind === 'new' ? f.name : '',
-          ]);
+          this.d.report(err, stage, sensitiveValues(doc));
         } catch (reportErr) {
           // The row is already failed; reporting is best effort.
           logger.error({ documentId: doc.id, errName: errorName(reportErr) }, 'could not report document failure');
@@ -182,7 +202,7 @@ export class DocumentWorker {
       }
       return;
     }
-    const nextAttemptAt = new Date(this.d.now().getTime() + BACKOFF_MS[attempts - 1]!);
+    const nextAttemptAt = new Date(this.d.now().getTime() + backoffMs(attempts));
     if (!this.d.repo.transition(doc.id, state, state, { attempts, error, nextAttemptAt }, opts)) {
       this.d.repo.applyRequestedDiscard(doc.id);
     }

@@ -224,7 +224,8 @@ export class DocumentRepo {
   resumeAwaitingLogin(): number {
     const ids = (this.db.prepare(`SELECT id FROM documents WHERE state = 'awaiting_login'`).all() as { id: string }[]).map((r) => r.id);
     let moved = 0;
-    for (const id of ids) if (this.transition(id, 'awaiting_login', 'filing', { nextAttemptAt: this.now() })) moved++;
+    // attempts reset: waiting for a login is not a failed attempt.
+    for (const id of ids) if (this.transition(id, 'awaiting_login', 'filing', { nextAttemptAt: this.now(), attempts: 0 })) moved++;
     return moved;
   }
 

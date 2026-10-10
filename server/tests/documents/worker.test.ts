@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { makeHarness } from './harness.js';
+import { makeHarness, ANALYSIS } from './harness.js';
 import { DocumentWorker, MAX_ATTEMPTS } from '../../src/documents/worker.js';
 import type { DocumentRow } from '../../src/documents/types.js';
 
@@ -216,5 +216,81 @@ describe('DocumentWorker', () => {
     expect(set).toHaveBeenCalledTimes(3);
     w.stop();
     expect(clear).toHaveBeenCalledTimes(3);
+  });
+
+  it.each([
+    [0, 24_000],
+    [0.999999, 36_000],
+  ])('waits a bounded, jittered delay before a retry (random %d)', async (random, expected) => {
+    h = makeHarness();
+    vi.spyOn(Math, 'random').mockReturnValue(random);
+    h.analyze.mockRejectedValueOnce(new Error('overloaded'));
+    const doc = h.add();
+    await new DocumentWorker(h.ctx).wake();
+    const delay = Date.parse(h.repo.get(doc.id)!.nextAttemptAt) - h.ctx.now().getTime();
+    expect(delay).toBeCloseTo(expected, -1);
+  });
+
+  it('redacts the document name and the folder path from a failure report', async () => {
+    h = makeHarness();
+    h.drive.uploadFile.mockRejectedValue(new Error('network down'));
+    const doc = h.add();
+    const w = new DocumentWorker(h.ctx);
+    for (let i = 0; i < MAX_ATTEMPTS; i++) {
+      await w.wake();
+      h.advance(10 * 60_000);
+    }
+    expect(h.repo.get(doc.id)?.state).toBe('failed');
+    expect(h.report).toHaveBeenCalledTimes(1);
+    const sensitive = h.report.mock.calls[0][2] as string[];
+    expect(sensitive).toEqual(expect.arrayContaining(['statement.txt', 'Northwind Energy Sep 2026', '/Bills']));
+  });
+
+  it.each([
+    ['BILLS', '/Bills', ['Northwind Energy', '/Bills']],
+    ['ROOT', '/', ['Northwind Energy']],
+  ])("redacts a new folder's name and parent path, but never '/' (parent %s)", async (parentLinkId, parentPath, expected) => {
+    h = makeHarness();
+    h.drive.uploadFile.mockRejectedValue(new Error('network down'));
+    const doc = h.add();
+    // An approved decision to file into a new folder.
+    h.repo.transition(doc.id, 'received', 'filing', {
+      decision: { name: 'Northwind Energy Sep 2026', folder: { kind: 'new', parentLinkId, parentPath, name: 'Northwind Energy' } },
+    });
+    const w = new DocumentWorker(h.ctx);
+    for (let i = 0; i < MAX_ATTEMPTS; i++) {
+      await w.wake();
+      h.advance(10 * 60_000);
+    }
+    expect(h.report).toHaveBeenCalledTimes(1);
+    const sensitive = h.report.mock.calls[0][2] as string[];
+    expect(sensitive).toEqual(expect.arrayContaining(expected));
+    expect(sensitive).not.toContain('/');
+  });
+
+  it('fails a filing that may have uploaded, despite a pending discard, and reports it once', async () => {
+    h = makeHarness();
+    h.drive.uploadFile.mockRejectedValue(new Error('network down'));
+    const doc = h.add();
+    const w = new DocumentWorker(h.ctx);
+    await w.wake();
+    expect(h.repo.get(doc.id)).toMatchObject({ state: 'filing', filingTarget: expect.anything() });
+    expect(h.repo.requestDiscard(doc.id)).toBe('requested');
+    for (let i = 1; i < MAX_ATTEMPTS; i++) {
+      h.advance(10 * 60_000);
+      await w.wake();
+    }
+    expect(h.repo.get(doc.id)).toMatchObject({ state: 'failed', attempts: MAX_ATTEMPTS, discardRequested: false });
+    expect(h.report).toHaveBeenCalledTimes(1);
+    expect(h.report.mock.calls[0][1]).toBe('file');
+  });
+
+  it('walks again after a folder refresh that failed', async () => {
+    h = makeHarness();
+    h.drive.walkFolderTree.mockRejectedValueOnce(new Error('network down'));
+    const w = new DocumentWorker(h.ctx);
+    await expect(w.refreshFolderCache()).rejects.toThrow('network down');
+    await w.refreshFolderCache();
+    expect(h.drive.walkFolderTree).toHaveBeenCalledTimes(2);
   });
 });

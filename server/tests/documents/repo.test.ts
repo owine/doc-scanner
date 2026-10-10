@@ -148,6 +148,14 @@ describe('DocumentRepo', () => {
     expect(r.get(a.id)?.state).toBe('filing');
   });
 
+  it('resets attempts when resuming after a login: waiting for one is not a failure', () => {
+    const r = repo();
+    const a = r.insert(doc());
+    r.transition(a.id, 'received', 'awaiting_login', { attempts: 2 });
+    r.resumeAwaitingLogin();
+    expect(r.get(a.id)).toMatchObject({ state: 'filing', attempts: 0 });
+  });
+
   it('lists discarded documents older than a cutoff', () => {
     const r = repo();
     const a = r.insert(doc());
