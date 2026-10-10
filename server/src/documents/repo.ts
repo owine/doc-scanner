@@ -161,9 +161,19 @@ export class DocumentRepo {
         : 'not_allowed';
     }
     if (WORKING_STATES.includes(doc.state)) {
+      // Due now, so a document waiting out a retry backoff is discarded on the
+      // worker's next step rather than after the backoff. Not a filing whose
+      // upload may have happened: the discard can't apply to it, and making it
+      // due would skip its upload backoff.
+      const t = iso(this.now());
       this.db
-        .prepare('UPDATE documents SET discard_requested = 1, seq = ?, updated_at = ? WHERE id = ?')
-        .run(this.nextSeq(), iso(this.now()), id);
+        .prepare(
+          `UPDATE documents SET discard_requested = 1, seq = ?, updated_at = ?,
+             next_attempt_at = CASE WHEN state = 'filing' AND filing_target IS NOT NULL
+                                    THEN next_attempt_at ELSE MIN(next_attempt_at, ?) END
+           WHERE id = ?`,
+        )
+        .run(this.nextSeq(), t, t, id);
       return 'requested';
     }
     return 'not_allowed';

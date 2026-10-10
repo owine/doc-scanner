@@ -106,7 +106,12 @@ export class DocumentWorker {
     // discard must not win here (the repo refuses it anyway), so retry or fail
     // the filing regardless of the flag. The user can discard from `failed`.
     const opts = { ignorePendingDiscard: state === 'filing' && !!current?.filingTarget };
-    logger.warn({ documentId: doc.id, stage, attempts, err: error }, 'document stage failed');
+    // The error's type only: a message could quote a document or folder name.
+    // The message itself is kept in the row, for the user's own inbox view.
+    logger.warn(
+      { documentId: doc.id, stage, attempts, errName: err instanceof Error ? err.name : typeof err },
+      'document stage failed',
+    );
     if (attempts >= MAX_ATTEMPTS) {
       // discardRequested cleared: a failed document is resting, discardable on request.
       if (this.d.repo.transition(doc.id, state, 'failed', { attempts, error, discardRequested: false }, opts)) {

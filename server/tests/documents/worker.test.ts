@@ -49,6 +49,18 @@ describe('DocumentWorker', () => {
     expect(h.repo.get(doc.id)?.state).toBe('discarded');
   });
 
+  it('applies a discard during a backoff on the next wake, without waiting the backoff out', async () => {
+    h = makeHarness();
+    h.analyze.mockRejectedValueOnce(new Error('overloaded'));
+    const doc = h.add();
+    const w = new DocumentWorker(h.ctx);
+    await w.wake();
+    expect(h.repo.get(doc.id)).toMatchObject({ state: 'analyzing', attempts: 1 });
+    expect(h.repo.requestDiscard(doc.id)).toBe('requested');
+    await w.wake();
+    expect(h.repo.get(doc.id)?.state).toBe('discarded');
+  });
+
   it('keeps retrying an upload that may have happened, even if a discard arrives', async () => {
     h = makeHarness();
     h.drive.uploadFile.mockRejectedValueOnce(new Error('network down'));

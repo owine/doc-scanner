@@ -94,6 +94,27 @@ describe('DocumentRepo', () => {
     expect(r.nextWorkable()).toMatchObject({ id: a.id, discardRequested: true });
   });
 
+  it('makes a working document due at once when its discard is requested', () => {
+    const r = repo();
+    const a = r.insert(doc());
+    r.transition(a.id, 'received', 'analyzing', { nextAttemptAt: new Date(clock.getTime() + 60_000) });
+    expect(r.nextWorkable()).toBeNull();
+    expect(r.requestDiscard(a.id)).toBe('requested');
+    expect(r.nextWorkable()).toMatchObject({ id: a.id, discardRequested: true });
+  });
+
+  it('keeps the backoff of a filing whose upload may have happened when a discard is requested', () => {
+    const r = repo();
+    const a = r.insert(doc());
+    r.transition(a.id, 'received', 'filing', {
+      nextAttemptAt: new Date(clock.getTime() + 60_000),
+      filingTarget: { folderLinkId: 'BILLS', name: 'Northwind Energy Sep 2026.pdf' },
+    });
+    expect(r.requestDiscard(a.id)).toBe('requested');
+    // The discard can't be applied to this row, so there is nothing to do sooner.
+    expect(r.nextWorkable()).toBeNull();
+  });
+
   it('never reuses a seq after the newest row is deleted', () => {
     const r = repo();
     const a = r.insert(doc());
