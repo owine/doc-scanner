@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { loadConfig } from '../src/config.js';
+import { loadConfig, autoFileThresholdSchema } from '../src/config.js';
 
 describe('loadConfig', () => {
   it('rejects missing SESSION_ENCRYPTION_KEY', () => {
@@ -53,6 +53,13 @@ describe('loadConfig', () => {
 
   it('rejects a blank ANALYZER_MODEL', () => {
     expect(() => loadConfig({ ...base, ANALYZER_MODEL: '  ' })).toThrow(/ANALYZER_MODEL/);
+  });
+
+  it('keeps the shared threshold schema strict (no coercion)', () => {
+    for (const bad of [null, '', false, '0.8']) {
+      expect(autoFileThresholdSchema.safeParse(bad).success).toBe(false);
+    }
+    expect(autoFileThresholdSchema.safeParse(0.8).success).toBe(true);
   });
 
   it('rejects a threshold with more than two decimals', () => {

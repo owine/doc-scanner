@@ -2,8 +2,9 @@ import { z } from 'zod';
 
 // Shared with saved-settings validation. At most two decimals: the analyzer prompt
 // prints the threshold with toFixed(2), so a finer value would show the model a
-// different number than the gate uses. z.coerce accepts env strings and JSON numbers.
-export const autoFileThresholdSchema = z.coerce
+// different number than the gate uses. Validates numbers only (no coercion, so a JSON
+// null/""/false can never become 0); the env wrapper below does the string coercion.
+export const autoFileThresholdSchema = z
   .number()
   .min(0)
   .max(1)
@@ -43,7 +44,7 @@ const ConfigSchema = z.object({
   PWA_DIST_PATH: z.string().optional(),
   ANALYZER_MODEL: z.string().trim().min(1).default('claude-haiku-5-5'),
   ANALYZER_EFFORT: z.enum(['low', 'medium', 'high']).default('medium'),
-  AUTO_FILE_THRESHOLD: z.preprocess(blankToUndefined, autoFileThresholdSchema.default(0.8)),
+  AUTO_FILE_THRESHOLD: z.preprocess(blankToUndefined, z.coerce.number().pipe(autoFileThresholdSchema).default(0.8)),
   // Off until the analyzer's auto-file precision has been measured on real use; saved settings can override.
   AUTO_FILE_ENABLED: z
     .string()
