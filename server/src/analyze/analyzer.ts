@@ -1,6 +1,6 @@
-import type Anthropic from '@anthropic-ai/sdk';
+import Anthropic from '@anthropic-ai/sdk';
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
-import { buildDocumentContent } from './content.js';
+import { buildDocumentContent, UNOPENABLE, type DocumentContent } from './content.js';
 import { buildFolderIndex, formatArrival, formatExamples, SYSTEM_PROMPT } from './prompt.js';
 import { ModelAnswerSchema, resolveAnalysis } from './resolve.js';
 import type { AnalyzeInput, AnalyzeOutcome, FolderContext, PastExample } from './types.js';
@@ -35,22 +35,36 @@ export function createAnalyzer(cfg: AnalyzerConfig): Analyzer {
       const doc = await buildDocumentContent(input.bytes, input.mimeType);
       const examplesText = formatExamples(examples);
 
-      const content: Anthropic.ContentBlockParam[] = [
-        // The folder list is the large stable part of the prompt; the
-        // breakpoint lets a burst of documents reuse it.
-        { type: 'text', text: index.text, cache_control: { type: 'ephemeral' } },
-        ...(examplesText ? [{ type: 'text' as const, text: examplesText }] : []),
-        ...doc.blocks,
-        { type: 'text', text: formatArrival(input, doc.note) },
-      ];
+      const request = (d: DocumentContent) =>
+        cfg.client.messages.create({
+          model: cfg.model,
+          max_tokens: cfg.maxTokens ?? DEFAULT_MAX_TOKENS,
+          system: SYSTEM_PROMPT,
+          output_config: { effort: cfg.effort, format: ANSWER_FORMAT },
+          messages: [
+            {
+              role: 'user',
+              content: [
+                // The folder list is the large stable part of the prompt; the
+                // breakpoint lets a burst of documents reuse it.
+                { type: 'text', text: index.text, cache_control: { type: 'ephemeral' } },
+                ...(examplesText ? [{ type: 'text' as const, text: examplesText }] : []),
+                ...d.blocks,
+                { type: 'text', text: formatArrival(input, d.note) },
+              ],
+            },
+          ],
+        });
 
-      const response = await cfg.client.messages.create({
-        model: cfg.model,
-        max_tokens: cfg.maxTokens ?? DEFAULT_MAX_TOKENS,
-        system: SYSTEM_PROMPT,
-        output_config: { effort: cfg.effort, format: ANSWER_FORMAT },
-        messages: [{ role: 'user', content }],
-      });
+      let response: Anthropic.Message;
+      try {
+        response = await request(doc);
+      } catch (err) {
+        // A PDF that needs a password to open is rejected outright; without
+        // this it would fail on every retry. File it from metadata instead.
+        if (!(doc.mayBeUnopenable && err instanceof Anthropic.BadRequestError)) throw err;
+        response = await request(UNOPENABLE);
+      }
 
       const base = { model: response.model, usage: response.usage, stopReason: response.stop_reason };
       if (response.stop_reason === 'refusal') {

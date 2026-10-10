@@ -9,7 +9,18 @@ export interface DocumentContent {
   blocks: Anthropic.ContentBlockParam[];
   /** Tells the model what it is (or isn't) seeing, when that isn't obvious. */
   note: string | null;
+  /**
+   * An encrypted PDF went in as-is; if the API can't open it, the analyzer
+   * retries with metadata only.
+   */
+  mayBeUnopenable?: boolean;
 }
+
+/** What to send instead when the API can't open the document. */
+export const UNOPENABLE: DocumentContent = {
+  blocks: [],
+  note: 'the PDF is password-protected and its content could not be read',
+};
 
 /**
  * Turns the raw file into the content blocks Claude reads. PDFs go in as
@@ -21,7 +32,7 @@ export async function buildDocumentContent(bytes: Uint8Array, mimeType: string):
   if (mimeType === 'application/pdf') {
     const pdf = await preparePdf(bytes);
     if (pdf.kind === 'unreadable') {
-      return { blocks: [], note: `the PDF is ${pdf.reason} and its content could not be read` };
+      return { blocks: [], note: 'the PDF is corrupt and its content could not be read' };
     }
     return {
       blocks: [
@@ -31,6 +42,7 @@ export async function buildDocumentContent(bytes: Uint8Array, mimeType: string):
         },
       ],
       note: pdf.sentPages < pdf.totalPages ? `showing the first ${pdf.sentPages} of ${pdf.totalPages} pages` : null,
+      mayBeUnopenable: pdf.encrypted,
     };
   }
 

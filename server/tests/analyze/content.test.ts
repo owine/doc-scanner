@@ -5,9 +5,11 @@ import { buildDocumentContent } from '../../src/analyze/content.js';
 import { preparePdf, MAX_ANALYZED_PAGES } from '../../src/analyze/pdf.js';
 import { normaliseImage } from '../../src/analyze/image.js';
 
-async function pdfWithPages(n: number): Promise<Uint8Array> {
+async function pdfWithPages(n: number, opts: { encrypt?: boolean } = {}): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
   for (let i = 0; i < n; i++) doc.addPage([200, 200]);
+  // Owner password only, the way e-signature services lock a contract.
+  if (opts.encrypt) doc.encrypt({ ownerPassword: 'owner', userPassword: '' });
   return doc.save();
 }
 
@@ -29,6 +31,13 @@ describe('preparePdf', () => {
     if (out.kind === 'readable') {
       expect((await PDFDocument.load(out.bytes)).getPageCount()).toBe(MAX_ANALYZED_PAGES);
     }
+  });
+
+  it('sends an encrypted PDF unchanged at any length, since its pages cannot be trimmed', async () => {
+    const bytes = await pdfWithPages(MAX_ANALYZED_PAGES + 5, { encrypt: true });
+    const out = await preparePdf(bytes);
+    expect(out).toMatchObject({ kind: 'readable', encrypted: true, totalPages: 25, sentPages: 25 });
+    if (out.kind === 'readable') expect(out.bytes).toBe(bytes);
   });
 
   it('reports a corrupt PDF instead of throwing', async () => {

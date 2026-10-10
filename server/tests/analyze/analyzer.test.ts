@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
-import type Anthropic from '@anthropic-ai/sdk';
+import Anthropic from '@anthropic-ai/sdk';
+import { PDFDocument } from '@cantoo/pdf-lib';
 import { createAnalyzer } from '../../src/analyze/analyzer.js';
 import type { AnalyzeInput, FolderContext } from '../../src/analyze/types.js';
 
@@ -100,6 +101,32 @@ describe('createAnalyzer', () => {
     expect(
       (await createAnalyzer({ client: offSchema.client, model: 'm', effort: 'low' }).analyze(input, folders)).status,
     ).toBe('invalid');
+  });
+
+  it('refiles an encrypted PDF the API cannot open from metadata alone', async () => {
+    const doc = await PDFDocument.create();
+    doc.addPage([200, 200]);
+    doc.encrypt({ ownerPassword: 'owner', userPassword: 'secret' });
+    const pdf: AnalyzeInput = { ...input, bytes: await doc.save(), mimeType: 'application/pdf' };
+    const ok = fakeClient(textReply(goodAnswer));
+    const create = vi
+      .fn()
+      .mockRejectedValueOnce(new Anthropic.BadRequestError(400, undefined, 'could not process PDF', new Headers()))
+      .mockImplementation(ok.create);
+    const client = { messages: { create } } as unknown as Pick<Anthropic, 'messages'>;
+    const out = await createAnalyzer({ client, model: 'm', effort: 'low' }).analyze(pdf, folders);
+    expect(out.status).toBe('ok');
+    expect(create).toHaveBeenCalledTimes(2);
+    const retry = create.mock.calls[1][0].messages[0].content;
+    expect(retry.some((b: { type: string }) => b.type === 'document')).toBe(false);
+    expect(retry.at(-1).text).toContain('password-protected');
+  });
+
+  it('does not swallow a bad request for an ordinary document', async () => {
+    const create = vi.fn().mockRejectedValue(new Anthropic.BadRequestError(400, undefined, 'bad', new Headers()));
+    const client = { messages: { create } } as unknown as Pick<Anthropic, 'messages'>;
+    await expect(createAnalyzer({ client, model: 'm', effort: 'low' }).analyze(input, folders)).rejects.toThrow('bad');
+    expect(create).toHaveBeenCalledTimes(1);
   });
 
   it('lets API errors propagate for the caller to retry', async () => {
