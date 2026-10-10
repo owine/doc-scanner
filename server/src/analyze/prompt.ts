@@ -10,7 +10,7 @@ Folder: pick the single best existing folder by its ID. Propose a new folder (un
 
 Confidence: your probability that the user accepts both the filename and the folder without editing either. Documents above 0.85 are filed automatically with no review, so be calibrated: a clear folder plus a clear naming pattern earns a high value, and a guess between plausible folders does not.
 
-isDocument: true for documents of any kind (statements, letters, forms, receipts, scans of paper); false for an ordinary photo or screenshot that isn't one.
+isDocument: true for documents of any kind (statements, letters, forms, receipts, scans of paper); false for an ordinary photo or screenshot that isn't one. Either way the file still gets a filename and a folder: photos are filed too, just kept as images instead of becoming PDFs.
 
 textSnippet: up to about 400 characters of the document's most identifying text (issuer, title, dates, account or reference numbers), for finding similar documents later.
 
