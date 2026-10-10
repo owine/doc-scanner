@@ -2856,6 +2856,8 @@ git commit -m "feat(documents): worker with retries, backoff, login hook and pur
 
 ## Task 15: Pipeline factory and HTTP API
 
+> **Known limitation (from Task 10's review):** a filing step that already holds a `LiveSession` keeps using its `driveClient` across awaits, so a logout in the middle of an upload can't stop that one upload, and the SDK may re-populate caches logout just cleared. Logout disposes every live session (Task 10 follow-up), so no *new* stage starts after it. Revisit if multi-account use ever matters.
+
 **Files:**
 - Create: `server/src/documents/pipeline.ts`, `server/src/documents/view.ts`, `server/src/http/routes-documents.ts`
 - Modify: `server/src/http/server.ts`
