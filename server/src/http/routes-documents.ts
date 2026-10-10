@@ -22,15 +22,26 @@ const COOKIE_SOURCES = ['picker', 'scanner', 'share'] as const;
 const MAX_NAME_CHARS = 255;
 const MAX_CONTEXT_CHARS = 2000;
 
+/** Bidi embeddings, overrides and isolates: invisible, and able to make a name read as another. */
+const BIDI_CONTROLS = /[\u202A-\u202E\u2066-\u2069]/g;
+/** A short trailing extension, as extension.ts recognises one. */
+const SHORT_EXTENSION = /(?<=[^.])\.[\p{L}\p{N}]{1,10}$/u;
+
 /**
  * Arrival metadata as stored: it is quoted into the analyzer prompt's
- * <arrival> block, so each run of control characters (newlines included)
- * becomes one space, and the length is capped. Null when nothing is left.
+ * <arrival> block, so bidi controls are removed, each run of control
+ * characters (newlines included) becomes one space, and the length is capped
+ * in code points. Other format characters stay, so ZWJ emoji survive. With
+ * `keepExtension`, a cap cuts the stem and keeps a short extension. Null when
+ * nothing is left.
  */
-function arrivalText(value: unknown, maxChars: number): string | null {
+function arrivalText(value: unknown, maxChars: number, keepExtension = false): string | null {
   if (typeof value !== 'string') return null;
-  const clean = [...value.replace(/[\p{Cc}\p{Zl}\p{Zp}]+/gu, ' ').trim()].slice(0, maxChars).join('').trim();
-  return clean || null;
+  const clean = value.replace(BIDI_CONTROLS, '').replace(/[\p{Cc}\p{Zl}\p{Zp}]+/gu, ' ').trim();
+  const chars = [...clean];
+  if (chars.length <= maxChars) return clean || null;
+  const ext = keepExtension ? (clean.match(SHORT_EXTENSION)?.[0] ?? '') : '';
+  return chars.slice(0, maxChars - [...ext].length).join('').trimEnd() + ext || null;
 }
 
 const requireAuth: MiddlewareHandler<Env> = async (c, next) => {
@@ -62,10 +73,10 @@ function sameFolder(a: Decision['folder'] | null | undefined, b: Decision['folde
   return a.kind === 'existing' ? a.linkId === (b as typeof a).linkId : a.parentLinkId === (b as typeof a).parentLinkId && a.name === (b as typeof a).name;
 }
 
-type FolderChoice = { kind: 'existing'; linkId: string } | { kind: 'new'; parentLinkId: string; name: string };
+type FolderWant = { kind: 'existing'; linkId: string } | { kind: 'new'; parentLinkId: string; name: string };
 
 /** `want` with its path(s) taken from the current folder tree, or null if its folder is gone. */
-function currentFolder(want: FolderChoice, pathOf: ReadonlyMap<string, string>): Decision['folder'] | null {
+function currentFolder(want: FolderWant, pathOf: ReadonlyMap<string, string>): Decision['folder'] | null {
   if (want.kind === 'existing') {
     const path = pathOf.get(want.linkId);
     return path ? { kind: 'existing', linkId: want.linkId, path } : null;
@@ -118,10 +129,13 @@ export function documentRoutes(deps: { store: SessionStore; pipeline: Pipeline }
         return c.json({ id: existing.id, duplicate: true }, 200);
       }
 
+      const originalName =
+        arrivalText(form!.get('originalName'), MAX_NAME_CHARS, true) ?? arrivalText(file.name, MAX_NAME_CHARS, true);
       const doc = repo.insert({
         source: source as (typeof COOKIE_SOURCES)[number],
-        originalName: arrivalText(form!.get('originalName'), MAX_NAME_CHARS) ?? arrivalText(file.name, MAX_NAME_CHARS),
-        mime: intakeMime(file.type, bytes, file.name || null),
+        originalName,
+        // The stored name, not file.name: a shared Blob arrives named "blob".
+        mime: intakeMime(file.type, bytes, originalName),
         size: bytes.length,
         sha256,
         sourceContext: arrivalText(form!.get('sourceContext'), MAX_CONTEXT_CHARS),

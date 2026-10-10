@@ -384,10 +384,50 @@ describe('intake', () => {
     });
     const { id } = (await res.json()) as { id: string };
     const doc = pipeline.repo.get(id)!;
-    expect(doc.originalName).toMatch(/^Northwind Energy bill a+$/);
+    // The stem is cut, not the extension.
+    expect(doc.originalName).toMatch(/^Northwind Energy bill a+\.pdf$/);
     expect(doc.originalName).toHaveLength(255);
     expect(doc.sourceContext).toMatch(/^Forwarded by Northwind b+$/);
     expect(doc.sourceContext).toHaveLength(2000);
+  });
+
+  it('strips bidi controls but keeps emoji joined with ZWJ', async () => {
+    const { app, cookie, pipeline } = await setup();
+    const family = '\u{1F468}\u200D\u{1F469}\u200D\u{1F467}';
+    const res = await send(app, cookie, new File(['Northwind'], 'x.txt', { type: 'text/plain' }), {
+      originalName: `Northwind\u202Efdp.exe ${family}.pdf`,
+      sourceContext: `\u2066Forwarded\u2069 by Northwind`,
+    });
+    const { id } = (await res.json()) as { id: string };
+    expect(pipeline.repo.get(id)).toMatchObject({
+      originalName: `Northwindfdp.exe ${family}.pdf`,
+      sourceContext: 'Forwarded by Northwind',
+    });
+  });
+
+  it('caps a name without a short extension by plain truncation', async () => {
+    const { app, cookie, pipeline } = await setup();
+    const res = await send(app, cookie, new File(['Northwind'], 'x.txt', { type: 'text/plain' }), {
+      originalName: `Northwind.${'c'.repeat(300)}`,
+    });
+    const { id } = (await res.json()) as { id: string };
+    const name = pipeline.repo.get(id)!.originalName!;
+    expect(name).toHaveLength(255);
+    expect(name.startsWith('Northwind.ccc')).toBe(true);
+  });
+
+  it('types a bare blob by the original name sent with it', async () => {
+    const { app, cookie, pipeline } = await setup();
+    const fd = new FormData();
+    fd.append('file', new Blob(['Northwind'])); // arrives named "blob", with no type
+    fd.append('source', 'share');
+    fd.append('originalName', 'statement.docx');
+    const res = await app.request('/api/documents', { method: 'POST', body: fd, headers: { cookie } });
+    const { id } = (await res.json()) as { id: string };
+    expect(pipeline.repo.get(id)).toMatchObject({
+      originalName: 'statement.docx',
+      mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    });
   });
 
   it('falls back to the file name when the given name is only control characters', async () => {
