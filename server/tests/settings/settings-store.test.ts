@@ -34,6 +34,7 @@ describe('SettingsStore', () => {
     const s = store();
     expect(() => s.update({ autoFileThreshold: 2 })).toThrow();
     expect(() => s.update({ autoFileThreshold: 0.875 })).toThrow();
+    expect(() => s.update({ autoFileThreshold: 0.3 })).toThrow();
     expect(() => s.update({ excludePaths: ['relative/path'] })).toThrow();
     expect(s.get()).toEqual(defaults);
   });

@@ -26,7 +26,7 @@ const excludePathSchema = z
 const FieldsSchema = z.object({
   model: z.string().trim().min(1),
   effort: z.enum(['low', 'medium', 'high']),
-  // Same rule as the env var: 0..1, at most two decimals (the prompt prints it with toFixed(2)).
+  // Same rule as the env var: 0.5..1, at most two decimals (the prompt prints it with toFixed(2)).
   autoFileThreshold: autoFileThresholdSchema,
   autoFileEnabled: z.boolean(),
   excludePaths: z.array(excludePathSchema).transform((a) => [...new Set(a)]),

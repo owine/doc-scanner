@@ -1,12 +1,14 @@
 import { z } from 'zod';
 
-// Shared with saved-settings validation. At most two decimals: the analyzer prompt
+// Shared with saved-settings validation. At least 0.5: below that the model
+// rates its own answer more likely wrong than right, and filing on it unseen
+// would defeat the review queue. At most two decimals: the analyzer prompt
 // prints the threshold with toFixed(2), so a finer value would show the model a
 // different number than the gate uses. Validates numbers only (no coercion, so a JSON
 // null/""/false can never become 0); the env wrapper below does the string coercion.
 export const autoFileThresholdSchema = z
   .number()
-  .min(0)
+  .min(0.5, 'must be at least 0.5')
   .max(1)
   .refine((v) => Math.abs(v * 100 - Math.round(v * 100)) < 1e-9, 'must have at most two decimal places (e.g. 0.85)');
 

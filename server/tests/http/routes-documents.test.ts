@@ -201,6 +201,15 @@ describe('document routes', () => {
       body: JSON.stringify({ autoFileThreshold: 7 }),
     });
     expect(bad.status).toBe(400);
+    const putThreshold = (autoFileThreshold: number) =>
+      app.request('/api/settings', {
+        method: 'PUT',
+        headers: { cookie, 'content-type': 'application/json' },
+        body: JSON.stringify({ autoFileThreshold }),
+      });
+    expect((await putThreshold(0.3)).status).toBe(400);
+    expect((await putThreshold(0.5)).status).toBe(200);
+    expect((await putThreshold(1)).status).toBe(200);
   });
 });
 

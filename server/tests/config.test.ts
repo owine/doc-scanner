@@ -31,8 +31,11 @@ describe('loadConfig', () => {
     expect(cfg.AUTO_FILE_ENABLED).toBe(false);
   });
 
-  it('rejects a threshold outside 0..1', () => {
+  it('rejects a threshold outside 0.5..1', () => {
     expect(() => loadConfig({ ...base, AUTO_FILE_THRESHOLD: '1.5' })).toThrow(/AUTO_FILE_THRESHOLD/);
+    // Below 0.5 the model is guessing more often than not: never file on that.
+    expect(() => loadConfig({ ...base, AUTO_FILE_THRESHOLD: '0.4' })).toThrow(/AUTO_FILE_THRESHOLD/);
+    expect(() => loadConfig({ ...base, AUTO_FILE_THRESHOLD: '0' })).toThrow(/AUTO_FILE_THRESHOLD/);
   });
 
   it('treats a blank threshold as unset', () => {
@@ -41,9 +44,9 @@ describe('loadConfig', () => {
   });
 
   it('accepts the threshold bounds and float-awkward two-decimal values', () => {
-    expect(loadConfig({ ...base, AUTO_FILE_THRESHOLD: '0' }).AUTO_FILE_THRESHOLD).toBe(0);
+    expect(loadConfig({ ...base, AUTO_FILE_THRESHOLD: '0.5' }).AUTO_FILE_THRESHOLD).toBe(0.5);
     expect(loadConfig({ ...base, AUTO_FILE_THRESHOLD: '1' }).AUTO_FILE_THRESHOLD).toBe(1);
-    expect(loadConfig({ ...base, AUTO_FILE_THRESHOLD: '0.29' }).AUTO_FILE_THRESHOLD).toBe(0.29);
+    expect(loadConfig({ ...base, AUTO_FILE_THRESHOLD: '0.57' }).AUTO_FILE_THRESHOLD).toBe(0.57);
   });
 
   it('parses AUTO_FILE_ENABLED true and 1 as true', () => {
