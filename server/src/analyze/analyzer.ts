@@ -73,6 +73,8 @@ export function createAnalyzer(cfg: AnalyzerConfig): Analyzer {
         });
 
       let response: Anthropic.Message;
+      // What the answered request carried: the analysis records whether any of it was the document.
+      let sent = doc;
       try {
         response = await request(doc);
       } catch (err) {
@@ -81,7 +83,8 @@ export function createAnalyzer(cfg: AnalyzerConfig): Analyzer {
         // from metadata alone; that request carries no file, so an error from
         // it propagates and nothing falls back twice.
         if (doc.blocks.length === 0 || !contentRejected(err)) throw err;
-        response = await request(doc.mayBeUnopenable && err instanceof Anthropic.BadRequestError ? UNOPENABLE : UNSENDABLE);
+        sent = doc.mayBeUnopenable && err instanceof Anthropic.BadRequestError ? UNOPENABLE : UNSENDABLE;
+        response = await request(sent);
       }
 
       const base = { model: response.model, usage: response.usage, stopReason: response.stop_reason };
@@ -105,7 +108,7 @@ export function createAnalyzer(cfg: AnalyzerConfig): Analyzer {
       if (!parsed.success) {
         return { ...base, status: 'invalid', detail: `answer did not match the schema: ${parsed.error.message}` };
       }
-      return { ...base, status: 'ok', analysis: resolveAnalysis(parsed.data, index) };
+      return { ...base, status: 'ok', analysis: resolveAnalysis(parsed.data, index, { contentSeen: sent.blocks.length > 0 }) };
     },
   };
 }

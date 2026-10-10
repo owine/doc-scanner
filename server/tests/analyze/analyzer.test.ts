@@ -52,7 +52,7 @@ describe('createAnalyzer', () => {
       status: 'ok',
       model: 'claude-haiku-5-5',
       usage,
-      analysis: { name: 'Northwind Energy Sep 2026', folder: { kind: 'existing', linkId: 'link-bills' }, confidence: 0.93 },
+      analysis: { name: 'Northwind Energy Sep 2026', folder: { kind: 'existing', linkId: 'link-bills' }, confidence: 0.93, contentSeen: true },
     });
   });
 
@@ -130,7 +130,7 @@ describe('createAnalyzer', () => {
     const create = vi.fn().mockRejectedValueOnce(apiError(status)).mockImplementation(ok.create);
     const client = { messages: { create } } as unknown as Pick<Anthropic, 'messages'>;
     const out = await createAnalyzer({ client, model: 'm', effort: 'low', autoFileThreshold: 0.8 }).analyze(input, folders);
-    expect(out.status).toBe('ok');
+    expect(out).toMatchObject({ status: 'ok', analysis: { contentSeen: false } });
     expect(create).toHaveBeenCalledTimes(2);
     const retry = create.mock.calls[1][0].messages[0].content as { type: string; text?: string }[];
     expect(retry.some((b) => b.text?.includes('<document>'))).toBe(false);
@@ -144,6 +144,13 @@ describe('createAnalyzer', () => {
       Anthropic.BadRequestError,
     );
     expect(create).toHaveBeenCalledTimes(2);
+  });
+
+  it('marks an analysis of a file it could not send as content unseen', async () => {
+    const { client } = fakeClient(textReply(goodAnswer));
+    const zip: AnalyzeInput = { ...input, bytes: new Uint8Array(4), mimeType: 'application/zip' };
+    const out = await createAnalyzer({ client, model: 'm', effort: 'low', autoFileThreshold: 0.8 }).analyze(zip, folders);
+    expect(out).toMatchObject({ status: 'ok', analysis: { contentSeen: false } });
   });
 
   it('throws a bad request that carried no file content', async () => {

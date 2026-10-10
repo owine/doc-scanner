@@ -160,8 +160,22 @@ describe('decideStage', () => {
     expect(reviewReason({ ...ANALYSIS, folder: { kind: 'new', parentLinkId: 'BILLS', parentPath: '/Bills', name: 'Water' } }, s)).toBe(
       'new folder proposed',
     );
+    expect(reviewReason({ ...ANALYSIS, contentSeen: false }, s)).toBe('analysed from file details only');
     expect(reviewReason({ ...ANALYSIS, confidence: 0.5 }, s)).toBe('confidence 0.500 is below 0.80');
     expect(reviewReason(ANALYSIS, s)).toBeNull();
+  });
+
+  it('never auto-files an answer the model gave without seeing the content', () => {
+    h = makeHarness();
+    const doc = readyDoc({ ...ANALYSIS, confidence: 0.99, contentSeen: false });
+    decideStage(doc, h.ctx);
+    expect(h.repo.get(doc.id)).toMatchObject({ state: 'needs_review', reviewReason: 'analysed from file details only', autoFiled: false });
+  });
+
+  it('names a folder problem before a details-only analysis', () => {
+    h = makeHarness();
+    const s = h.ctx.settings.get();
+    expect(reviewReason({ ...ANALYSIS, folder: null, contentSeen: false }, s)).toBe('no folder chosen');
   });
 
   it('files at exactly the threshold', () => {

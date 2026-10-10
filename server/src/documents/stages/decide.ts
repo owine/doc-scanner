@@ -6,9 +6,10 @@ import type { DocumentRow, StoredAnalysis } from '../types.js';
 
 /**
  * Why this analysis can't be filed without the user, or null when it can:
- * the folder is an existing one outside the never-file-here list, the model's
- * confidence clears the threshold, and auto-filing is on (spec §1). The
- * switch is checked last so the reason names what the user would have to fix.
+ * the folder is an existing one outside the never-file-here list, the model
+ * saw the document's content, its confidence clears the threshold, and
+ * auto-filing is on (spec §1). The switch is checked last so the reason
+ * names what the user would have to fix.
  * Reasons never contain document or folder names.
  */
 export function reviewReason(a: StoredAnalysis | null, s: EffectiveSettings): string | null {
@@ -16,6 +17,9 @@ export function reviewReason(a: StoredAnalysis | null, s: EffectiveSettings): st
   if (a.folder === null) return 'no folder chosen';
   if (a.folder.kind === 'new') return 'new folder proposed';
   if (isUnderAny(a.folder.path, s.excludePaths)) return 'folder is on the never-file-here list';
+  // The model answered from the filename and arrival details alone: it may be
+  // confident, but it never read the document.
+  if (!a.contentSeen) return 'analysed from file details only';
   if (a.confidence < s.autoFileThreshold) {
     return `confidence ${a.confidence.toFixed(3)} is below ${s.autoFileThreshold.toFixed(2)}`;
   }

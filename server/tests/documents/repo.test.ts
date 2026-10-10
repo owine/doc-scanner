@@ -310,6 +310,7 @@ describe('DocumentRepo', () => {
         confidence: 0.9,
         rationale: `A ${MARK} Energy bill.`,
         isDocument: true,
+        contentSeen: true,
       },
       decision: { name: `${MARK} Energy Sep 2026`, folder: { kind: 'existing', linkId: 'BILLS', path: `/Bills/${MARK} Energy` } },
       filingTarget: { folderLinkId: 'BILLS', name: `${MARK} Energy Sep 2026.pdf` },

@@ -21,6 +21,7 @@ export function toView(d: DocumentRow) {
       confidence: d.analysis.confidence,
       rationale: d.analysis.rationale,
       isDocument: d.analysis.isDocument,
+      contentSeen: d.analysis.contentSeen,
     },
     decision: d.decision,
     filed: d.state === 'filed' ? { name: d.filedName, folderPath: d.filedFolderPath, driveNodeUid: d.driveNodeUid } : null,

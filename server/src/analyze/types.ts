@@ -48,6 +48,13 @@ export interface Analysis {
   rationale: string;
   /** False for an ordinary photo that isn't a document; it is stored as-is. */
   isDocument: boolean;
+  /**
+   * Whether the model saw the document's content. False when it answered
+   * from the filename and arrival details alone (a file too large to send,
+   * rejected by the API, unreadable, or of a type it can't read): such an
+   * answer is never auto-filed.
+   */
+  contentSeen: boolean;
   /** Identifying text kept for history recall. */
   textSnippet: string;
 }

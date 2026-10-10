@@ -27,6 +27,7 @@ export const ANALYSIS: Analysis = {
   confidence: 0.92,
   rationale: 'A monthly utility bill.',
   isDocument: true,
+  contentSeen: true,
   textSnippet: 'Northwind Energy statement September 2026',
 };
 

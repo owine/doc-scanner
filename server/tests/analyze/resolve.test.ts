@@ -60,29 +60,34 @@ describe('sanitiseName', () => {
 });
 
 describe('resolveAnalysis', () => {
+  it('records whether the model saw the content', () => {
+    expect(resolveAnalysis(answer(), index, { contentSeen: true }).contentSeen).toBe(true);
+    expect(resolveAnalysis(answer(), index, { contentSeen: false }).contentSeen).toBe(false);
+  });
+
   it('maps a short folder ID back to the Drive link ID', () => {
-    const a = resolveAnalysis(answer(), index);
+    const a = resolveAnalysis(answer(), index, { contentSeen: true });
     expect(a.folder).toEqual({ kind: 'existing', linkId: 'link-bills', path: '/Bills' });
   });
 
   it('resolves a new-folder proposal against its parent', () => {
-    const a = resolveAnalysis(answer({ folderId: null, newFolder: { parentId: 'F2', name: 'Water' } }), index);
+    const a = resolveAnalysis(answer({ folderId: null, newFolder: { parentId: 'F2', name: 'Water' } }), index, { contentSeen: true });
     expect(a.folder).toEqual({ kind: 'new', parentLinkId: 'link-bills', parentPath: '/Bills', name: 'Water' });
   });
 
   it('prefers the existing folder when both are set', () => {
-    const a = resolveAnalysis(answer({ newFolder: { parentId: 'F1', name: 'Other' } }), index);
+    const a = resolveAnalysis(answer({ newFolder: { parentId: 'F1', name: 'Other' } }), index, { contentSeen: true });
     expect(a.folder?.kind).toBe('existing');
   });
 
   it('returns no folder for a hallucinated ID, so the document goes to review', () => {
-    expect(resolveAnalysis(answer({ folderId: 'F99' }), index).folder).toBeNull();
-    expect(resolveAnalysis(answer({ folderId: null, newFolder: { parentId: 'F9', name: 'X' } }), index).folder).toBeNull();
+    expect(resolveAnalysis(answer({ folderId: 'F99' }), index, { contentSeen: true }).folder).toBeNull();
+    expect(resolveAnalysis(answer({ folderId: null, newFolder: { parentId: 'F9', name: 'X' } }), index, { contentSeen: true }).folder).toBeNull();
   });
 
   it('clamps confidence into 0..1', () => {
-    expect(resolveAnalysis(answer({ confidence: 1.7 }), index).confidence).toBe(1);
-    expect(resolveAnalysis(answer({ confidence: -2 }), index).confidence).toBe(0);
-    expect(resolveAnalysis(answer({ confidence: Number.NaN }), index).confidence).toBe(0);
+    expect(resolveAnalysis(answer({ confidence: 1.7 }), index, { contentSeen: true }).confidence).toBe(1);
+    expect(resolveAnalysis(answer({ confidence: -2 }), index, { contentSeen: true }).confidence).toBe(0);
+    expect(resolveAnalysis(answer({ confidence: Number.NaN }), index, { contentSeen: true }).confidence).toBe(0);
   });
 });

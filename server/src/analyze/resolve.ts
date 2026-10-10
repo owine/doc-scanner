@@ -65,7 +65,7 @@ function resolveFolder(answer: ModelAnswer, index: FolderIndex): FolderChoice | 
   return null;
 }
 
-export function resolveAnalysis(answer: ModelAnswer, index: FolderIndex): Analysis {
+export function resolveAnalysis(answer: ModelAnswer, index: FolderIndex, opts: { contentSeen: boolean }): Analysis {
   const confidence = Number.isFinite(answer.confidence) ? Math.min(1, Math.max(0, answer.confidence)) : 0;
   return {
     name: sanitiseName(answer.name, 'Document'),
@@ -73,6 +73,7 @@ export function resolveAnalysis(answer: ModelAnswer, index: FolderIndex): Analys
     confidence,
     rationale: answer.rationale.trim(),
     isDocument: answer.isDocument,
+    contentSeen: opts.contentSeen,
     textSnippet: answer.textSnippet.trim().slice(0, MAX_SNIPPET_CHARS),
   };
 }
