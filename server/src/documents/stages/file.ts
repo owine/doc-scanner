@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { ServerError } from '@protontech/drive-sdk';
 import { FolderNameTakenError } from '../../drive/client.js';
+import { isUnderAny } from '../../drive/folder-tree.js';
 import { logger } from '../../logger.js';
 import { errorName } from '../../observability/error-name.js';
 import type { StageContext } from '../deps.js';
@@ -48,6 +49,16 @@ export async function fileStage(doc: DocumentRow, ctx: StageContext): Promise<vo
   const drive = live.driveClient;
 
   try {
+    // Before a target is set nothing has been uploaded, so it isn't too late.
+    if (doc.autoFiled && !doc.filingTarget) {
+      const problem = await autoFiledFolderProblem(doc.decision, ctx);
+      if (problem) {
+        if (!ctx.repo.transition(doc.id, 'filing', 'needs_review', { reviewReason: problem, attempts: 0, error: null })) {
+          ctx.repo.applyRequestedDiscard(doc.id);
+        }
+        return;
+      }
+    }
     const { folderLinkId, folderPath } = await resolveFolder(doc.id, doc.decision, ctx, drive);
 
     const kind = ctx.inbox.has(doc.id, 'prepared') ? 'prepared' : 'original';
@@ -159,6 +170,31 @@ export async function fileStage(doc: DocumentRow, ctx: StageContext): Promise<vo
     // Clears a pending discard too: from awaiting_login the user can discard again.
     ctx.repo.transition(doc.id, 'filing', 'awaiting_login', { discardRequested: false }, KEEP_GOING);
   }
+}
+
+/**
+ * Why an auto-filed decision's folder is no longer a safe target, or null if
+ * it still is. Such a decision can wait days in awaiting_login, during which
+ * the folder may be deleted or moved under a never-file-here path. Checked
+ * against the current cached tree and settings, by link ID (a folder that was
+ * only renamed or moved elsewhere is still fine). User-approved decisions are
+ * not re-checked: approval validated them against the tree, and the user, not
+ * the model, picked the folder.
+ */
+async function autoFiledFolderProblem(decision: Decision, ctx: StageContext): Promise<string | null> {
+  const f = decision.folder;
+  // Already created on an earlier run, so the walked tree may not have it yet.
+  if (f.kind === 'new' && f.createdLinkId) return null;
+  const linkId = f.kind === 'existing' ? f.linkId : f.parentLinkId;
+  let cache = ctx.folderCache.load();
+  if (!cache) {
+    await ctx.refreshFolderCache();
+    cache = ctx.folderCache.load();
+  }
+  const folder = cache?.tree.find((t) => t.linkId === linkId);
+  if (!folder) return 'suggested folder no longer available';
+  if (isUnderAny(folder.path, ctx.settings.get().excludePaths)) return 'folder is on the never-file-here list';
+  return null;
 }
 
 async function resolveFolder(

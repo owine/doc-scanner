@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 import { ServerError } from '@protontech/drive-sdk';
-import { makeHarness, ANALYSIS } from './harness.js';
+import { makeHarness, ANALYSIS, TREE } from './harness.js';
 import { fileStage } from '../../src/documents/stages/file.js';
 import { FolderNameTakenError } from '../../src/drive/client.js';
 import type { Decision } from '../../src/documents/types.js';
@@ -168,6 +168,56 @@ describe('fileStage', () => {
     expect(h.drive.findFileBySha1).toHaveBeenCalled();
     expect(h.drive.uploadFile).toHaveBeenCalled();
     expect(h.repo.get(doc.id)).toMatchObject({ state: 'filed', discardRequested: false });
+  });
+
+  describe('re-checking an auto-filed folder before uploading', () => {
+    it('sends the document to review when the folder is gone', async () => {
+      h = makeHarness();
+      h.ctx.folderCache.save(TREE.filter((f) => f.linkId !== 'BILLS'), h.ctx.now());
+      const doc = filingDoc(EXISTING);
+      await fileStage(doc, h.ctx);
+      expect(h.drive.uploadFile).not.toHaveBeenCalled();
+      expect(h.repo.get(doc.id)).toMatchObject({ state: 'needs_review', reviewReason: 'suggested folder no longer available' });
+    });
+
+    it('sends the document to review when the folder is now on the never-file-here list', async () => {
+      h = makeHarness();
+      // Moved into /Archive while the document waited for a login.
+      h.ctx.folderCache.save(
+        TREE.map((f) => (f.linkId === 'BILLS' ? { ...f, path: '/Archive/Bills' } : f)),
+        h.ctx.now(),
+      );
+      const doc = filingDoc(EXISTING);
+      await fileStage(doc, h.ctx);
+      expect(h.drive.uploadFile).not.toHaveBeenCalled();
+      expect(h.repo.get(doc.id)).toMatchObject({ state: 'needs_review', reviewReason: 'folder is on the never-file-here list' });
+    });
+
+    it('walks the tree first when no folder cache is loaded', async () => {
+      h = makeHarness({ withTree: false });
+      h.refreshFolderCache.mockImplementation(async () => h.ctx.folderCache.save(TREE, h.ctx.now()));
+      const doc = filingDoc(EXISTING);
+      await fileStage(doc, h.ctx);
+      expect(h.refreshFolderCache).toHaveBeenCalled();
+      expect(h.repo.get(doc.id)?.state).toBe('filed');
+    });
+
+    it('leaves a user-approved folder alone: it was checked at approval', async () => {
+      h = makeHarness();
+      h.ctx.folderCache.save(TREE.filter((f) => f.linkId !== 'BILLS'), h.ctx.now());
+      const doc = filingDoc(EXISTING, { autoFiled: false });
+      await fileStage(doc, h.ctx);
+      expect(h.repo.get(doc.id)?.state).toBe('filed');
+    });
+
+    it('does not re-check once a filing target is set: the upload may have happened', async () => {
+      h = makeHarness();
+      h.ctx.folderCache.save(TREE.filter((f) => f.linkId !== 'BILLS'), h.ctx.now());
+      h.drive.findFileBySha1.mockResolvedValue({ uid: 'NODE0', name: 'Northwind Energy Sep 2026.pdf' });
+      const doc = filingDoc(EXISTING, { filingTarget: { folderLinkId: 'BILLS', name: 'Northwind Energy Sep 2026.pdf' } });
+      await fileStage(doc, h.ctx);
+      expect(h.repo.get(doc.id)).toMatchObject({ state: 'filed', driveNodeUid: 'NODE0' });
+    });
   });
 
   it('ignores a filing target left by an earlier decision for another folder', async () => {
