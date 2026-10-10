@@ -48,4 +48,43 @@ describe('FolderCacheStore', () => {
     expect(loaded.tree[0].files[0].modified.toISOString()).toBe('2026-09-05T00:00:00.000Z');
     expect(loaded.walkedAt.toISOString()).toBe('2026-10-10T00:00:00.000Z');
   });
+
+  it('treats a cache sealed with another key as absent and removes it', () => {
+    const t = createTestDb();
+    cleanup = t.cleanup;
+    const other = new FolderCacheStore(t.db, new AtRestCipher(Buffer.alloc(32, 9).toString('base64'), 'folder-cache'));
+    other.save([{ linkId: 'L', path: '/Bills', files: [] }], new Date());
+    const s = new FolderCacheStore(t.db, new AtRestCipher(Buffer.alloc(32, 4).toString('base64'), 'folder-cache'));
+    expect(s.load()).toBeNull();
+    expect(t.db.prepare('SELECT COUNT(*) AS n FROM folder_cache').get()).toEqual({ n: 0 });
+  });
+
+  it('keeps one entry when the same uid is filed twice', () => {
+    const t = createTestDb();
+    cleanup = t.cleanup;
+    const s = new FolderCacheStore(t.db, new AtRestCipher(Buffer.alloc(32, 4).toString('base64'), 'folder-cache'));
+    s.save([{ linkId: 'L', path: '/Bills', files: [] }], new Date());
+    s.recordFiled('L', { uid: 'N1', name: 'a.pdf', modified: new Date('2026-10-10T00:00:00Z') });
+    s.recordFiled('L', { uid: 'N1', name: 'a.pdf', modified: new Date('2026-10-10T00:00:00Z') });
+    expect(s.load()!.tree[0].files).toHaveLength(1);
+  });
+
+  it('evicts the oldest file when filing into a full folder', () => {
+    const t = createTestDb();
+    cleanup = t.cleanup;
+    const s = new FolderCacheStore(t.db, new AtRestCipher(Buffer.alloc(32, 4).toString('base64'), 'folder-cache'));
+    const files = Array.from({ length: 5 }, (_, i) => ({ uid: `F${i}`, name: `s${i}.pdf`, modified: new Date(Date.UTC(2026, 0, i + 1)) }));
+    s.save([{ linkId: 'L', path: '/Bills', files }], new Date());
+    s.recordFiled('L', { uid: 'N', name: 'new.pdf', modified: new Date('2026-10-10T00:00:00Z') });
+    expect(s.load()!.tree[0].files.map((f) => f.uid)).toEqual(['N', 'F4', 'F3', 'F2', 'F1']);
+  });
+
+  it('keeps the walk time when a filing is recorded', () => {
+    const t = createTestDb();
+    cleanup = t.cleanup;
+    const s = new FolderCacheStore(t.db, new AtRestCipher(Buffer.alloc(32, 4).toString('base64'), 'folder-cache'));
+    s.save([{ linkId: 'L', path: '/Bills', files: [] }], new Date('2026-10-01T00:00:00Z'));
+    s.recordFiled('L', { uid: 'N', name: 'a.pdf', modified: new Date() });
+    expect(s.load()!.walkedAt.toISOString()).toBe('2026-10-01T00:00:00.000Z');
+  });
 });

@@ -1,6 +1,12 @@
 import type { DB } from '../db.js';
+import { logger } from '../logger.js';
 import type { AtRestCipher } from '../crypto/at-rest.js';
 import { RECENT_NAMES_PER_FOLDER, type TreeFile, type TreeFolder } from './folder-tree.js';
+
+const time = (f: TreeFile): number => {
+  const t = f.modified.getTime();
+  return Number.isFinite(t) ? t : 0;
+};
 
 /** Only what the analyzer and the folder picker use; nothing else is kept at rest (spec §4). */
 function trim(tree: TreeFolder[]): TreeFolder[] {
@@ -8,7 +14,7 @@ function trim(tree: TreeFolder[]): TreeFolder[] {
     linkId: f.linkId,
     path: f.path,
     files: [...f.files]
-      .sort((a, b) => b.modified.getTime() - a.modified.getTime())
+      .sort((a, b) => time(b) - time(a))
       .slice(0, RECENT_NAMES_PER_FOLDER)
       .map((file) => ({ uid: file.uid, name: file.name, modified: file.modified })),
   }));
@@ -31,7 +37,7 @@ export class FolderCacheStore {
     const cached = this.load();
     const folder = cached?.tree.find((f) => f.linkId === folderLinkId);
     if (!cached || !folder) return;
-    folder.files.unshift(file);
+    folder.files = [file, ...folder.files.filter((f) => f.uid !== file.uid)];
     this.save(cached.tree, cached.walkedAt);
   }
 
@@ -50,8 +56,15 @@ export class FolderCacheStore {
       | { encrypted_tree: Uint8Array; walked_at: string }
       | undefined;
     if (!row) return null;
-    const raw = JSON.parse(this.cipher.open(row.encrypted_tree).toString('utf8')) as TreeFolder[];
-    const tree = raw.map((f) => ({ ...f, files: f.files.map((file) => ({ ...file, modified: new Date(file.modified) })) }));
+    let tree: TreeFolder[];
+    try {
+      const raw = JSON.parse(this.cipher.open(row.encrypted_tree).toString('utf8')) as TreeFolder[];
+      tree = raw.map((f) => ({ ...f, files: f.files.map((file) => ({ ...file, modified: new Date(file.modified) })) }));
+    } catch (err) {
+      logger.warn({ err: (err as Error).message }, 'folder cache unreadable; discarding it');
+      this.db.prepare('DELETE FROM folder_cache WHERE id = 1').run();
+      return null;
+    }
     return { tree, walkedAt: new Date(row.walked_at) };
   }
 }
