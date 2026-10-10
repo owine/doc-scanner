@@ -1,8 +1,10 @@
--- Schema version 4: filing history (FTS5-indexed; similarity recall is not switched on yet).
+-- Schema version 4: filing history (FTS5-indexed), provisioned for future similarity recall.
 --
--- `classification_history` records every filing. An FTS5 index over it is kept
--- in sync by triggers, so similarity recall can be switched on later without
--- a backfill migration. Nothing reads this table yet.
+-- `classification_history` and its FTS5 index (kept in sync by the triggers
+-- below) exist so similarity recall can be switched on later without a
+-- backfill migration. Nothing writes to or reads this table yet: writes
+-- start when recall is built, because the rows would hold document names,
+-- paths and text in plaintext.
 
 CREATE TABLE IF NOT EXISTS classification_history (
   id              INTEGER PRIMARY KEY AUTOINCREMENT,
