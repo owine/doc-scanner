@@ -120,3 +120,21 @@ input[type="checkbox"] { width: auto; }
 .review-card .rationale { margin: 8px 0; line-height: 1.4; }
 .folder-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; overflow-wrap: anywhere; }
 .badge { background: var(--warn-bg); border: 1px solid var(--warn-border); border-radius: 999px; padding: 2px 8px; font-size: 12px; }
+
+.inbox {
+  max-width: 720px; margin: 0 auto; padding: 16px;
+  padding-top: max(16px, env(safe-area-inset-top));
+  padding-bottom: max(24px, env(safe-area-inset-bottom));
+}
+.inbox-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.inbox-header h1 { margin: 0; font-size: 22px; }
+.inbox h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--fg-muted); margin: 24px 0 8px; }
+.inbox .warn { margin: 12px 0 0; }
+.doc-list { list-style: none; padding: 0; margin: 0; }
+.doc-row { display: flex; align-items: center; gap: 8px; padding: 10px 0; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.doc-main { flex: 1; min-width: 12rem; }
+.doc-name { font-weight: 600; overflow-wrap: anywhere; }
+.chip { border: 1px solid var(--border); border-radius: 999px; padding: 2px 8px; font-size: 12px; white-space: nowrap; }
+.chip-auto { border-color: var(--accent); color: var(--accent); }
+a.btn { text-decoration: none; display: inline-flex; align-items: center; box-sizing: border-box; }
+.inbox-footer { margin-top: 32px; }
