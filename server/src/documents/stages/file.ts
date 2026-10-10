@@ -100,6 +100,8 @@ export async function fileStage(doc: DocumentRow, ctx: StageContext): Promise<vo
             source: doc.source,
             autoFiled: doc.autoFiled,
             userEdited: doc.userEdited,
+            // The model's confidence, to calibrate the auto-file threshold from real use.
+            confidence: doc.analysis?.confidence ?? null,
           }),
         );
     });
@@ -151,7 +153,7 @@ async function resolveFolder(
   try {
     await ctx.refreshFolderCache();
   } catch (err) {
-    logger.warn({ documentId: id, err: errorName(err) }, 'folder cache refresh failed');
+    logger.warn({ documentId: id, errName: errorName(err) }, 'folder cache refresh failed');
   }
   return { folderLinkId: createdLinkId, folderPath };
 }
@@ -161,6 +163,6 @@ function afterFiled(documentId: string, what: string, fn: () => void): void {
   try {
     fn();
   } catch (err) {
-    logger.warn({ documentId, err: errorName(err) }, what);
+    logger.warn({ documentId, errName: errorName(err) }, what);
   }
 }

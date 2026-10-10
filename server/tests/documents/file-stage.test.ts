@@ -42,7 +42,7 @@ describe('fileStage', () => {
     });
     expect(h.inbox.has(doc.id, 'original')).toBe(false);
     const audit = h.db.prepare(`SELECT detail FROM audit_log WHERE event = 'document_filed'`).get() as { detail: string };
-    expect(JSON.parse(audit.detail)).toMatchObject({ documentId: doc.id, driveNodeUid: 'NODE1', autoFiled: true });
+    expect(JSON.parse(audit.detail)).toMatchObject({ documentId: doc.id, driveNodeUid: 'NODE1', autoFiled: true, confidence: 0.92 });
     // v1 records no filing history (it would be plaintext outside the encrypted stores).
     expect((h.db.prepare('SELECT COUNT(*) AS n FROM classification_history').get() as { n: number }).n).toBe(0);
     const bills = h.ctx.folderCache.load()!.tree.find((f) => f.linkId === 'BILLS')!;
