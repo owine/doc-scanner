@@ -2912,6 +2912,7 @@ import { FolderCacheStore } from '../drive/folder-cache-store.js';
 import { captureDocumentFailure } from '../observability/report.js';
 import { SettingsStore, type EffectiveSettings } from '../settings/settings-store.js';
 import { logger } from '../logger.js';
+import { errorName } from '../observability/error-name.js';
 import { InboxStore } from './inbox-store.js';
 import { DocumentRepo } from './repo.js';
 import { DocumentWorker } from './worker.js';
@@ -2970,7 +2971,7 @@ export function createPipeline(o: PipelineOptions): Pipeline {
     start() {
       worker.start();
       unsubscribe = onLiveSessionRegistered(() => {
-        worker.onLogin().catch((err: unknown) => logger.error({ err }, 'document worker failed after login'));
+        worker.onLogin().catch((err: unknown) => logger.error({ errName: errorName(err) }, 'document worker failed after login'));
       });
     },
     stop() {
