@@ -35,13 +35,13 @@ Two entrypoints get their own short follow-up specs because they are independent
 | Entrypoints | Picker/drag-drop and scanner now; share sheet and email-in as follow-up specs | All four post to one endpoint; the two follow-ups are independent plumbing. |
 | Confirmation | **Auto-file when confident**, review queue otherwise | Fewer taps; a misfile is cheap to fix in Drive, and the eval shows the high-confidence band is precise. |
 | What the AI may decide | Name + existing folder, **or propose a new folder** — a proposal always goes to review, and is created automatically when approved | Lets structure grow (a new year, a new kind of document) without the AI reshaping the tree unseen. |
-| Naming | **Learn from the user's own names** (each folder's recent filenames + FTS5 recall of similar past documents), no fixed template | The user's conventions vary by folder; a template would fight them. |
+| Naming | **Learn from the user's own names**: each folder's five most recent filenames, no fixed template. FTS5 recall of similar past documents is recorded from day one but **switched on only once the eval shows it helps** | The user's conventions vary by folder; a template would fight them. Recent names alone gave 83% in the eval; recall has no pre-analysis text to search with yet (see §2). |
 | File types | PDF, images, Office documents, and anything else (metadata-only) | Every type gets filed; only the analysis depth varies. |
 | Scan output | Phone builds an **image-only PDF**; the **server adds the text layer** with `ocrmypdf` | Keeps OCR out of iOS Safari (the Phase 4 failure) and applies the same rule to any image-only PDF, whatever its source. |
 | Processing model | **SQLite job queue worked in-process**; every source returns `202` immediately | One code path for interactive and unattended sources; survives restarts; no long-held requests from iOS Safari. |
 | Unattended filing | **Analyse while logged out, file after login** | Keeps today's posture: decrypted keys never touch disk. |
 | Model | **Claude Haiku 5.5, medium effort**, configurable | Ties Opus 5.5 on accuracy at ~1/37 the cost, with better-calibrated confidence. See [Model evaluation](#model-evaluation). |
-| Auto-file threshold | **0.80**, configurable | In the eval, 53% of documents auto-filed at 0.80 with no misfiles. |
+| Auto-file threshold | **0.80**, configurable; the prompt states the configured value | In the eval, 53% of documents auto-filed at 0.80 with no misfiles (measured with the prompt saying 0.85; re-checked at 0.80 in the plan). |
 | Duplicate upload | Returns the **existing** document (unless that one failed, in which case it is retried) | Forwarded emails and double taps otherwise file twice. |
 | Discard | **Kept 7 days**, recoverable, then purged | Room to change one's mind; Drive remains the system of record. |
 
@@ -59,7 +59,7 @@ Unchanged from the parent spec, made explicit for unattended sources:
 
 ### 1. Document lifecycle and storage
 
-One table, `documents` (forward migration `004`), one state machine for every source.
+One table, `documents`, one state machine for every source. Migrations: the Phase 5 history table keeps its `004_classification_history.sql`; `documents` and `settings` are `005`.
 
 | Field | Purpose |
 |---|---|
@@ -68,6 +68,8 @@ One table, `documents` (forward migration `004`), one state machine for every so
 | `source_context` | Free text about the arrival (email subject, etc.) |
 | `state`, `attempts`, `error`, `updated_at` | Lifecycle below |
 | `analysis` (JSON) | Name, folder choice (existing link ID or proposed new folder), confidence, rationale, `isDocument`, text snippet |
+| `decision` (JSON) | The name and folder actually being filed: the analysis's, or the user's approved edit. Written before `filing`, so a restart never loses an approval |
+| `filing_target` | Target folder UID and intended name, written just before upload (crash recovery below) |
 | `filed_name`, `filed_folder_path`, `drive_node_uid`, `auto_filed`, `user_edited` | Outcome, for the activity log and history |
 | `discarded_at` | Set on discard; purge after 7 days |
 
@@ -79,9 +81,12 @@ any working state ─▶ failed (retry with backoff; visible after 3 attempts)
 needs_review / failed ─▶ discarded ─(7 days)─▶ purged
 ```
 
-- **Auto-file rule:** `confidence ≥ threshold` **and** the answer names an **existing** folder **and** the document is not a duplicate. An unresolved folder or a new-folder proposal always goes to `needs_review`, whatever the confidence.
-- **Blob store:** `$DATA_DIR/inbox/<id>.bin`, AES-GCM, one file per document.
-- **Worker:** a single in-process loop, one job at a time, woken on enqueue, on login and on a timer. At startup, rows found in a working state (`analyzing`, `preparing`, `filing`) are reset to their previous resting state, so a crash mid-job loses nothing.
+- **Auto-file rule:** `confidence ≥ threshold` **and** the answer names an **existing** folder. An unresolved folder or a new-folder proposal always goes to `needs_review`, whatever the confidence. (Duplicates never reach this point: intake returns the existing document.)
+- **Discard:** allowed from any state before `filing` (`received` through `needs_review`, `awaiting_login`, `failed`).
+- **Blob store:** `<dir of DB_PATH>/inbox/<id>.bin` (no new env var; next to the database, inside the existing data volume), AES-GCM, one file per document; the prepared output and thumbnail sit beside it.
+- **Worker:** a single in-process loop, one job at a time, woken on enqueue, on login and on a timer. **Crash recovery** at startup:
+  - `analyzing` and `preparing` simply re-run: both read the inbox blob and are idempotent.
+  - `filing` resumes as `filing` from `decision`, so an approval or edit survives. If `filing_target` is set, the upload may already have happened, so the worker first looks in the target folder for a file whose claimed SHA-1 matches the prepared file; if one exists the document is marked filed, otherwise it uploads. This prevents `name (1).pdf` duplicates in Drive.
 
 ### 2. Analysis
 
@@ -102,24 +107,24 @@ One Claude call per document: `createAnalyzer({ client, model, effort }).analyze
 **Prompt** (`prompt.ts`): a fixed system prompt, then the user turn:
 
 1. **Folder list** with short IDs (`F1`, `F2`, …) — Drive's long link IDs stay out of the prompt and the answer — each with its **five most recent filenames** as the naming signal: `F12 /Bills/Utilities | recent: "Electric Sep 2026"; …`. This block carries the `cache_control` breakpoint, so a burst of documents reuses it. Folders on the user's **never-file-here** list (and everything under them) are left out entirely.
-2. **FTS5 examples**: the three past filings whose text best matches this document (`history.ts` from the Phase 5 branch).
+2. **FTS5 examples** — *off in v1.* Every filing is recorded in the history table (`history.ts` from the Phase 5 branch, which today only has `findRecent`). Recalling *similar* documents needs text to search with **before** the analysis call, and for scans and image-only PDFs there is none until OCR. Turning recall on (querying with the original filename and source context, or with OCR text if OCR moves ahead of analysis) is a later change, made only if the eval shows it beats recent names alone. Note the field rename when porting: the branch's `ocrSnippet` is `snippet` here.
 3. The **document** content blocks.
 4. An **arrival** block: source, type, size, original filename, source context, and any note about what the model can or can't see.
 
-The system prompt asks for the user's naming conventions, an existing folder unless every one is clearly wrong, a calibrated confidence ("documents above the threshold are filed with no review"), `isDocument` (photos are still filed, just kept as images), and a text snippet; and it marks everything about the document as untrusted data.
+The system prompt asks for the user's naming conventions, an existing folder unless every one is clearly wrong, a calibrated confidence (it states the configured threshold, e.g. "documents above 0.80 are filed with no review"; the eval ran with the wording "0.85", so the plan re-runs Haiku with 0.80 to confirm calibration — about $1.20), `isDocument` (photos are still filed, just kept as images), and a text snippet; and it marks everything about the document as untrusted data.
 
 **Output** is **structured outputs** (`output_config.format` with a zod schema), not forced tool use, which current models reject. Code then resolves and validates it (`resolve.ts`): short folder IDs map back to link IDs, an unknown ID or empty proposal becomes "no folder" (→ review), confidence is clamped to 0–1, and the name is sanitised — control characters and `/ \ : * ? " < > |` removed, a trailing extension stripped, ≤ 120 characters. Unicode and ordinary punctuation are kept; the Phase 5 branch's ASCII-only regex rejected the user's own names.
 
 **Outcomes**: `ok`, or `refusal` / `truncated` / `invalid` with a detail, each carrying the model and token usage that were billed. API errors propagate so the worker's retry policy owns them.
 
-**Settings**: `ANALYZER_MODEL` (default `claude-haiku-5-5`), `ANALYZER_EFFORT` (default `medium`), `AUTO_FILE_THRESHOLD` (default `0.80`).
+**Settings**: `ANALYZER_MODEL` (default `claude-haiku-5-5`), `ANALYZER_EFFORT` (default `medium`), `AUTO_FILE_THRESHOLD` (default `0.80`). Env vars are the defaults; a value saved in the PWA's settings (§4) overrides them.
 
 ### 3. Intake
 
 **`POST /api/documents`** — multipart: one `file`, `source`, optional `originalName` and `sourceContext`. Session-cookie auth (email-in gets a machine credential in its own spec). 50 MB limit.
 
 - Encrypts the file into the inbox, inserts the row, returns **`202 { id }`**.
-- **Duplicate** (same `sha256` as a document that is pending, in review, or filed): **`200 { id, duplicate: true }`** for the existing document. If the earlier copy `failed`, it is reset and retried instead.
+- **Duplicate** (same `sha256` as a document that is pending, in review, or filed): **`200 { id, duplicate: true }`** for the existing document. If the earlier copy `failed`, it is reset and retried instead. A discarded copy doesn't count: re-uploading it creates a new document.
 
 **PWA:**
 
@@ -131,8 +136,10 @@ The system prompt asks for the user's naming conventions, an existing folder unl
 
 **Preparing** (no keys needed):
 
-- Image-only PDFs and document photos (`isDocument: true`) → `ocrmypdf --skip-text` → searchable PDF. `--skip-text` leaves pages that already have text alone; encrypted PDFs are passed through.
-- Ordinary photos, Office files and other types are kept as they are.
+- Image-only PDFs → `ocrmypdf --skip-text` → searchable PDF. `--skip-text` leaves pages that already have text alone; encrypted PDFs are passed through.
+- Document photos (`isDocument: true`) → `img2pdf` (bundled with `ocrmypdf`) then OCR → searchable PDF, so the filed type, MIME and extension become PDF. Formats `sharp` can't decode (HEIC) stay as images.
+- Ordinary photos, Office files and other types are kept as they are. The filename's extension always follows the **prepared** file.
+- **Thumbnail** for the review card: the first page rendered with Ghostscript (installed with `ocrmypdf`) for PDFs, `sharp` for images, none otherwise; stored encrypted beside the blob.
 - OCR failure or a 5-minute timeout files the original with a note: a text layer is never worth losing a document over.
 
 **Filing** (needs a live session; otherwise `awaiting_login`):
@@ -143,7 +150,7 @@ The system prompt asks for the user's naming conventions, an existing folder unl
 
 **Folder cache**: `walkFolderTree` (built; lists 6 folders concurrently by default) runs at login, every 6 hours, on demand, and after a folder is created. The result — paths plus each folder's five recent filenames, nothing else — is cached **encrypted at rest** so analysis works while logged out.
 
-**Settings** (a small `settings` table, editable in the PWA): never-file-here folder paths (default empty), auto-file threshold, model, effort.
+**Settings** (a small `settings` table, editable in the PWA): never-file-here folder paths (default empty), and overrides for the auto-file threshold, model and effort (env vars supply the defaults).
 
 **Docker**: add `ocrmypdf` (Tesseract, Ghostscript) to the Alpine image; measure the size impact in the plan.
 
@@ -161,7 +168,7 @@ Primary actions: **Add** and **Scan**. **Settings** sits behind a menu.
 
 Updates: the PWA polls `GET /api/documents?since=<cursor>` every few seconds while visible.
 
-**Edits teach the system**: when the user changes the name or folder before approving, the history row stores *their* version, so the next similar document gets the correction as an example.
+**Edits teach the system**: when the user changes the name or folder before approving, *their* version is what gets filed, so it becomes one of that folder's recent filenames — the naming signal the next document in that folder sees. The history row also stores their version, for when recall is switched on.
 
 ### 6. Errors and observability
 
@@ -224,7 +231,17 @@ On `feat/ai-analyzer`, built and tested:
 - `server/src/drive/folder-tree.ts` — concurrent tree walk with recent filenames and never-file-here exclusion; `DriveClient.walkFolderTree` and `downloadFile`.
 - `server/evals/analyzer/` — the model eval.
 
-Carried over from `feat/phase-5-ai-organize` in implementation: `classify/history.ts` and its migration (FTS5 recall), `uploadFile`'s `parentFolderUid`, `isAuthExpired`, `ConfirmCard` (→ review card), and `pdf/build.ts` without the OCR layer. Superseded: `routes-classify.ts`, `routes-upload.ts`, `classify/haiku.ts` (word-box OCR), `outbox-drain.ts`, the background-sync service-worker listeners.
+Carried over from `feat/phase-5-ai-organize` in implementation: `classify/history.ts` and its migration `004` (history recording; recall comes later), `uploadFile`'s `parentFolderUid`, `isAuthExpired`, `ConfirmCard` (→ review card), and `pdf/build.ts` without the OCR layer. Superseded: `routes-classify.ts`, `routes-upload.ts`, `classify/haiku.ts` (word-box OCR), `outbox-drain.ts`, the background-sync service-worker listeners.
+
+## Delivery slices
+
+The plan should ship this in independently useful slices:
+
+1. **Server pipeline** — `documents` table, inbox store, worker, intake endpoint, analyzer wired in, filing with auto-file, `awaiting_login`, settings. Usable through the API and a minimal list.
+2. **Review UI** — the inbox screen, review card, folder picker, discard/restore, activity log, settings screen.
+3. **Preparing** — `ocrmypdf`, `img2pdf`, thumbnails, the Docker image.
+4. **Entrypoints** — Add screen and offline upload queue; the scanner posting image-only PDFs.
+5. **Calibration check** — re-run the Haiku eval with the 0.80 prompt wording.
 
 ## Open items for the plan
 
