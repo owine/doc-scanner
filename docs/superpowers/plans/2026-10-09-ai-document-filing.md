@@ -2739,7 +2739,8 @@ export class DocumentWorker {
     const opts = { ignorePendingDiscard: state === 'filing' && !!current?.filingTarget };
     logger.warn({ documentId: doc.id, stage, attempts, err: error }, 'document stage failed');
     if (attempts >= MAX_ATTEMPTS) {
-      if (this.d.repo.transition(doc.id, state, 'failed', { attempts, error }, opts)) {
+      // discardRequested cleared: a failed document is resting, discardable on request.
+      if (this.d.repo.transition(doc.id, state, 'failed', { attempts, error, discardRequested: false }, opts)) {
         this.d.report(err, stage, [doc.originalName ?? '', doc.decision?.name ?? '', doc.analysis?.name ?? '']);
       } else {
         this.d.repo.applyRequestedDiscard(doc.id);
