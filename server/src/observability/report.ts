@@ -5,7 +5,7 @@ import { redactExact } from './scrub.js';
  * Drive operations we report on. A failure in any of these can mean a scan
  * never reaches Proton Drive, which is the one failure that must be heard.
  */
-export type DriveOperation = 'folder-lookup' | 'upload' | 'session-refresh';
+export type DriveOperation = 'folder-lookup' | 'upload' | 'download' | 'session-refresh';
 
 /**
  * Reports a Drive failure tagged with its operation. `sensitive` lists values

@@ -18,6 +18,7 @@ import { EventIdStore } from './event-id-store.js';
 import { getOrCreateClientUid } from './client-uid.js';
 import { getOpenPGPModule } from './crypto-module.js';
 import { reportingDriveFailure } from '../observability/report.js';
+import { walkFolderTree, type TreeFolder } from './folder-tree.js';
 
 /** Proton's production Drive API host. The SDK config wants a host, not a URL. */
 const DEFAULT_DRIVE_HOST = 'drive-api.proton.me';
@@ -207,6 +208,26 @@ export class DriveClient {
     }
 
     return { nodeUid, driveUrl, name: availableName };
+  }
+
+  /** Every folder in My files with its files; see folder-tree.ts. */
+  async walkFolderTree(signal?: AbortSignal): Promise<TreeFolder[]> {
+    return walkFolderTree(this.sdk, signal);
+  }
+
+  /** Downloads, decrypts and verifies a file's active revision into memory. */
+  async downloadFile(nodeUid: string, signal?: AbortSignal): Promise<Uint8Array> {
+    return reportingDriveFailure('download', async () => {
+      const downloader = await this.sdk.getFileDownloader(nodeUid, signal);
+      const chunks: Uint8Array[] = [];
+      const sink = new WritableStream<Uint8Array>({
+        write(chunk) {
+          chunks.push(chunk);
+        },
+      });
+      await downloader.downloadToStream(sink).completion();
+      return Buffer.concat(chunks);
+    });
   }
 
   /**
