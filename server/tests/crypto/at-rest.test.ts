@@ -59,4 +59,27 @@ describe('AtRestCipher', () => {
     const c = new AtRestCipher(MASTER, 'inbox');
     expect(c.open(c.seal(new Uint8Array(0))).length).toBe(0);
   });
+
+  describe('associated data', () => {
+    const aad = (s: string) => new TextEncoder().encode(s);
+
+    it('round-trips with the same associated data', () => {
+      const c = new AtRestCipher(MASTER, 'documents');
+      const sealed = c.seal(aad('Northwind Energy'), aad('row-1\0original_name'));
+      expect(c.open(sealed, aad('row-1\0original_name')).toString('utf8')).toBe('Northwind Energy');
+    });
+
+    it('refuses to open under different or missing associated data', () => {
+      const c = new AtRestCipher(MASTER, 'documents');
+      const sealed = c.seal(aad('Northwind Energy'), aad('row-1\0original_name'));
+      expect(() => c.open(sealed, aad('row-2\0original_name'))).toThrow(/unable to authenticate/i);
+      expect(() => c.open(sealed, aad('row-1\0filed_name'))).toThrow(/unable to authenticate/i);
+      expect(() => c.open(sealed)).toThrow(/unable to authenticate/i);
+    });
+
+    it('leaves blobs sealed without it as they were', () => {
+      const c = new AtRestCipher(MASTER, 'inbox');
+      expect(() => c.open(c.seal(aad('x')), aad('row-1'))).toThrow(/unable to authenticate/i);
+    });
+  });
 });
