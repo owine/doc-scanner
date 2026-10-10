@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildFolderIndex, formatArrival, formatExamples } from '../../src/analyze/prompt.js';
+import { buildFolderIndex, formatArrival, formatExamples, systemPrompt } from '../../src/analyze/prompt.js';
 
 describe('buildFolderIndex', () => {
   it('lists folders in path order with short IDs and recent names', () => {
@@ -47,5 +47,16 @@ describe('formatArrival', () => {
     expect(text).toContain('original filename: statement.pdf');
     expect(text).toContain('source note: Fwd: your bill');
     expect(text).toContain('note: showing the first 20 of 31 pages');
+  });
+});
+
+describe('systemPrompt', () => {
+  it('states the configured auto-file threshold', () => {
+    expect(systemPrompt(0.8)).toContain('Documents above 0.80 are filed automatically');
+    expect(systemPrompt(0.85)).toContain('Documents above 0.85 are filed automatically');
+  });
+
+  it('is stable for a given threshold, so the prompt cache holds', () => {
+    expect(systemPrompt(0.8)).toBe(systemPrompt(0.8));
   });
 });

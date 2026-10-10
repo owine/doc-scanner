@@ -152,8 +152,8 @@ async function runCase(input, ctx) {
   return harness.runCase(input, ctx);
 }
 
-async function gradeCase(input, run, _ref, _ctx) {
-  return harness.gradeCase(input, run);
+async function gradeCase(input, run, _ref, ctx) {
+  return harness.gradeCase(input, run, ctx);
 }
 
 function perfFrom(run) { return harness.perfFrom(run); }

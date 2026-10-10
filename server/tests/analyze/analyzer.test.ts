@@ -47,7 +47,7 @@ const goodAnswer = {
 describe('createAnalyzer', () => {
   it('returns a resolved analysis with the served model and usage', async () => {
     const { client } = fakeClient(textReply(goodAnswer));
-    const out = await createAnalyzer({ client, model: 'claude-haiku-5-5', effort: 'low' }).analyze(input, folders);
+    const out = await createAnalyzer({ client, model: 'claude-haiku-5-5', effort: 'low', autoFileThreshold: 0.8 }).analyze(input, folders);
     expect(out).toMatchObject({
       status: 'ok',
       model: 'claude-haiku-5-5',
@@ -58,10 +58,11 @@ describe('createAnalyzer', () => {
 
   it('sends effort and the structured-output format, with the folder list cached first', async () => {
     const { client, create } = fakeClient(textReply(goodAnswer));
-    await createAnalyzer({ client, model: 'claude-sonnet-5-5', effort: 'medium' }).analyze(input, folders);
+    await createAnalyzer({ client, model: 'claude-sonnet-5-5', effort: 'medium', autoFileThreshold: 0.8 }).analyze(input, folders);
     const params = create.mock.calls[0][0];
     expect(params.model).toBe('claude-sonnet-5-5');
     expect(params.output_config.effort).toBe('medium');
+    expect(params.system).toContain('Documents above 0.80 are filed automatically');
     expect(params.output_config.format.type).toBe('json_schema');
     const content = params.messages[0].content;
     expect(content[0]).toMatchObject({ cache_control: { type: 'ephemeral' } });
@@ -71,7 +72,7 @@ describe('createAnalyzer', () => {
 
   it('includes history examples when given', async () => {
     const { client, create } = fakeClient(textReply(goodAnswer));
-    await createAnalyzer({ client, model: 'm', effort: 'low' }).analyze(input, folders, [
+    await createAnalyzer({ client, model: 'm', effort: 'low', autoFileThreshold: 0.8 }).analyze(input, folders, [
       { snippet: 'Northwind Energy', finalName: 'Northwind Energy Jul 2026', folderPath: '/Bills' },
     ]);
     expect(create.mock.calls[0][0].messages[0].content[1].text).toContain('Northwind Energy Jul 2026');
@@ -82,24 +83,24 @@ describe('createAnalyzer', () => {
       stop_reason: 'refusal',
       stop_details: { type: 'refusal', category: 'cyber', explanation: null } as Anthropic.Message['stop_details'],
     });
-    const out = await createAnalyzer({ client, model: 'm', effort: 'low' }).analyze(input, folders);
+    const out = await createAnalyzer({ client, model: 'm', effort: 'low', autoFileThreshold: 0.8 }).analyze(input, folders);
     expect(out).toMatchObject({ status: 'refusal', detail: 'declined (cyber)', usage });
   });
 
   it('maps max_tokens to truncated', async () => {
     const { client } = fakeClient({ stop_reason: 'max_tokens', content: [] });
-    const out = await createAnalyzer({ client, model: 'm', effort: 'low' }).analyze(input, folders);
+    const out = await createAnalyzer({ client, model: 'm', effort: 'low', autoFileThreshold: 0.8 }).analyze(input, folders);
     expect(out.status).toBe('truncated');
   });
 
   it('reports malformed or off-schema answers as invalid', async () => {
     const broken = fakeClient({ content: [{ type: 'text', text: '{nope', citations: null } as Anthropic.TextBlock] });
-    expect((await createAnalyzer({ client: broken.client, model: 'm', effort: 'low' }).analyze(input, folders)).status).toBe(
+    expect((await createAnalyzer({ client: broken.client, model: 'm', effort: 'low', autoFileThreshold: 0.8 }).analyze(input, folders)).status).toBe(
       'invalid',
     );
     const offSchema = fakeClient(textReply({ name: 'x' }));
     expect(
-      (await createAnalyzer({ client: offSchema.client, model: 'm', effort: 'low' }).analyze(input, folders)).status,
+      (await createAnalyzer({ client: offSchema.client, model: 'm', effort: 'low', autoFileThreshold: 0.8 }).analyze(input, folders)).status,
     ).toBe('invalid');
   });
 
@@ -114,7 +115,7 @@ describe('createAnalyzer', () => {
       .mockRejectedValueOnce(new Anthropic.BadRequestError(400, undefined, 'could not process PDF', new Headers()))
       .mockImplementation(ok.create);
     const client = { messages: { create } } as unknown as Pick<Anthropic, 'messages'>;
-    const out = await createAnalyzer({ client, model: 'm', effort: 'low' }).analyze(pdf, folders);
+    const out = await createAnalyzer({ client, model: 'm', effort: 'low', autoFileThreshold: 0.8 }).analyze(pdf, folders);
     expect(out.status).toBe('ok');
     expect(create).toHaveBeenCalledTimes(2);
     const retry = create.mock.calls[1][0].messages[0].content;
@@ -125,13 +126,13 @@ describe('createAnalyzer', () => {
   it('does not swallow a bad request for an ordinary document', async () => {
     const create = vi.fn().mockRejectedValue(new Anthropic.BadRequestError(400, undefined, 'bad', new Headers()));
     const client = { messages: { create } } as unknown as Pick<Anthropic, 'messages'>;
-    await expect(createAnalyzer({ client, model: 'm', effort: 'low' }).analyze(input, folders)).rejects.toThrow('bad');
+    await expect(createAnalyzer({ client, model: 'm', effort: 'low', autoFileThreshold: 0.8 }).analyze(input, folders)).rejects.toThrow('bad');
     expect(create).toHaveBeenCalledTimes(1);
   });
 
   it('lets API errors propagate for the caller to retry', async () => {
     const create = vi.fn().mockRejectedValue(new Error('overloaded'));
     const client = { messages: { create } } as unknown as Pick<Anthropic, 'messages'>;
-    await expect(createAnalyzer({ client, model: 'm', effort: 'low' }).analyze(input, folders)).rejects.toThrow('overloaded');
+    await expect(createAnalyzer({ client, model: 'm', effort: 'low', autoFileThreshold: 0.8 }).analyze(input, folders)).rejects.toThrow('overloaded');
   });
 });

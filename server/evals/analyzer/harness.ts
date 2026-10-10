@@ -7,24 +7,26 @@ import Anthropic from '@anthropic-ai/sdk';
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
 import { z } from 'zod';
 import { createAnalyzer, type Effort } from '../../src/analyze/analyzer.js';
-import { buildFolderIndex, formatArrival, SYSTEM_PROMPT } from '../../src/analyze/prompt.js';
+import { buildFolderIndex, formatArrival, systemPrompt } from '../../src/analyze/prompt.js';
 import type { AnalyzeInput, AnalyzeOutcome, FolderContext } from '../../src/analyze/types.js';
 import { toFolderContexts, type TreeFolder } from '../../src/drive/folder-tree.js';
 import { loadCases, loadSampleConfig, loadTree, stripExtension, type EvalCase } from './cases.js';
 
 /** The contenders. The report only reads directories named baseline / v<N>. */
-export const VARIANTS: Record<string, { model: string; effort: Effort; label: string }> = {
-  baseline: { model: 'claude-haiku-5-5', effort: 'low', label: 'Haiku 5.5, low effort' },
-  v1: { model: 'claude-haiku-5-5', effort: 'medium', label: 'Haiku 5.5, medium effort' },
-  v2: { model: 'claude-sonnet-5-5', effort: 'low', label: 'Sonnet 5.5, low effort' },
-  v3: { model: 'claude-opus-5-5', effort: 'low', label: 'Opus 5.5, low effort' },
+export const VARIANTS: Record<string, { model: string; effort: Effort; threshold: number; label: string }> = {
+  baseline: { model: 'claude-haiku-5-5', effort: 'low', threshold: 0.85, label: 'Haiku 5.5, low effort' },
+  v1: { model: 'claude-haiku-5-5', effort: 'medium', threshold: 0.85, label: 'Haiku 5.5, medium effort' },
+  v2: { model: 'claude-sonnet-5-5', effort: 'low', threshold: 0.85, label: 'Sonnet 5.5, low effort' },
+  v3: { model: 'claude-opus-5-5', effort: 'low', threshold: 0.85, label: 'Opus 5.5, low effort' },
   // Confirmation round for the two finalists, after the photo-filing prompt
   // fix (508fa80) and encrypted-PDF reading; run with --reps 2.
-  v4: { model: 'claude-haiku-5-5', effort: 'medium', label: 'Haiku 5.5, medium effort (fixed prompt)' },
-  v5: { model: 'claude-opus-5-5', effort: 'low', label: 'Opus 5.5, low effort (fixed prompt)' },
+  v4: { model: 'claude-haiku-5-5', effort: 'medium', threshold: 0.85, label: 'Haiku 5.5, medium effort (fixed prompt)' },
+  v5: { model: 'claude-opus-5-5', effort: 'low', threshold: 0.85, label: 'Opus 5.5, low effort (fixed prompt)' },
+  // Calibration check for production: the finalist with the prompt stating
+  // the default auto-file threshold. Run with --reps 2.
+  v6: { model: 'claude-haiku-5-5', effort: 'medium', threshold: 0.8, label: 'Haiku 5.5, medium effort, prompt states 0.80' },
 };
 
-export const AUTO_FILE_THRESHOLD = 0.85;
 const JUDGE_MODEL = process.env.JUDGE_MODEL ?? 'claude-fable-5-1';
 
 // The runner owns retries (with jittered backoff, counted per row), so the
@@ -91,7 +93,7 @@ export async function runCase(rc: RunnerCase, ctx: Ctx) {
     originalName: null,
     source: 'picker',
   };
-  const analyzer = createAnalyzer({ client, model: variant.model, effort: variant.effort });
+  const analyzer = createAnalyzer({ client, model: variant.model, effort: variant.effort, autoFileThreshold: variant.threshold });
   const outcome = await analyzer.analyze(input, folders);
 
   return {
@@ -101,7 +103,7 @@ export async function runCase(rc: RunnerCase, ctx: Ctx) {
     stop_reason: outcome.stopReason,
     folders,
     transcript: [
-      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'system', content: systemPrompt(variant.threshold) },
       {
         role: 'user',
         content: `${buildFolderIndex(folders).text}\n\n[document: ${c.docPath}]\n\n${formatArrival(input, null)}`,
@@ -174,7 +176,7 @@ export async function judgeName(c: EvalCase, proposed: string, folders: FolderCo
   return { ...parsed.data, ...judge };
 }
 
-export async function gradeCase(rc: RunnerCase, run: Awaited<ReturnType<typeof runCase>>) {
+export async function gradeCase(rc: RunnerCase, run: Awaited<ReturnType<typeof runCase>>, ctx: Ctx) {
   const c = rc.evalCase;
   const outcome = run.output as AnalyzeOutcome;
   if (outcome.status !== 'ok') {
@@ -193,7 +195,7 @@ export async function gradeCase(rc: RunnerCase, run: Awaited<ReturnType<typeof r
   const fullOk = folderExact && nameOk ? 1 : 0;
   // The design's auto-file rule: confident AND an existing folder. An
   // unresolved folder or a new-folder proposal always goes to review.
-  const confident = a.confidence >= AUTO_FILE_THRESHOLD && a.folder?.kind === 'existing' ? 1 : 0;
+  const confident = a.confidence >= VARIANTS[ctx.variant]!.threshold && a.folder?.kind === 'existing' ? 1 : 0;
   const folderSaid =
     a.folder === null ? '(unresolved)' : a.folder.kind === 'existing' ? a.folder.path : `NEW ${a.folder.parentPath}/${a.folder.name}`;
   return {

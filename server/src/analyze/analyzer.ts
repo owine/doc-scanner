@@ -1,7 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
 import { buildDocumentContent, UNOPENABLE, type DocumentContent } from './content.js';
-import { buildFolderIndex, formatArrival, formatExamples, SYSTEM_PROMPT } from './prompt.js';
+import { buildFolderIndex, formatArrival, formatExamples, systemPrompt } from './prompt.js';
 import { ModelAnswerSchema, resolveAnalysis } from './resolve.js';
 import type { AnalyzeInput, AnalyzeOutcome, FolderContext, PastExample } from './types.js';
 
@@ -11,6 +11,8 @@ export interface AnalyzerConfig {
   client: Pick<Anthropic, 'messages'>;
   model: string;
   effort: Effort;
+  /** Stated in the prompt so the model knows what its confidence triggers. */
+  autoFileThreshold: number;
   /** Thinking counts against this, so it is sized well above the answer itself. */
   maxTokens?: number;
 }
@@ -39,7 +41,7 @@ export function createAnalyzer(cfg: AnalyzerConfig): Analyzer {
         cfg.client.messages.create({
           model: cfg.model,
           max_tokens: cfg.maxTokens ?? DEFAULT_MAX_TOKENS,
-          system: SYSTEM_PROMPT,
+          system: systemPrompt(cfg.autoFileThreshold),
           output_config: { effort: cfg.effort, format: ANSWER_FORMAT },
           messages: [
             {
