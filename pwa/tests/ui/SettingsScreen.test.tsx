@@ -20,8 +20,8 @@ function setup(over: Partial<DocumentsApi> = {}) {
   } as unknown as DocumentsApi;
   const onBack = vi.fn();
   const onLoggedOut = vi.fn();
-  render(<SettingsScreen email="user@example.test" documents={api} onBack={onBack} onLoggedOut={onLoggedOut} />);
-  return { api, onBack, onLoggedOut };
+  const { unmount } = render(<SettingsScreen email="user@example.test" documents={api} onBack={onBack} onLoggedOut={onLoggedOut} />);
+  return { api, onBack, onLoggedOut, unmount };
 }
 
 describe('SettingsScreen', () => {
@@ -70,6 +70,62 @@ describe('SettingsScreen', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(api.saveSettings).toHaveBeenCalledWith({ excludePaths: ['/Taxes/2026'] }));
     await screen.findByText('Saved.');
+  });
+
+  it('reloads the folder list after the excluded folders change', async () => {
+    const { api } = setup();
+    await screen.findByRole('checkbox', { name: /file automatically/i });
+    expect(api.folders).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Remove /Archive' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await screen.findByText('Saved.');
+    await waitFor(() => expect(api.folders).toHaveBeenCalledTimes(2));
+  });
+
+  it('does not reload the folder list when only other settings change', async () => {
+    const { api } = setup();
+    fireEvent.click(await screen.findByRole('checkbox', { name: /file automatically/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await screen.findByText('Saved.');
+    expect(api.folders).toHaveBeenCalledTimes(1);
+  });
+
+  it('blocks an empty model before sending it', async () => {
+    const { api } = setup();
+    fireEvent.input(await screen.findByRole('textbox', { name: /model/i }), { target: { value: '  ' } });
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+    expect(screen.getByText(/enter a model name/i)).toBeInTheDocument();
+    expect(api.saveSettings).not.toHaveBeenCalled();
+  });
+
+  it('locks the form while saving', async () => {
+    let finish: (s: Settings) => void = () => {};
+    const { api } = setup({
+      saveSettings: vi.fn(() => new Promise<Settings>((resolve) => { finish = resolve; })),
+    });
+    const box = await screen.findByRole('checkbox', { name: /file automatically/i });
+    fireEvent.click(box);
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(api.saveSettings).toHaveBeenCalled());
+    expect(box).toBeDisabled();
+    finish({ ...SETTINGS, autoFileEnabled: true });
+    await screen.findByText('Saved.');
+    expect(box).toBeEnabled();
+  });
+
+  it('ignores a save that finishes after the screen is gone', async () => {
+    let finish: (s: Settings) => void = () => {};
+    const { api, unmount } = setup({
+      saveSettings: vi.fn(() => new Promise<Settings>((resolve) => { finish = resolve; })),
+    });
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove /Archive' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(api.saveSettings).toHaveBeenCalled());
+    unmount();
+    finish({ ...SETTINGS, excludePaths: [] });
+    await new Promise((r) => setTimeout(r, 0));
+    // A reload after unmount would be a sign the guard is missing.
+    expect(api.folders).toHaveBeenCalledTimes(1);
   });
 
   it('refreshes the folder list', async () => {

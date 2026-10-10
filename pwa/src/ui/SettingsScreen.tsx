@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { api, ApiError } from '../api.js';
 import { documentsApi, type DocumentsApi } from '../documents/api.js';
 import type { Settings } from '../documents/types.js';
@@ -40,47 +40,63 @@ export function SettingsScreen({ email, documents = documentsApi, onBack, onLogg
   const [signOutError, setSignOutError] = useState<string | null>(null);
   const [thresholdText, setThresholdText] = useState('');
 
+  // Set false on unmount so nothing is set after an await resolves late.
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
   useEffect(() => {
     documents
       .settings()
       .then((s) => {
+        if (!mounted.current) return;
         setSaved(s);
         setDraft(s);
         setThresholdText(String(s.autoFileThreshold));
       })
-      .catch(() => setStatus('Could not load settings.'));
+      .catch(() => mounted.current && setStatus('Could not load settings.'));
   }, [documents]);
 
   const set = <K extends keyof Settings>(key: K, value: Settings[K]) => setDraft((d) => (d ? { ...d, [key]: value } : d));
   const patch = draft && saved ? changedFields(draft, saved) : {};
-  const thresholdValid = thresholdText.trim() !== '' && Number.isFinite(Number(thresholdText));
+  const thresholdNumber = Number(thresholdText);
+  const thresholdValid = thresholdText.trim() !== '' && Number.isFinite(thresholdNumber) && thresholdNumber >= 0.5 && thresholdNumber <= 1;
+  const modelValid = draft === null || draft.model.trim() !== '';
   const dirty = Object.keys(patch).length > 0;
 
   async function save() {
-    if (!dirty || !thresholdValid) return;
+    if (!dirty || !thresholdValid || !modelValid) return;
     setBusy(true);
     setStatus(null);
     try {
       const s = await documents.saveSettings(patch);
+      if (!mounted.current) return;
       setSaved(s);
       setDraft(s);
       setThresholdText(String(s.autoFileThreshold));
       setStatus('Saved.');
+      // /api/folders hides excluded subtrees, so the list is now stale.
+      if ('excludePaths' in patch) void folders.reload();
     } catch (err) {
+      if (!mounted.current) return;
       setStatus(
         err instanceof ApiError && err.code === 'invalid_input'
-          ? 'A value was rejected. The threshold must be between 0.5 and 1, with at most two decimals.'
+          ? "A value was rejected: the model can't be empty, and the threshold must be 0.5 to 1 with at most two decimals."
           : 'Could not save settings.',
       );
     } finally {
-      setBusy(false);
+      if (mounted.current) setBusy(false);
     }
   }
 
   async function refreshFolders() {
     setRefreshed(false);
     await folders.refresh();
-    setRefreshed(true);
+    if (mounted.current) setRefreshed(true);
   }
 
   async function logout() {
@@ -88,6 +104,7 @@ export function SettingsScreen({ email, documents = documentsApi, onBack, onLogg
     try {
       await api.logout();
     } catch {
+      if (!mounted.current) return;
       // The server keeps the live session until it restarts, so leaving the
       // screen now would look signed out while it is not.
       setSignOutError('Could not sign out. Check your connection and try again.');
@@ -107,9 +124,12 @@ export function SettingsScreen({ email, documents = documentsApi, onBack, onLogg
 
       <h2>Filing</h2>
       {draft === null ? (
-        <p class="muted">{status ?? 'Loading…'}</p>
+        <p role="status" class="muted">
+          {status ?? 'Loading…'}
+        </p>
       ) : (
         <div class="card">
+          <fieldset disabled={busy} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
           <label class="field">
             <input type="checkbox" checked={draft.autoFileEnabled} onChange={(e) => set('autoFileEnabled', (e.target as HTMLInputElement).checked)} />{' '}
             File automatically when confident
@@ -133,6 +153,7 @@ export function SettingsScreen({ email, documents = documentsApi, onBack, onLogg
           <label class="field">
             <span class="field-label">Model</span>
             <input value={draft.model} onInput={(e) => set('model', (e.target as HTMLInputElement).value)} />
+            {!modelValid && <span class="error-text">Enter a model name.</span>}
           </label>
           <label class="field">
             <span class="field-label">Effort</span>
@@ -175,14 +196,13 @@ export function SettingsScreen({ email, documents = documentsApi, onBack, onLogg
               </button>
             )}
           </div>
-          {status && (
-            <p role="status" class={status === 'Saved.' ? 'muted' : 'error-text'}>
-              {status}
-            </p>
-          )}
-          <button class="btn" disabled={busy || !dirty || !thresholdValid} onClick={() => void save()}>
+          <p role="status" class={status === 'Saved.' ? 'muted' : 'error-text'}>
+            {status}
+          </p>
+          <button class="btn" disabled={busy || !dirty || !thresholdValid || !modelValid} onClick={() => void save()}>
             Save
           </button>
+          </fieldset>
         </div>
       )}
 
@@ -191,9 +211,9 @@ export function SettingsScreen({ email, documents = documentsApi, onBack, onLogg
         <button class="btn btn-secondary" disabled={folders.busy} onClick={() => void refreshFolders()}>
           {folders.busy ? 'Refreshing…' : 'Refresh folder list'}
         </button>
-        {refreshed && !folders.busy && (
-          <p class={folders.error ? 'error-text' : 'muted'}>{folders.error ?? `Loaded ${folders.folders?.length ?? 0} folders.`}</p>
-        )}
+        <p role="status" class={folders.error ? 'error-text' : 'muted'}>
+          {refreshed && !folders.busy ? (folders.error ?? `Loaded ${folders.folders?.length ?? 0} folders.`) : ''}
+        </p>
       </div>
 
       <h2>Theme</h2>
