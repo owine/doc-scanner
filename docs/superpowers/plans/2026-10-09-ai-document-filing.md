@@ -2276,6 +2276,7 @@ import { createHash } from 'node:crypto';
 import { ServerError } from '@protontech/drive-sdk';
 import { makeHarness, ANALYSIS } from './harness.js';
 import { fileStage } from '../../src/documents/stages/file.js';
+import { FolderNameTakenError } from '../../src/drive/client.js';
 import type { Decision } from '../../src/documents/types.js';
 
 let h: ReturnType<typeof makeHarness>;
@@ -2340,6 +2341,16 @@ describe('fileStage', () => {
     expect(h.drive.uploadFile.mock.calls[0][3]).toEqual({ parentFolderUid: 'EXISTINGWATER' });
   });
 
+  it('sends the document to review when a file already owns the new folder\'s name', async () => {
+    h = makeHarness();
+    h.drive.createFolder.mockRejectedValue(new FolderNameTakenError('SOMEFILE'));
+    const doc = filingDoc(NEW);
+    await fileStage(doc, h.ctx);
+    expect(h.repo.get(doc.id)).toMatchObject({ state: 'needs_review' });
+    expect(h.repo.get(doc.id)?.reviewReason).toContain('already uses');
+    expect(h.drive.uploadFile).not.toHaveBeenCalled();
+  });
+
   it('after a crash mid-upload, finds the file it already uploaded instead of uploading twice', async () => {
     h = makeHarness();
     const sha1 = createHash('sha1').update(new TextEncoder().encode('statement bytes')).digest('hex');
@@ -2386,6 +2397,7 @@ describe('fileStage', () => {
 ```ts
 import { createHash } from 'node:crypto';
 import { ServerError } from '@protontech/drive-sdk';
+import { FolderNameTakenError } from '../../drive/client.js';
 import { logger } from '../../logger.js';
 import type { StageContext } from '../deps.js';
 import { extensionFor } from '../extension.js';
@@ -2477,6 +2489,17 @@ export async function fileStage(doc: DocumentRow, ctx: StageContext): Promise<vo
     }
     logger.info({ documentId: doc.id, autoFiled: doc.autoFiled, userEdited: doc.userEdited }, 'document filed');
   } catch (err) {
+    if (err instanceof FolderNameTakenError) {
+      // Retrying can't help: something else owns the name. Ask the user.
+      ctx.repo.transition(
+        doc.id,
+        'filing',
+        'needs_review',
+        { reviewReason: 'a file or unreadable item already uses the new folder\'s name', discardRequested: false },
+        KEEP_GOING,
+      );
+      return;
+    }
     if (!isAuthExpired(err)) throw err;
     logger.warn({ documentId: doc.id }, 'proton session expired while filing; waiting for login');
     // Clears a pending discard too: from awaiting_login the user can discard again.
@@ -2496,7 +2519,9 @@ async function resolveFolder(
   const folderPath = f.parentPath === '/' ? `/${f.name}` : `${f.parentPath}/${f.name}`;
   if (f.createdLinkId) return { folderLinkId: f.createdLinkId, folderPath };
 
-  // createFolder throws on a name clash, so reuse a folder that already exists.
+  // Reuse a folder that already exists; createFolder throws FolderNameTakenError
+  // when something the lookup can't see (a file, an unreadable item) owns the
+  // name — fileStage turns that into a review with a clear reason.
   const createdLinkId = (await drive.findChildFolder(f.parentLinkId, f.name)) ?? (await drive.createFolder(f.parentLinkId, f.name));
   // Saved at once: a crash before upload must not create the folder again.
   ctx.repo.transition(id, 'filing', 'filing', { decision: { ...decision, folder: { ...f, createdLinkId } } }, KEEP_GOING);
@@ -2505,7 +2530,7 @@ async function resolveFolder(
 }
 ```
 
-- [ ] **Step 4: Run to see them pass** — same command as Step 2. Expected: 8 passed.
+- [ ] **Step 4: Run to see them pass** — same command as Step 2. Expected: 9 passed.
 
 - [ ] **Step 5: Commit**
 
