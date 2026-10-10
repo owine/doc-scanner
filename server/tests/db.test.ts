@@ -81,4 +81,39 @@ describe('openDb', () => {
       cleanup();
     }
   });
+
+  const insertDoc = (db: ReturnType<typeof createTestDb>['db'], state: string, discardedAt: string | null) =>
+    db.prepare(
+      `INSERT INTO documents (id, seq, created_at, updated_at, source, mime, size, sha256, state, next_attempt_at, discarded_at)
+       VALUES ('d1', 1, 't', 't', 'picker', 'application/pdf', 10, 'abc', ?, 't', ?)`,
+    ).run(state, discardedAt);
+
+  it('seeds document_seq at 0', () => {
+    const { db, cleanup } = createTestDb();
+    try {
+      expect(db.prepare('SELECT value FROM document_seq WHERE id = 1').get()).toEqual({ value: 0 });
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('rejects an unknown document state', () => {
+    const { db, cleanup } = createTestDb();
+    try {
+      expect(() => insertDoc(db, 'bogus', null)).toThrow();
+      expect(() => insertDoc(db, 'received', null)).not.toThrow();
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('rejects a discarded row without discarded_at', () => {
+    const { db, cleanup } = createTestDb();
+    try {
+      expect(() => insertDoc(db, 'discarded', null)).toThrow();
+      expect(() => insertDoc(db, 'discarded', 't')).not.toThrow();
+    } finally {
+      cleanup();
+    }
+  });
 });

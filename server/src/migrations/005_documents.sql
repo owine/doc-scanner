@@ -13,14 +13,14 @@ CREATE TABLE IF NOT EXISTS documents (
   source             TEXT    NOT NULL CHECK (source IN ('picker', 'scanner', 'share', 'email')),
   original_name      TEXT,
   mime               TEXT    NOT NULL,
-  size               INTEGER NOT NULL,
+  size               INTEGER NOT NULL CHECK (size >= 0),
   sha256             TEXT    NOT NULL,
   source_context     TEXT,
   state              TEXT    NOT NULL CHECK (state IN (
                        'received', 'analyzing', 'preparing', 'ready', 'needs_review',
                        'awaiting_login', 'filing', 'filed', 'failed', 'discarded')),
   review_reason      TEXT,
-  attempts           INTEGER NOT NULL DEFAULT 0,
+  attempts           INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
   next_attempt_at    TEXT    NOT NULL,
   error              TEXT,
   analysis           TEXT CHECK (analysis IS NULL OR json_valid(analysis)),
@@ -30,10 +30,12 @@ CREATE TABLE IF NOT EXISTS documents (
   filed_name         TEXT,
   filed_folder_path  TEXT,
   drive_node_uid     TEXT,
-  auto_filed         INTEGER NOT NULL DEFAULT 0,
-  user_edited        INTEGER NOT NULL DEFAULT 0,
-  discard_requested  INTEGER NOT NULL DEFAULT 0,
-  discarded_at       TEXT
+  auto_filed         INTEGER NOT NULL DEFAULT 0 CHECK (auto_filed IN (0, 1)),
+  user_edited        INTEGER NOT NULL DEFAULT 0 CHECK (user_edited IN (0, 1)),
+  discard_requested  INTEGER NOT NULL DEFAULT 0 CHECK (discard_requested IN (0, 1)),
+  discarded_at       TEXT,
+  -- A discarded row without discarded_at would never be purged.
+  CHECK ((state = 'discarded') = (discarded_at IS NOT NULL))
 );
 
 CREATE INDEX IF NOT EXISTS idx_documents_sha256 ON documents(sha256);
