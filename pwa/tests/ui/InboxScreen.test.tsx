@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/preact';
+import { act, render, screen, fireEvent, waitFor, within } from '@testing-library/preact';
 import { InboxScreen } from '../../src/ui/inbox/InboxScreen.js';
 import { DocumentSync } from '../../src/documents/sync.js';
 import type { DocumentsApi } from '../../src/documents/api.js';
@@ -150,8 +150,13 @@ describe('InboxScreen', () => {
       // Let the mount's own re-renders and the folder load settle first.
       await waitFor(() => expect(api.folders).toHaveBeenCalled());
       await new Promise((r) => setTimeout(r, 20));
+      expect(screen.getByRole('region', { name: 'Discarded' })).toBeInTheDocument();
       clock += 2 * 86_400_000 + 60_000;
-      vi.advanceTimersByTime(60_000);
+      // Nothing re-renders until the interval fires.
+      expect(screen.getByRole('region', { name: 'Discarded' })).toBeInTheDocument();
+      act(() => {
+        vi.advanceTimersByTime(60_000);
+      });
       await waitFor(() => expect(screen.queryByRole('region', { name: 'Discarded' })).toBeNull());
     } finally {
       vi.useRealTimers();
@@ -164,7 +169,7 @@ describe('InboxScreen', () => {
     sync.error = new Error('offline');
     const api = { folders: vi.fn().mockResolvedValue({ walkedAt: NOW.toISOString(), folders: FOLDERS }), refreshFolders: vi.fn() } as unknown as DocumentsApi;
     render(<InboxScreen sync={sync} documents={api} now={() => NOW} onScan={vi.fn()} onSavedScans={vi.fn()} onSettings={vi.fn()} onSignInAgain={vi.fn()} />);
-    expect(screen.getByText("Can't reach the server.")).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent("Can't reach the server.");
     expect(screen.queryByText(/nothing to review/i)).toBeNull();
     expect(screen.queryByText(/showing what was last loaded/i)).toBeNull();
     await waitFor(() => expect(api.folders).toHaveBeenCalled());
