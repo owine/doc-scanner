@@ -35,6 +35,26 @@ describe('loadConfig', () => {
     expect(() => loadConfig({ ...base, AUTO_FILE_THRESHOLD: '1.5' })).toThrow(/AUTO_FILE_THRESHOLD/);
   });
 
+  it('treats a blank threshold as unset', () => {
+    expect(loadConfig({ ...base, AUTO_FILE_THRESHOLD: '' }).AUTO_FILE_THRESHOLD).toBe(0.8);
+    expect(loadConfig({ ...base, AUTO_FILE_THRESHOLD: '  ' }).AUTO_FILE_THRESHOLD).toBe(0.8);
+  });
+
+  it('accepts the threshold bounds and float-awkward two-decimal values', () => {
+    expect(loadConfig({ ...base, AUTO_FILE_THRESHOLD: '0' }).AUTO_FILE_THRESHOLD).toBe(0);
+    expect(loadConfig({ ...base, AUTO_FILE_THRESHOLD: '1' }).AUTO_FILE_THRESHOLD).toBe(1);
+    expect(loadConfig({ ...base, AUTO_FILE_THRESHOLD: '0.29' }).AUTO_FILE_THRESHOLD).toBe(0.29);
+  });
+
+  it('parses AUTO_FILE_ENABLED true and 1 as true', () => {
+    expect(loadConfig({ ...base, AUTO_FILE_ENABLED: 'true' }).AUTO_FILE_ENABLED).toBe(true);
+    expect(loadConfig({ ...base, AUTO_FILE_ENABLED: '1' }).AUTO_FILE_ENABLED).toBe(true);
+  });
+
+  it('rejects a blank ANALYZER_MODEL', () => {
+    expect(() => loadConfig({ ...base, ANALYZER_MODEL: '  ' })).toThrow(/ANALYZER_MODEL/);
+  });
+
   it('rejects a threshold with more than two decimals', () => {
     expect(() => loadConfig({ ...base, AUTO_FILE_THRESHOLD: '0.875' })).toThrow(/AUTO_FILE_THRESHOLD/);
     expect(loadConfig({ ...base, AUTO_FILE_THRESHOLD: '0.85' }).AUTO_FILE_THRESHOLD).toBe(0.85);
