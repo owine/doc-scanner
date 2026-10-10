@@ -11,7 +11,6 @@ import { toView } from '../documents/view.js';
 import { isUnderAny } from '../drive/folder-tree.js';
 import { logger } from '../logger.js';
 import { errorName } from '../observability/error-name.js';
-import { captureDriveFailure } from '../observability/report.js';
 import { sessionMiddleware, type AuthContext } from './middleware.js';
 
 type Env = { Variables: { auth?: AuthContext } };
@@ -242,10 +241,9 @@ export function folderRoutes(deps: { store: SessionStore; pipeline: Pipeline }) 
     try {
       await deps.pipeline.worker.refreshFolderCache();
     } catch (err) {
-      // The type only: a walk error's message can quote folder paths. Still
-      // reported, as it was when it escaped to the Sentry middleware.
+      // The type only: a walk error's message can quote folder paths.
+      // DriveClient.walkFolderTree has already reported it (as folder-walk).
       logger.error({ errName: errorName(err) }, 'folder refresh failed');
-      captureDriveFailure(err, 'folder-lookup');
       return c.json({ error: 'refresh_failed' }, 502);
     }
     // Analyses parked for want of a tree can run now.

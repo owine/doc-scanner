@@ -336,7 +336,7 @@ export class DriveClient {
 
   /** Every folder in My files with its files; see folder-tree.ts. */
   async walkFolderTree(opts?: WalkOptions): Promise<TreeFolder[]> {
-    return walkFolderTree(this.sdk, opts);
+    return reportingDriveFailure('folder-walk', () => walkFolderTree(this.sdk, opts));
   }
 
   /** Downloads, decrypts and verifies a file's active revision into memory. */

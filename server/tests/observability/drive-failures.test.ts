@@ -123,6 +123,17 @@ describe('Drive failure reporting', () => {
     expect(tagsOf(0)).toMatchObject({ 'drive.operation': 'folder-lookup' });
   });
 
+  it('reports one event tagged folder-walk when the folder tree walk fails', async () => {
+    mockSdk.getMyFilesRootFolder.mockRejectedValue(new Error('volume not found'));
+    const client = await makeClient(db);
+
+    await expect(client.walkFolderTree()).rejects.toThrow('volume not found');
+    await flushEvents();
+
+    expect(events).toHaveLength(1);
+    expect(tagsOf(0)).toMatchObject({ 'drive.operation': 'folder-walk' });
+  });
+
   it('reports a folder-create failure but not an expected name clash', async () => {
     const client = await makeClient(db);
     mockSdk.createFolder.mockRejectedValueOnce(new sdkErrors.NodeWithSameNameExistsValidationError('exists', 1, 'N1'));
