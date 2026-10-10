@@ -363,11 +363,19 @@ export class DocumentRepo {
     }
   }
 
-  listChangedSince(seq: number, limit = 500): DocumentRow[] {
-    const rows = this.db
+  /**
+   * A page of documents changed after `seq`, and the cursor for the next
+   * page. The cursor is the last seq as read, before decoding: quarantining
+   * an unreadable row gives it a new seq above every other, and a cursor
+   * taken from that would skip the rows not read yet. The quarantined row
+   * comes back on the next page.
+   */
+  listChangedSince(seq: number, limit = 500): { rows: DocumentRow[]; cursor: number } {
+    const raw = this.db
       .prepare('SELECT * FROM documents WHERE seq > ? ORDER BY seq LIMIT ?')
       .all(seq, limit) as Raw[];
-    return rows.map((r) => this.decode(r));
+    const cursor = raw.length > 0 ? Number(raw[raw.length - 1]!.seq) : seq;
+    return { rows: raw.map((r) => this.decode(r)), cursor };
   }
 
   /** On login: everything waiting for a session goes back to filing, due now. */

@@ -581,6 +581,6 @@ describe('document route edges', () => {
     const res = await app.request('/api/documents', { method: 'POST', body: fd, headers: { cookie } });
     expect(res.status).toBe(413);
     expect(await res.json()).toEqual({ error: 'payload_too_large' });
-    expect(pipeline.repo.listChangedSince(0)).toHaveLength(0);
+    expect(pipeline.repo.listChangedSince(0).rows).toHaveLength(0);
   });
 });

@@ -169,7 +169,10 @@ describe('DocumentRepo', () => {
     const cursor = a.seq;
     const b = r.insert(doc({ sha256: 'b'.repeat(64) }));
     r.transition(a.id, 'received', 'analyzing');
-    expect(r.listChangedSince(cursor).map((d) => d.id).sort()).toEqual([a.id, b.id].sort());
+    const page = r.listChangedSince(cursor);
+    expect(page.rows.map((d) => d.id).sort()).toEqual([a.id, b.id].sort());
+    expect(page.cursor).toBe(r.get(a.id)!.seq);
+    expect(r.listChangedSince(page.cursor)).toEqual({ rows: [], cursor: page.cursor });
   });
 
   it('wakes awaiting-login documents into filing', () => {
@@ -418,6 +421,21 @@ describe('DocumentRepo', () => {
       expect(r.get(a.id)).toMatchObject({ state: 'filed', filedName: null, driveNodeUid: 'NODE1' });
     });
 
+    it('pages by the seqs as read, so a row quarantined at the end of a full page comes back next poll', () => {
+      const r = repo();
+      const ids = [0, 1, 2, 3].map((i) => r.insert(doc({ sha256: String(i).repeat(64) })).id);
+      const lastOnPage = ids[2]!;
+      const seqAsRead = r.get(lastOnPage)!.seq;
+      db.prepare('UPDATE documents SET original_name = ? WHERE id = ?').run(new Uint8Array(40), lastOnPage);
+      const first = r.listChangedSince(0, 3);
+      expect(first.rows.map((d) => d.id)).toEqual(ids.slice(0, 3));
+      // Not the quarantined row's new seq, which is past the unread fourth row.
+      expect(first.cursor).toBe(seqAsRead);
+      const second = r.listChangedSince(first.cursor, 3);
+      expect(second.rows.map((d) => d.id)).toEqual([ids[3], lastOnPage]);
+      expect(second.rows[1]).toMatchObject({ state: 'failed' });
+    });
+
     it('never lets an undecryptable row block the work queue', () => {
       const r = repo();
       const bad = r.insert(named());
@@ -433,7 +451,7 @@ describe('DocumentRepo', () => {
       const bad = r.insert(named());
       const good = r.insert(doc({ sha256: 'c'.repeat(64) }));
       db.prepare('UPDATE documents SET original_name = ? WHERE id = ?').run(new Uint8Array(3), bad.id);
-      const rows = r.listChangedSince(0);
+      const { rows } = r.listChangedSince(0);
       expect(rows.map((d) => d.id).sort()).toEqual([bad.id, good.id].sort());
       expect(rows.find((d) => d.id === bad.id)?.state).toBe('failed');
     });

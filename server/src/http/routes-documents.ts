@@ -154,8 +154,8 @@ export function documentRoutes(deps: { store: SessionStore; pipeline: Pipeline }
   r.get('/', (c) => {
     const since = Number(c.req.query('since') ?? '0');
     if (!Number.isInteger(since) || since < 0) return c.json({ error: 'invalid_cursor' }, 400);
-    const docs = repo.listChangedSince(since);
-    return c.json({ documents: docs.map(toView), cursor: docs.length ? docs[docs.length - 1]!.seq : since });
+    const { rows, cursor } = repo.listChangedSince(since);
+    return c.json({ documents: rows.map(toView), cursor });
   });
 
   r.get('/:id', (c) => {
