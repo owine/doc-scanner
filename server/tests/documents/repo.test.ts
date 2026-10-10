@@ -49,6 +49,32 @@ describe('DocumentRepo', () => {
     expect(r.get(a.id)?.state).toBe('analyzing');
   });
 
+  it('cancels a pending discard only while it is still pending', () => {
+    const r = repo();
+    const a = r.insert(doc());
+    expect(r.cancelDiscardRequest(a.id)).toBe(false); // nothing pending
+    r.transition(a.id, 'received', 'analyzing');
+    expect(r.requestDiscard(a.id)).toBe('requested');
+    const before = r.get(a.id)!.seq;
+    expect(r.cancelDiscardRequest(a.id)).toBe(true);
+    expect(r.get(a.id)).toMatchObject({ state: 'analyzing', discardRequested: false });
+    expect(r.get(a.id)!.seq).toBeGreaterThan(before);
+    expect(r.transition(a.id, 'analyzing', 'preparing')).toBe(true);
+    // Once applied, it is too late.
+    expect(r.requestDiscard(a.id)).toBe('requested');
+    expect(r.applyRequestedDiscard(a.id)).toBe(true);
+    expect(r.cancelDiscardRequest(a.id)).toBe(false);
+    expect(r.get(a.id)?.state).toBe('discarded');
+  });
+
+  it('never cancels on a discarded row, even with a stray flag', () => {
+    const r = repo();
+    const a = r.insert(doc());
+    r.transition(a.id, 'received', 'discarded', { discardedAt: clock, discardRequested: true }, { ignorePendingDiscard: true });
+    expect(r.cancelDiscardRequest(a.id)).toBe(false);
+    expect(r.get(a.id)).toMatchObject({ state: 'discarded', discardRequested: true });
+  });
+
   it('refuses to move a working document on once a discard was requested', () => {
     const r = repo();
     const a = r.insert(doc());

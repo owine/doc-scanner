@@ -336,6 +336,52 @@ describe('intake', () => {
     return app.request('/api/documents', { method: 'POST', body: fd, headers: { cookie } });
   }
 
+  it('re-uploading a failed document resets and retries it, restoring a lost original', async () => {
+    const { app, cookie, pipeline } = await setup();
+    const { id } = (await (await upload(app, cookie)).json()) as { id: string };
+    expect(pipeline.repo.transition(id, 'received', 'failed', { attempts: 3, error: 'boom' })).toBe(true);
+    pipeline.inbox.deleteAll(id);
+    const again = await upload(app, cookie);
+    expect(again.status).toBe(200);
+    expect(await again.json()).toEqual({ id, duplicate: true });
+    expect(pipeline.inbox.has(id, 'original')).toBe(true);
+    expect(pipeline.inbox.get(id, 'original').toString()).toBe('statement');
+    // No analysis yet, so it restarts at `received`; with no folder tree the
+    // worker parks it there at once.
+    expect(pipeline.repo.get(id)).toMatchObject({ state: 'received', attempts: 0, error: null });
+  });
+
+  it('re-uploading a document with a pending discard keeps it', async () => {
+    const { app, cookie, pipeline } = await setup();
+    const { id } = (await (await upload(app, cookie)).json()) as { id: string };
+    pipeline.repo.transition(id, 'received', 'analyzing');
+    expect(pipeline.repo.requestDiscard(id)).toBe('requested');
+    const again = await upload(app, cookie);
+    expect(await again.json()).toEqual({ id, duplicate: true });
+    expect(pipeline.repo.get(id)).toMatchObject({ state: 'analyzing', discardRequested: false });
+  });
+
+  it('strips control characters from arrival metadata and caps its length', async () => {
+    const { app, cookie, pipeline } = await setup();
+    const res = await send(app, cookie, new File(['Northwind'], 'x.txt', { type: 'text/plain' }), {
+      originalName: `Northwind\r\nEnergy\u0000bill ${'a'.repeat(300)}.pdf`,
+      sourceContext: `Forwarded by\tNorthwind\u2028${'b'.repeat(3000)}`,
+    });
+    const { id } = (await res.json()) as { id: string };
+    const doc = pipeline.repo.get(id)!;
+    expect(doc.originalName).toMatch(/^Northwind Energy bill a+$/);
+    expect(doc.originalName).toHaveLength(255);
+    expect(doc.sourceContext).toMatch(/^Forwarded by Northwind b+$/);
+    expect(doc.sourceContext).toHaveLength(2000);
+  });
+
+  it('falls back to the file name when the given name is only control characters', async () => {
+    const { app, cookie, pipeline } = await setup();
+    const res = await send(app, cookie, new File(['Northwind'], 'Northwind bill.txt', { type: 'text/plain' }), { originalName: '\n\t', sourceContext: '\u0007' });
+    const { id } = (await res.json()) as { id: string };
+    expect(pipeline.repo.get(id)).toMatchObject({ originalName: 'Northwind bill.txt', sourceContext: null });
+  });
+
   it('stores the bare, lowercased MIME type', async () => {
     const { app, cookie, pipeline } = await setup();
     const res = await send(app, cookie, new File(['Northwind'], 'note.txt', { type: 'text/plain;charset=utf-8' }));

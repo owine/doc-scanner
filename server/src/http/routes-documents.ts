@@ -20,6 +20,20 @@ const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 /** Email arrives with its own credential (email-in spec), never a browser cookie. */
 const COOKIE_SOURCES = ['picker', 'scanner', 'share'] as const;
 
+const MAX_NAME_CHARS = 255;
+const MAX_CONTEXT_CHARS = 2000;
+
+/**
+ * Arrival metadata as stored: it is quoted into the analyzer prompt's
+ * <arrival> block, so each run of control characters (newlines included)
+ * becomes one space, and the length is capped. Null when nothing is left.
+ */
+function arrivalText(value: unknown, maxChars: number): string | null {
+  if (typeof value !== 'string') return null;
+  const clean = [...value.replace(/[\p{Cc}\p{Zl}\p{Zp}]+/gu, ' ').trim()].slice(0, maxChars).join('').trim();
+  return clean || null;
+}
+
 const requireAuth: MiddlewareHandler<Env> = async (c, next) => {
   if (!c.get('auth')) return c.json({ error: 'not_authenticated' }, 401);
   await next();
@@ -86,24 +100,32 @@ export function documentRoutes(deps: { store: SessionStore; pipeline: Pipeline }
       if (bytes.length === 0) return c.json({ error: 'empty_file' }, 400);
       const sha256 = createHash('sha256').update(bytes).digest('hex');
 
-      const existing = repo.findActiveBySha256(sha256);
+      let existing = repo.findActiveBySha256(sha256);
+      // Sending it again means "keep it": withdraw a pending discard. If the
+      // discard has already been applied, this is a new upload.
+      if (existing?.discardRequested && !repo.cancelDiscardRequest(existing.id)) existing = null;
       if (existing) {
         if (existing.state === 'failed') {
-          repo.transition(existing.id, 'failed', restartState(existing), { attempts: 0, error: null, nextAttemptAt: new Date() });
+          // A failure for want of its original (InboxBlobMissingError) is fixed by this very upload.
+          if (!inbox.has(existing.id, 'original')) inbox.put(existing.id, 'original', bytes);
+          const restarted = repo.transition(existing.id, 'failed', restartState(existing), {
+            attempts: 0,
+            error: null,
+            nextAttemptAt: new Date(),
+          });
+          if (!restarted) return c.json({ error: 'conflict' }, 409);
           void worker.wake();
         }
         return c.json({ id: existing.id, duplicate: true }, 200);
       }
 
-      const originalName = form!.get('originalName');
-      const sourceContext = form!.get('sourceContext');
       const doc = repo.insert({
         source: source as (typeof COOKIE_SOURCES)[number],
-        originalName: typeof originalName === 'string' && originalName ? originalName : file.name || null,
+        originalName: arrivalText(form!.get('originalName'), MAX_NAME_CHARS) ?? arrivalText(file.name, MAX_NAME_CHARS),
         mime: intakeMime(file.type, bytes, file.name || null),
         size: bytes.length,
         sha256,
-        sourceContext: typeof sourceContext === 'string' && sourceContext ? sourceContext : null,
+        sourceContext: arrivalText(form!.get('sourceContext'), MAX_CONTEXT_CHARS),
       });
       try {
         inbox.put(doc.id, 'original', bytes);

@@ -180,6 +180,21 @@ export class DocumentRepo {
   }
 
   /**
+   * Withdraws a pending discard (the user re-uploaded the document). A
+   * compare-and-set: false when none is pending or it has already been
+   * applied, in which case the caller treats the upload as new.
+   */
+  cancelDiscardRequest(id: string): boolean {
+    const res = this.db
+      .prepare(
+        `UPDATE documents SET discard_requested = 0, seq = ?, updated_at = ?
+         WHERE id = ? AND discard_requested = 1 AND state != 'discarded'`,
+      )
+      .run(this.nextSeq(), iso(this.now()), id);
+    return Number(res.changes) === 1;
+  }
+
+  /**
    * Called by the worker when a stage could not move on: honours a pending
    * discard. Refuses a filed row, and a filing row whose upload may already
    * have happened (filing_target is written just before the upload).
