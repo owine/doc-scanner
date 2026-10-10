@@ -9,6 +9,15 @@ import { FOLDERS, makeDoc } from '../documents/fixtures.js';
 
 const NOW = new Date('2026-10-10T12:00:00.000Z');
 
+/** Waits until the inbox's folder load has finished and its re-render has flushed. */
+async function folderLoad(api: DocumentsApi) {
+  const folders = vi.mocked(api.folders);
+  await waitFor(() => expect(folders).toHaveBeenCalled());
+  await act(async () => {
+    await folders.mock.results[0]!.value;
+  });
+}
+
 function setup(docs: DocumentView[], over: Partial<DocumentsApi> = {}) {
   const sync = new DocumentSync({ list: vi.fn().mockResolvedValue({ documents: [], cursor: 0 }) });
   sync.loaded = true;
@@ -172,8 +181,7 @@ describe('InboxScreen', () => {
       render(<InboxScreen sync={sync} documents={api} now={() => new Date(clock)} onScan={vi.fn()} onSavedScans={vi.fn()} onSettings={vi.fn()} onSignInAgain={vi.fn()} />);
       expect(screen.getByRole('region', { name: 'Discarded' })).toBeInTheDocument();
       // Let the mount's own re-renders and the folder load settle first.
-      await waitFor(() => expect(api.folders).toHaveBeenCalled());
-      await new Promise((r) => setTimeout(r, 20));
+      await folderLoad(api);
       expect(screen.getByRole('region', { name: 'Discarded' })).toBeInTheDocument();
       clock += 2 * 86_400_000 + 60_000;
       // Nothing re-renders until the interval fires.
@@ -196,8 +204,7 @@ describe('InboxScreen', () => {
     expect(screen.getByRole('status')).toHaveTextContent("Can't reach the server.");
     expect(screen.queryByText(/nothing to review/i)).toBeNull();
     expect(screen.queryByText(/showing what was last loaded/i)).toBeNull();
-    await waitFor(() => expect(api.folders).toHaveBeenCalled());
-    await new Promise((r) => setTimeout(r, 20));
+    await folderLoad(api);
   });
 
   it('keeps the documents and warns when the server becomes unreachable', async () => {
@@ -209,8 +216,7 @@ describe('InboxScreen', () => {
     render(<InboxScreen sync={sync} documents={api} now={() => NOW} onScan={vi.fn()} onSavedScans={vi.fn()} onSettings={vi.fn()} onSignInAgain={vi.fn()} />);
     expect(screen.getByText(/showing what was last loaded/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument();
-    await waitFor(() => expect(api.folders).toHaveBeenCalled());
-    await new Promise((r) => setTimeout(r, 20));
+    await folderLoad(api);
   });
 
   it('describes every row action by its document and keeps list semantics', async () => {
