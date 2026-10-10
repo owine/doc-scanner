@@ -200,6 +200,65 @@ describe('InboxScreen', () => {
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Inbox' })).toBeInTheDocument());
   });
 
+  it('shows a requested discard as discarding and hides the button', async () => {
+    const doc = makeDoc({ state: 'analyzing' });
+    const { api } = setup([doc], {
+      discard: vi.fn().mockResolvedValue({ result: 'requested' }),
+      get: vi.fn(async () => ({ ...doc, discardRequested: true, seq: 999 })),
+    });
+    const progress = screen.getByRole('region', { name: 'In progress' });
+    fireEvent.click(within(progress).getByRole('button', { name: 'Discard' }));
+    await waitFor(() => expect(api.get).toHaveBeenCalledWith(doc.id));
+    expect(await within(progress).findByText('Discarding…')).toBeInTheDocument();
+    expect(within(progress).queryByRole('button', { name: 'Discard' })).toBeNull();
+  });
+
+  it('offers no discard while an upload is under way', async () => {
+    setup([makeDoc({ state: 'filing', possiblyInDrive: true })]);
+    const progress = screen.getByRole('region', { name: 'In progress' });
+    expect(within(progress).getByText('Filing…')).toBeInTheDocument();
+    expect(within(progress).queryByRole('button', { name: 'Discard' })).toBeNull();
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Inbox' })).toBeInTheDocument());
+  });
+
+  it('does not report a failure when the read-back after a discard fails, and polls instead', async () => {
+    const doc = makeDoc({ state: 'awaiting_login' });
+    const { sync, api } = setup([doc], { get: vi.fn().mockRejectedValue(new Error('network')) });
+    const poll = vi.spyOn(sync, 'poll').mockResolvedValue();
+    fireEvent.click(within(screen.getByRole('region', { name: 'In progress' })).getByRole('button', { name: 'Discard' }));
+    await waitFor(() => expect(poll).toHaveBeenCalled());
+    expect(api.discard).toHaveBeenCalledWith(doc.id);
+    expect(screen.queryByText(/failed, try again/i)).toBeNull();
+  });
+
+  it('shows a failed action that is not a refusal as try again', async () => {
+    const doc = makeDoc({ state: 'failed', error: 'Drive was unavailable' });
+    const { api } = setup([doc], { retry: vi.fn().mockRejectedValue(new ApiError('boom', 500)) });
+    fireEvent.click(within(screen.getByRole('region', { name: 'Failed' })).getByRole('button', { name: 'Retry' }));
+    expect(await screen.findByRole('button', { name: 'Retry (failed, try again)' })).toBeInTheDocument();
+    expect(api.get).not.toHaveBeenCalled();
+  });
+
+  it('goes ahead with a discard when the user confirms', async () => {
+    const nativeConfirm = window.confirm;
+    window.confirm = vi.fn().mockReturnValue(true);
+    try {
+      const doc = makeDoc({ state: 'failed', error: 'Upload interrupted', possiblyInDrive: true });
+      const { api } = setup([doc]);
+      fireEvent.click(within(screen.getByRole('region', { name: 'Failed' })).getByRole('button', { name: 'Discard' }));
+      await waitFor(() => expect(api.discard).toHaveBeenCalledWith(doc.id));
+      expect(await screen.findByRole('region', { name: 'Discarded' })).toBeInTheDocument();
+    } finally {
+      window.confirm = nativeConfirm;
+    }
+  });
+
+  it('says how many documents are waiting for sign-in', async () => {
+    setup([makeDoc({ state: 'awaiting_login' }), makeDoc({ state: 'awaiting_login' })]);
+    expect(screen.getByText(/2 documents are waiting to be filed/i)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getAllByText('Waiting for sign-in')).toHaveLength(2));
+  });
+
   it('opens the scanner, settings and saved scans', async () => {
     const { props } = setup([]);
     fireEvent.click(screen.getByRole('button', { name: 'Scan' }));
