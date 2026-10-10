@@ -4,6 +4,11 @@
 -- to do; analyzing / preparing / filing are working states the single worker
 -- re-runs after a crash (each is idempotent). `seq` increases on every write
 -- so the PWA can poll for changes with ?since=<seq>.
+--
+-- The BLOB columns hold names, paths and document-derived text, sealed with
+-- AES-GCM by DocumentRepo (iv | tag | ciphertext, bound to row id and column;
+-- JSON values are sealed as JSON text). NULL stays NULL. Nothing in SQL may
+-- look inside them: sha256 stays plaintext for duplicate lookup.
 
 CREATE TABLE IF NOT EXISTS documents (
   id                 TEXT    PRIMARY KEY,
@@ -11,24 +16,24 @@ CREATE TABLE IF NOT EXISTS documents (
   created_at         TEXT    NOT NULL,
   updated_at         TEXT    NOT NULL,
   source             TEXT    NOT NULL CHECK (source IN ('picker', 'scanner', 'share', 'email')),
-  original_name      TEXT,
+  original_name      BLOB,
   mime               TEXT    NOT NULL,
   size               INTEGER NOT NULL CHECK (size >= 0),
   sha256             TEXT    NOT NULL,
-  source_context     TEXT,
+  source_context     BLOB,
   state              TEXT    NOT NULL CHECK (state IN (
                        'received', 'analyzing', 'preparing', 'ready', 'needs_review',
                        'awaiting_login', 'filing', 'filed', 'failed', 'discarded')),
-  review_reason      TEXT,
+  review_reason      BLOB,
   attempts           INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
   next_attempt_at    TEXT    NOT NULL,
-  error              TEXT,
-  analysis           TEXT CHECK (analysis IS NULL OR json_valid(analysis)),
+  error              BLOB,
+  analysis           BLOB,
   prepared_mime      TEXT,
-  decision           TEXT CHECK (decision IS NULL OR json_valid(decision)),
-  filing_target      TEXT CHECK (filing_target IS NULL OR json_valid(filing_target)),
-  filed_name         TEXT,
-  filed_folder_path  TEXT,
+  decision           BLOB,
+  filing_target      BLOB,
+  filed_name         BLOB,
+  filed_folder_path  BLOB,
   drive_node_uid     TEXT,
   auto_filed         INTEGER NOT NULL DEFAULT 0 CHECK (auto_filed IN (0, 1)),
   user_edited        INTEGER NOT NULL DEFAULT 0 CHECK (user_edited IN (0, 1)),

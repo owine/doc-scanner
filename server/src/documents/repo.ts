@@ -1,5 +1,7 @@
 import { randomBytes } from 'node:crypto';
+import type { AtRestCipher } from '../crypto/at-rest.js';
 import type { DB } from '../db.js';
+import { logger } from '../logger.js';
 import {
   DISCARDABLE_STATES,
   RESTING_STATES,
@@ -33,6 +35,39 @@ const COLUMN: Record<keyof DocumentPatch, string> = {
 };
 const JSON_FIELDS = new Set<keyof DocumentPatch>(['analysis', 'decision', 'filingTarget']);
 
+/**
+ * Columns sealed at rest: everything that can hold a document's or folder's
+ * name, a path, or text derived from the document. review_reason carries the
+ * analyzer's schema-error detail and error any thrown message (a Drive error
+ * can quote a name), so both are sealed too. The rest (ids, states, times,
+ * MIME types, sizes, sha256 for duplicate lookup) stays plaintext: the SQL
+ * filters and orders on it. A NULL stays NULL, so IS NULL checks still work.
+ */
+const SEALED_COLUMNS = [
+  'original_name',
+  'source_context',
+  'review_reason',
+  'error',
+  'analysis',
+  'decision',
+  'filing_target',
+  'filed_name',
+  'filed_folder_path',
+] as const;
+type SealedColumn = (typeof SEALED_COLUMNS)[number];
+const SEALED = new Set<string>(SEALED_COLUMNS);
+
+/** What a quarantined row shows in place of its unreadable details. */
+const UNREADABLE_TEXT = 'stored document details could not be decrypted';
+
+/** A sealed column that would not open: the key changed, or the value was corrupted or moved. */
+export class DocumentDataUnreadableError extends Error {
+  constructor(readonly column: SealedColumn) {
+    super(UNREADABLE_TEXT);
+    this.name = 'DocumentDataUnreadableError';
+  }
+}
+
 function toSql(key: keyof DocumentPatch, value: unknown): string | number | null {
   if (value === null || value === undefined) return null;
   if (JSON_FIELDS.has(key)) return JSON.stringify(value);
@@ -42,33 +77,44 @@ function toSql(key: keyof DocumentPatch, value: unknown): string | number | null
 }
 
 interface Raw {
-  [col: string]: string | number | null;
+  [col: string]: string | number | Uint8Array | null;
 }
 
-function fromRow(r: Raw): DocumentRow {
-  const json = <T>(v: string | number | null) => (v === null ? null : (JSON.parse(String(v)) as T));
+/** Opens a sealed column's value, or throws DocumentDataUnreadableError. */
+type Unseal = (column: SealedColumn) => string | null;
+
+function fromRow(r: Raw, unseal: Unseal): DocumentRow {
+  const json = <T>(col: SealedColumn) => {
+    const v = unseal(col);
+    if (v === null) return null;
+    try {
+      return JSON.parse(v) as T;
+    } catch {
+      throw new DocumentDataUnreadableError(col);
+    }
+  };
   return {
     id: String(r.id),
     seq: Number(r.seq),
     createdAt: String(r.created_at),
     updatedAt: String(r.updated_at),
     source: r.source as DocumentRow['source'],
-    originalName: r.original_name as string | null,
+    originalName: unseal('original_name'),
     mime: String(r.mime),
     size: Number(r.size),
     sha256: String(r.sha256),
-    sourceContext: r.source_context as string | null,
+    sourceContext: unseal('source_context'),
     state: r.state as DocumentState,
-    reviewReason: r.review_reason as string | null,
+    reviewReason: unseal('review_reason'),
     attempts: Number(r.attempts),
     nextAttemptAt: String(r.next_attempt_at),
-    error: r.error as string | null,
-    analysis: json(r.analysis),
+    error: unseal('error'),
+    analysis: json('analysis'),
     preparedMime: r.prepared_mime as string | null,
-    decision: json(r.decision),
-    filingTarget: json(r.filing_target),
-    filedName: r.filed_name as string | null,
-    filedFolderPath: r.filed_folder_path as string | null,
+    decision: json('decision'),
+    filingTarget: json('filing_target'),
+    filedName: unseal('filed_name'),
+    filedFolderPath: unseal('filed_folder_path'),
     driveNodeUid: r.drive_node_uid as string | null,
     autoFiled: r.auto_filed === 1,
     userEdited: r.user_edited === 1,
@@ -83,12 +129,76 @@ const placeholders = (n: number) => Array(n).fill('?').join(', ');
  * All SQL for `documents`. Every state change is a compare-and-set on the
  * current state, and a working document whose discard was requested can't
  * move on, so the API and the worker never overwrite each other.
+ *
+ * Names, paths and document-derived text are sealed with AES-GCM here and
+ * nowhere else (see SEALED_COLUMNS), each value bound to its row id and
+ * column. A row with a value that won't open is quarantined on read rather
+ * than thrown, so it can't block the worker's queue or the inbox listing.
  */
 export class DocumentRepo {
   constructor(
     private readonly db: DB,
+    private readonly cipher: AtRestCipher,
     private readonly now: () => Date = () => new Date(),
   ) {}
+
+  /** Associated data: a ciphertext opens only in the row and column it was sealed for. */
+  private static aad(id: string, column: SealedColumn): Uint8Array {
+    return new TextEncoder().encode(`${id}\u0000${column}`);
+  }
+
+  private seal(id: string, column: SealedColumn, value: string | number | null): Uint8Array | string | number | null {
+    if (value === null) return null;
+    return this.cipher.seal(new TextEncoder().encode(String(value)), DocumentRepo.aad(id, column));
+  }
+
+  private unsealer(r: Raw): Unseal {
+    const id = String(r.id);
+    return (column) => {
+      const v = r[column];
+      if (v === null || v === undefined) return null;
+      // Plaintext text here was never written by this repo: as unreadable as a bad tag.
+      if (!(v instanceof Uint8Array)) throw new DocumentDataUnreadableError(column);
+      try {
+        return this.cipher.open(v, DocumentRepo.aad(id, column)).toString('utf8');
+      } catch {
+        throw new DocumentDataUnreadableError(column);
+      }
+    };
+  }
+
+  /**
+   * The row, decrypted. One that won't decrypt is quarantined first: its
+   * sealed fields are cleared (they can't be recovered) and, unless it is
+   * already filed or discarded, it becomes `failed` with a fixed error, so
+   * the user can retry or discard it. Only the column name is logged.
+   */
+  private decode(r: Raw): DocumentRow {
+    try {
+      return fromRow(r, this.unsealer(r));
+    } catch (err) {
+      if (!(err instanceof DocumentDataUnreadableError)) throw err;
+      const id = String(r.id);
+      logger.warn({ documentId: id, column: err.column }, 'document details could not be decrypted; quarantining the row');
+      this.quarantine(id, Number(r.seq));
+      const again = this.db.prepare('SELECT * FROM documents WHERE id = ?').get(id) as Raw | undefined;
+      if (!again) throw err;
+      return fromRow(again, this.unsealer(again));
+    }
+  }
+
+  /** Compare-and-set on seq: only the version that was read is quarantined. */
+  private quarantine(id: string, seq: number): void {
+    const t = iso(this.now());
+    this.db
+      .prepare(
+        `UPDATE documents SET ${SEALED_COLUMNS.filter((c) => c !== 'error').map((c) => `${c} = NULL`).join(', ')},
+           error = ?, discard_requested = 0, seq = ?, updated_at = ?,
+           state = CASE WHEN state IN ('filed', 'discarded') THEN state ELSE 'failed' END
+         WHERE id = ? AND seq = ?`,
+      )
+      .run(this.seal(id, 'error', UNREADABLE_TEXT), this.nextSeq(), t, id, seq);
+  }
 
   /** Never reuses a number, even after the row that held the highest one is purged. */
   private nextSeq(): number {
@@ -105,13 +215,25 @@ export class DocumentRepo {
                                 source_context, state, next_attempt_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'received', ?)`,
       )
-      .run(id, this.nextSeq(), t, t, d.source, d.originalName, d.mime, d.size, d.sha256, d.sourceContext, t);
+      .run(
+        id,
+        this.nextSeq(),
+        t,
+        t,
+        d.source,
+        this.seal(id, 'original_name', d.originalName),
+        d.mime,
+        d.size,
+        d.sha256,
+        this.seal(id, 'source_context', d.sourceContext),
+        t,
+      );
     return this.get(id)!;
   }
 
   get(id: string): DocumentRow | null {
     const r = this.db.prepare('SELECT * FROM documents WHERE id = ?').get(id) as Raw | undefined;
-    return r ? fromRow(r) : null;
+    return r ? this.decode(r) : null;
   }
 
   /** A document with these exact bytes that is anywhere but the discard pile. */
@@ -119,7 +241,7 @@ export class DocumentRepo {
     const r = this.db
       .prepare(`SELECT * FROM documents WHERE sha256 = ? AND state != 'discarded' ORDER BY created_at DESC LIMIT 1`)
       .get(sha256) as Raw | undefined;
-    return r ? fromRow(r) : null;
+    return r ? this.decode(r) : null;
   }
 
   /**
@@ -140,7 +262,16 @@ export class DocumentRepo {
     const entries = (Object.entries(patch) as [keyof DocumentPatch, unknown][]).filter(([, v]) => v !== undefined);
     for (const [k] of entries) if (!Object.hasOwn(COLUMN, k)) throw new Error(`unknown patch field ${k}`);
     const sets = ['state = ?', 'seq = ?', 'updated_at = ?', ...entries.map(([k]) => `${COLUMN[k]} = ?`)];
-    const params = [to, this.nextSeq(), iso(this.now()), ...entries.map(([k, v]) => toSql(k, v))];
+    const params = [
+      to,
+      this.nextSeq(),
+      iso(this.now()),
+      ...entries.map(([k, v]) => {
+        const col = COLUMN[k];
+        const plain = toSql(k, v);
+        return SEALED.has(col) ? this.seal(id, col as SealedColumn, plain) : plain;
+      }),
+    ];
     const res = this.db
       .prepare(
         `UPDATE documents SET ${sets.join(', ')}
@@ -218,21 +349,25 @@ export class DocumentRepo {
    * discard arrived has no running stage to apply it, so the worker must.
    */
   nextWorkable(): DocumentRow | null {
-    const r = this.db
-      .prepare(
-        `SELECT * FROM documents
-         WHERE state IN (${placeholders(WORKABLE_STATES.length)}) AND next_attempt_at <= ?
-         ORDER BY discard_requested DESC, next_attempt_at, created_at LIMIT 1`,
-      )
-      .get(...WORKABLE_STATES, iso(this.now())) as Raw | undefined;
-    return r ? fromRow(r) : null;
+    const pick = this.db.prepare(
+      `SELECT * FROM documents
+       WHERE state IN (${placeholders(WORKABLE_STATES.length)}) AND next_attempt_at <= ?
+       ORDER BY discard_requested DESC, next_attempt_at, created_at LIMIT 1`,
+    );
+    for (;;) {
+      const r = pick.get(...WORKABLE_STATES, iso(this.now())) as Raw | undefined;
+      if (!r) return null;
+      const doc = this.decode(r);
+      // A quarantined row is no longer workable: look again.
+      if (WORKABLE_STATES.includes(doc.state)) return doc;
+    }
   }
 
   listChangedSince(seq: number, limit = 500): DocumentRow[] {
     const rows = this.db
       .prepare('SELECT * FROM documents WHERE seq > ? ORDER BY seq LIMIT ?')
       .all(seq, limit) as Raw[];
-    return rows.map(fromRow);
+    return rows.map((r) => this.decode(r));
   }
 
   /** On login: everything waiting for a session goes back to filing, due now. */

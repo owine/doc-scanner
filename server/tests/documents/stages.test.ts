@@ -31,8 +31,8 @@ describe('analyzeStage', () => {
     const doc = h.add();
     await analyzeStage(doc, h.ctx);
     expect(h.repo.get(doc.id)?.analysis).not.toHaveProperty('textSnippet');
-    const raw = h.db.prepare('SELECT analysis FROM documents WHERE id = ?').get(doc.id) as { analysis: string };
-    expect(raw.analysis).not.toContain(ANALYSIS.textSnippet);
+    // Sealed at rest, so the plaintext column can't be inspected: the decrypted
+    // row above is the check, and the repo tests cover what reaches disk.
   });
 
   it('hides never-file-here folders from the model', async () => {
@@ -67,7 +67,7 @@ describe('analyzeStage retry state and recovery', () => {
     h = makeHarness();
     h.analyze.mockResolvedValue({ ...okOutcome(), status: 'refusal', detail: 'declined' });
     const doc = h.add();
-    h.db.prepare('UPDATE documents SET attempts = 2, error = ? WHERE id = ?').run('x', doc.id);
+    h.repo.transition(doc.id, 'received', 'received', { attempts: 2, error: 'x' });
     await analyzeStage(h.repo.get(doc.id)!, h.ctx);
     expect(h.repo.get(doc.id)).toMatchObject({ state: 'needs_review', attempts: 0, error: null });
   });
@@ -184,7 +184,7 @@ describe('decideStage', () => {
   it('resets retry state when it moves on', () => {
     h = makeHarness();
     const doc = readyDoc();
-    h.db.prepare('UPDATE documents SET attempts = 2, error = ? WHERE id = ?').run('x', doc.id);
+    h.repo.transition(doc.id, 'ready', 'ready', { attempts: 2, error: 'x' });
     decideStage(h.repo.get(doc.id)!, h.ctx);
     expect(h.repo.get(doc.id)).toMatchObject({ state: 'filing', attempts: 0, error: null });
   });

@@ -53,7 +53,7 @@ export function makeHarness(opts: { settings?: Partial<EffectiveSettings>; withT
   const dir = mkdtempSync(join(tmpdir(), 'pipeline-test-'));
   let clock = new Date('2026-10-10T12:00:00Z');
   const now = () => clock;
-  const repo = new DocumentRepo(db, now);
+  const repo = new DocumentRepo(db, new AtRestCipher(KEY, 'documents'), now);
   const inbox = new InboxStore(join(dir, 'inbox'), new AtRestCipher(KEY, 'inbox'));
   const folderCache = new FolderCacheStore(db, new AtRestCipher(KEY, 'folder-cache'));
   if (opts.withTree !== false) folderCache.save(TREE, clock);

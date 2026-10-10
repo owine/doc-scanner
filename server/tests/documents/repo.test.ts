@@ -1,17 +1,23 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { createTestDb } from '../helpers/test-db.js';
+import { AtRestCipher } from '../../src/crypto/at-rest.js';
+import type { DB } from '../../src/db.js';
 import { DocumentRepo } from '../../src/documents/repo.js';
-import type { NewDocument } from '../../src/documents/types.js';
+import type { DocumentPatch, NewDocument } from '../../src/documents/types.js';
+
+const KEY = Buffer.alloc(32, 5).toString('base64');
 
 let cleanup: () => void = () => {};
 afterEach(() => cleanup());
 
 let clock = new Date('2026-10-10T12:00:00Z');
+let db: DB;
 function repo() {
   const t = createTestDb();
   cleanup = t.cleanup;
+  db = t.db;
   clock = new Date('2026-10-10T12:00:00Z');
-  return new DocumentRepo(t.db, () => clock);
+  return new DocumentRepo(t.db, new AtRestCipher(KEY, 'documents'), () => clock);
 }
 
 const doc = (over: Partial<NewDocument> = {}): NewDocument => ({
@@ -291,5 +297,129 @@ describe('DocumentRepo', () => {
     r.requestDiscard(a.id);
     expect(r.transition(a.id, 'discarded', 'needs_review', { discardedAt: null })).toBe(true);
     expect(r.get(a.id)).toMatchObject({ state: 'needs_review', discardedAt: null });
+  });
+
+  describe('metadata at rest', () => {
+    // Fictional values, each containing a marker the raw row must never show.
+    const MARK = 'Northwind';
+    const named = (): NewDocument => doc({ originalName: `${MARK} Energy Sep 2026.pdf`, sourceContext: `Fwd: ${MARK} Energy statement` });
+    const everything: DocumentPatch = {
+      analysis: {
+        name: `${MARK} Energy Sep 2026`,
+        folder: { kind: 'existing', linkId: 'BILLS', path: `/Bills/${MARK} Energy` },
+        confidence: 0.9,
+        rationale: `A ${MARK} Energy bill.`,
+        isDocument: true,
+      },
+      decision: { name: `${MARK} Energy Sep 2026`, folder: { kind: 'existing', linkId: 'BILLS', path: `/Bills/${MARK} Energy` } },
+      filingTarget: { folderLinkId: 'BILLS', name: `${MARK} Energy Sep 2026.pdf` },
+      filedName: `${MARK} Energy Sep 2026.pdf`,
+      filedFolderPath: `/Bills/${MARK} Energy`,
+      reviewReason: `analysis invalid: ${MARK}`,
+      error: `upload of ${MARK} Energy Sep 2026.pdf failed`,
+    };
+    const rawRow = (id: string) => db.prepare('SELECT * FROM documents WHERE id = ?').get(id) as Record<string, unknown>;
+    const SEALED = ['original_name', 'source_context', 'analysis', 'decision', 'filing_target', 'filed_name', 'filed_folder_path', 'review_reason', 'error'];
+
+    it('keeps no plaintext name, path or text in the raw row', () => {
+      const r = repo();
+      const a = r.insert(named());
+      expect(r.transition(a.id, 'received', 'filing', everything)).toBe(true);
+      const raw = rawRow(a.id);
+      for (const [col, v] of Object.entries(raw)) {
+        if (v === null || typeof v === 'number') continue;
+        expect([col, Buffer.from(v as Uint8Array | string).includes(MARK)]).toEqual([col, false]);
+      }
+      for (const col of SEALED) expect([col, raw[col] instanceof Uint8Array]).toEqual([col, true]);
+      // Duplicate lookup still works on the plaintext hash.
+      expect(r.findActiveBySha256(a.sha256)?.id).toBe(a.id);
+    });
+
+    it('round-trips every sealed field', () => {
+      const r = repo();
+      const a = r.insert(named());
+      r.transition(a.id, 'received', 'filing', everything);
+      expect(r.get(a.id)).toMatchObject({ ...everything, originalName: `${MARK} Energy Sep 2026.pdf`, sourceContext: `Fwd: ${MARK} Energy statement` });
+    });
+
+    it('keeps NULL as NULL, so IS NULL checks still work', () => {
+      const r = repo();
+      const a = r.insert(doc({ originalName: null, sourceContext: null }));
+      for (const col of SEALED) expect([col, rawRow(a.id)[col]]).toEqual([col, null]);
+      r.transition(a.id, 'received', 'filing', { filingTarget: { folderLinkId: 'BILLS', name: 'x.pdf' } });
+      r.requestDiscard(a.id);
+      // filing_target IS NOT NULL: the upload may have happened, so the discard can't apply.
+      expect(r.applyRequestedDiscard(a.id)).toBe(false);
+      r.transition(a.id, 'filing', 'filing', { filingTarget: null }, { ignorePendingDiscard: true });
+      expect(rawRow(a.id).filing_target).toBeNull();
+      expect(r.applyRequestedDiscard(a.id)).toBe(true);
+    });
+
+    it('treats a value moved from another row as unreadable', () => {
+      const r = repo();
+      const a = r.insert(named());
+      const b = r.insert(doc({ sha256: 'b'.repeat(64), originalName: 'other.pdf' }));
+      db.prepare('UPDATE documents SET original_name = (SELECT original_name FROM documents WHERE id = ?) WHERE id = ?').run(a.id, b.id);
+      expect(r.get(b.id)).toMatchObject({ state: 'failed', originalName: null, error: 'stored document details could not be decrypted' });
+      expect(r.get(a.id)?.originalName).toBe(`${MARK} Energy Sep 2026.pdf`);
+    });
+
+    it('treats a value moved from another column as unreadable', () => {
+      const r = repo();
+      const a = r.insert(named());
+      db.prepare('UPDATE documents SET source_context = original_name WHERE id = ?').run(a.id);
+      expect(r.get(a.id)).toMatchObject({ state: 'failed', originalName: null, sourceContext: null });
+    });
+
+    it('quarantines an undecryptable row: sealed fields cleared, failed, discard flag dropped', () => {
+      const r = repo();
+      const a = r.insert(named());
+      r.transition(a.id, 'received', 'filing', everything);
+      r.requestDiscard(a.id);
+      db.prepare('UPDATE documents SET decision = ? WHERE id = ?').run(new Uint8Array(40), a.id);
+      const seqBefore = (rawRow(a.id).seq as number);
+      const got = r.get(a.id)!;
+      expect(got).toMatchObject({
+        state: 'failed',
+        discardRequested: false,
+        originalName: null,
+        analysis: null,
+        decision: null,
+        filingTarget: null,
+        filedName: null,
+        error: 'stored document details could not be decrypted',
+      });
+      // Clients polling by seq see the change.
+      expect(got.seq).toBeGreaterThan(seqBefore);
+      for (const col of SEALED.filter((c) => c !== 'error')) expect([col, rawRow(a.id)[col]]).toEqual([col, null]);
+    });
+
+    it('keeps a filed or discarded row in its state when quarantining it', () => {
+      const r = repo();
+      const a = r.insert(named());
+      r.transition(a.id, 'received', 'filed', { filedName: 'x.pdf', driveNodeUid: 'NODE1' });
+      db.prepare('UPDATE documents SET filed_name = ? WHERE id = ?').run(new Uint8Array(40), a.id);
+      expect(r.get(a.id)).toMatchObject({ state: 'filed', filedName: null, driveNodeUid: 'NODE1' });
+    });
+
+    it('never lets an undecryptable row block the work queue', () => {
+      const r = repo();
+      const bad = r.insert(named());
+      clock = new Date(clock.getTime() + 1000);
+      const good = r.insert(doc({ sha256: 'c'.repeat(64) }));
+      db.prepare('UPDATE documents SET original_name = ? WHERE id = ?').run('plaintext from somewhere else', bad.id);
+      expect(r.nextWorkable()?.id).toBe(good.id);
+      expect(r.get(bad.id)?.state).toBe('failed');
+    });
+
+    it('lists changes past an undecryptable row', () => {
+      const r = repo();
+      const bad = r.insert(named());
+      const good = r.insert(doc({ sha256: 'c'.repeat(64) }));
+      db.prepare('UPDATE documents SET original_name = ? WHERE id = ?').run(new Uint8Array(3), bad.id);
+      const rows = r.listChangedSince(0);
+      expect(rows.map((d) => d.id).sort()).toEqual([bad.id, good.id].sort());
+      expect(rows.find((d) => d.id === bad.id)?.state).toBe('failed');
+    });
   });
 });
