@@ -2,7 +2,8 @@
 // user's Proton Drive: their human-chosen name and folder are the labels.
 //
 //   PROTON_EMAIL=... PROTON_PASSWORD=... [PROTON_TOTP=123456] \
-//     pnpm --filter @doc-scanner/server run eval:analyzer:sample [--n 40] [--seed 1]
+//     pnpm --filter @doc-scanner/server run eval:analyzer:sample [--n 40] [--seed 1] \
+//       [--exclude /Archive --exclude '/Vault/z Past'] [--since 2024-01-01] [--reuse-tree | --dry-run]
 //
 // Logs in once, snapshots the folder tree, samples documents stratified across
 // folders, and downloads them. Everything lands under the flow directory,
@@ -11,6 +12,7 @@
 // so they need no Proton login and every variant sees the same folder tree.
 
 import '../../src/polyfills/typed-array-base64.js';
+import { createHash } from 'node:crypto';
 import { mkdirSync, writeFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -20,8 +22,8 @@ import { ProtonApi } from '../../src/auth/proton-api.js';
 import { ProtonAuth } from '../../src/auth/srp.js';
 import { openDb } from '../../src/db.js';
 import { DriveClient } from '../../src/drive/client.js';
-import type { TreeFile, TreeFolder } from '../../src/drive/folder-tree.js';
-import { EXTENSION_BY_TYPE, type EvalCase } from './cases.js';
+import { isUnderAny, type TreeFile, type TreeFolder } from '../../src/drive/folder-tree.js';
+import { EXTENSION_BY_TYPE, loadTree, type EvalCase, type SampleConfig } from './cases.js';
 
 const MAX_BYTES = 25 * 1024 * 1024;
 
@@ -30,6 +32,15 @@ const { values: args } = parseArgs({
     n: { type: 'string', default: '40' },
     seed: { type: 'string', default: '1' },
     flow: { type: 'string', default: DEFAULT_FLOW },
+    // "Never file here" folders: not sampled, and hidden from the model.
+    exclude: { type: 'string', multiple: true, default: ['/Archive', '/Vault/z Past'] },
+    // Recent documents reflect current folders and naming conventions.
+    since: { type: 'string', default: '2024-01-01' },
+    'per-folder': { type: 'string', default: '3' },
+    // Skip the walk and sample from the last tree.json snapshot.
+    'reuse-tree': { type: 'boolean', default: false },
+    // Preview the picks in review.md from the saved tree; no login, no downloads.
+    'dry-run': { type: 'boolean', default: false },
   },
 });
 
@@ -60,24 +71,28 @@ function eligible(file: TreeFile): boolean {
 }
 
 /**
- * Round-robin over folders in random order, one random document per folder
- * per pass, until n are picked. Spreads the set across the whole tree rather
- * than letting one big folder (a statements archive, say) dominate it. Files
- * left loose at the top level are skipped: "unfiled" is not a filing decision.
+ * A random draw of recent documents from active folders, at most
+ * `perFolder` from any one folder. Roughly proportional to where documents
+ * actually go, without one bulky folder dominating. Files loose at the top
+ * level are skipped: "unfiled" is not a filing decision.
  */
-function stratifiedSample(tree: TreeFolder[], n: number, rand: () => number): { folder: TreeFolder; file: TreeFile }[] {
-  const pools = shuffle(
-    tree.filter((f) => f.path !== '/').map((folder) => ({ folder, files: shuffle(folder.files.filter(eligible), rand) })),
-    rand,
-  ).filter((p) => p.files.length > 0);
+function sample(tree: TreeFolder[], cfg: SampleConfig, n: number, rand: () => number): { folder: TreeFolder; file: TreeFile }[] {
+  const since = new Date(cfg.since).getTime();
+  const pool = tree
+    .filter((f) => f.path !== '/' && !isUnderAny(f.path, cfg.excludePaths))
+    .flatMap((folder) =>
+      folder.files.filter((file) => eligible(file) && file.modified.getTime() >= since).map((file) => ({ folder, file })),
+    );
+  const perFolder = new Map<string, number>();
   const picked: { folder: TreeFolder; file: TreeFile }[] = [];
-  while (picked.length < n && pools.some((p) => p.files.length > 0)) {
-    for (const pool of pools) {
-      const file = pool.files.pop();
-      if (file) picked.push({ folder: pool.folder, file });
-      if (picked.length === n) break;
-    }
+  for (const pick of shuffle(pool, rand)) {
+    const count = perFolder.get(pick.folder.linkId) ?? 0;
+    if (count >= cfg.perFolder) continue;
+    perFolder.set(pick.folder.linkId, count + 1);
+    picked.push(pick);
+    if (picked.length === n) break;
   }
+  console.error(`sampled ${picked.length} of ${pool.length} eligible documents`);
   return picked;
 }
 
@@ -109,74 +124,100 @@ function reviewSheet(cases: EvalCase[]): string {
 }
 
 async function main(): Promise<void> {
-  const email = process.env.PROTON_EMAIL;
-  const password = process.env.PROTON_PASSWORD;
-  if (!email || !password) throw new Error('Set PROTON_EMAIL and PROTON_PASSWORD (and PROTON_TOTP if 2FA is on).');
   const n = Number(args.n);
   const flow = resolve(args.flow!);
   const docsDir = join(flow, 'inputs', 'docs');
+  const treePath = join(flow, 'inputs', 'tree.json');
   mkdirSync(docsDir, { recursive: true });
+  const cfg: SampleConfig = {
+    excludePaths: args.exclude!,
+    since: args.since!,
+    perFolder: Number(args['per-folder']),
+    seed: Number(args.seed),
+  };
+  const reuse = (args['reuse-tree'] || args['dry-run']) && existsSync(treePath);
+  if (args['dry-run'] && !reuse) throw new Error('--dry-run needs an existing tree.json from an earlier run');
 
-  const api = new ProtonApi('https://mail.proton.me/api', 'external-drive-docscanner@0.1.0');
-  const auth = new ProtonAuth(api);
+  // Logging in is needed only to walk the tree or download documents.
+  const conn: { session?: Awaited<ReturnType<typeof openDrive>> } = {};
+  const connect = async () => (conn.session ??= await openDrive());
+  try {
+    const tree = reuse ? loadTree(flow) : await walk((await connect()).drive, treePath);
+    const picks = sample(tree, cfg, n, rng(cfg.seed));
+    const cases: EvalCase[] = picks.map(({ folder, file }, i) => ({
+      id: `doc${String(i + 1).padStart(3, '0')}`,
+      fileUid: file.uid,
+      mimeType: file.mediaType!,
+      // Named by Drive file ID, so a resample can never pair a stale
+      // download with a different case's label.
+      docPath: join('inputs', 'docs', `${createHash('sha256').update(file.uid).digest('hex').slice(0, 16)}${EXTENSION_BY_TYPE[file.mediaType!]}`),
+      expectedName: file.name,
+      expectedFolderLinkId: folder.linkId,
+      expectedFolderPath: folder.path,
+      siblingCount: folder.files.length - 1,
+    }));
+    writeFileSync(join(flow, 'inputs', 'review.md'), reviewSheet(cases));
+    if (args['dry-run']) {
+      console.error(`dry run: ${cases.length} cases previewed in ${join(flow, 'inputs', 'review.md')}; nothing downloaded`);
+      return;
+    }
+    for (const [i, c] of cases.entries()) {
+      const docPath = join(flow, c.docPath);
+      if (existsSync(docPath)) continue;
+      console.error(`downloading ${i + 1}/${cases.length}`);
+      writeFileSync(docPath, await (await connect()).drive.downloadFile(c.fileUid));
+    }
+    writeFileSync(join(flow, 'inputs', 'config.json'), JSON.stringify(cfg, null, 2));
+    writeFileSync(join(flow, 'inputs', 'cases.json'), JSON.stringify(cases, null, 2));
+    console.error(`wrote ${cases.length} cases to ${join(flow, 'inputs')}; review them in inputs/review.md`);
+  } finally {
+    conn.session?.close();
+  }
+}
+
+async function openDrive(): Promise<{ drive: DriveClient; close: () => void }> {
+  const email = process.env.PROTON_EMAIL;
+  const password = process.env.PROTON_PASSWORD;
+  if (!email || !password) throw new Error('Set PROTON_EMAIL and PROTON_PASSWORD (and PROTON_TOTP if 2FA is on).');
+  const auth = new ProtonAuth(new ProtonApi('https://mail.proton.me/api', 'external-drive-docscanner@0.1.0'));
   const login = await auth.login(email, password, process.env.PROTON_TOTP);
-
   // The SDK's caches need a database; a throwaway one keeps this run from
   // touching the app's real state.
   const scratch = mkdtempSync(join(tmpdir(), 'analyzer-eval-'));
   const db = openDb(join(scratch, 'drive.db'));
-  try {
-    const drive = new DriveClient({
-      db,
-      encryptionKey: Buffer.alloc(32, 7).toString('base64'),
-      appVersion: 'external-drive-docscanner@0.1.0',
-      user: login.decryptedKeys,
-      session: login.session,
-      protonAuth: auth,
-    });
+  const drive = new DriveClient({
+    db,
+    encryptionKey: Buffer.alloc(32, 7).toString('base64'),
+    appVersion: 'external-drive-docscanner@0.1.0',
+    user: login.decryptedKeys,
+    session: login.session,
+    protonAuth: auth,
+  });
+  return {
+    drive,
+    close: () => {
+      db.close();
+      rmSync(scratch, { recursive: true, force: true });
+      login.mailboxSecret.dispose();
+    },
+  };
+}
 
-    console.error('walking the folder tree...');
-    let lastReport = 0;
-    const tree = await drive.walkFolderTree({
-      concurrency: 8,
-      onProgress: ({ folders, files, pending }) => {
-        if (Date.now() - lastReport < 2000) return;
-        lastReport = Date.now();
-        console.error(`  ${folders} folders, ${files} files so far, ${pending} folders queued`);
-      },
-    });
-    const fileCount = tree.reduce((sum, f) => sum + f.files.length, 0);
-    console.error(`${tree.length} folders, ${fileCount} files`);
-    writeFileSync(join(flow, 'inputs', 'tree.json'), JSON.stringify(tree, null, 2));
-
-    const picks = stratifiedSample(tree, n, rng(Number(args.seed)));
-    const cases: EvalCase[] = [];
-    for (const [i, { folder, file }] of picks.entries()) {
-      const id = `doc${String(i + 1).padStart(3, '0')}`;
-      const docPath = join(docsDir, `${id}${EXTENSION_BY_TYPE[file.mediaType!]}`);
-      if (!existsSync(docPath)) {
-        console.error(`downloading ${i + 1}/${picks.length}`);
-        writeFileSync(docPath, await drive.downloadFile(file.uid));
-      }
-      cases.push({
-        id,
-        fileUid: file.uid,
-        mimeType: file.mediaType!,
-        docPath: join('inputs', 'docs', `${id}${EXTENSION_BY_TYPE[file.mediaType!]}`),
-        expectedName: file.name,
-        expectedFolderLinkId: folder.linkId,
-        expectedFolderPath: folder.path,
-        siblingCount: folder.files.length - 1,
-      });
-    }
-    writeFileSync(join(flow, 'inputs', 'cases.json'), JSON.stringify(cases, null, 2));
-    writeFileSync(join(flow, 'inputs', 'review.md'), reviewSheet(cases));
-    console.error(`wrote ${cases.length} cases to ${join(flow, 'inputs')}; review them in inputs/review.md`);
-  } finally {
-    db.close();
-    rmSync(scratch, { recursive: true, force: true });
-    login.mailboxSecret.dispose();
-  }
+async function walk(drive: DriveClient, treePath: string): Promise<TreeFolder[]> {
+  console.error('walking the folder tree...');
+  let lastReport = 0;
+  const tree = await drive.walkFolderTree({
+    concurrency: 8,
+    onProgress: ({ folders, files, pending }) => {
+      if (Date.now() - lastReport < 2000) return;
+      lastReport = Date.now();
+      console.error(`  ${folders} folders, ${files} files so far, ${pending} folders queued`);
+    },
+  });
+  const fileCount = tree.reduce((sum, f) => sum + f.files.length, 0);
+  console.error(`${tree.length} folders, ${fileCount} files`);
+  writeFileSync(treePath, JSON.stringify(tree, null, 2));
+  return tree;
 }
 
 main().catch((err) => {

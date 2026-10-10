@@ -28,6 +28,18 @@ export interface EvalCase {
   siblingCount: number;
 }
 
+/** How the set was drawn; the harness applies the same folder exclusions. */
+export interface SampleConfig {
+  excludePaths: string[];
+  since: string;
+  perFolder: number;
+  seed: number;
+}
+
+export function loadSampleConfig(flow: string): SampleConfig {
+  return JSON.parse(readFileSync(join(flow, 'inputs', 'config.json'), 'utf8'));
+}
+
 export function loadCases(flow: string): EvalCase[] {
   return JSON.parse(readFileSync(join(flow, 'inputs', 'cases.json'), 'utf8'));
 }

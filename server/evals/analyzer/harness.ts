@@ -10,7 +10,7 @@ import { createAnalyzer, type Effort } from '../../src/analyze/analyzer.js';
 import { buildFolderIndex, formatArrival, SYSTEM_PROMPT } from '../../src/analyze/prompt.js';
 import type { AnalyzeInput, AnalyzeOutcome, FolderContext } from '../../src/analyze/types.js';
 import { toFolderContexts, type TreeFolder } from '../../src/drive/folder-tree.js';
-import { loadCases, loadTree, stripExtension, type EvalCase } from './cases.js';
+import { loadCases, loadSampleConfig, loadTree, stripExtension, type EvalCase } from './cases.js';
 
 /** The contenders. The report only reads directories named baseline / v<N>. */
 export const VARIANTS: Record<string, { model: string; effort: Effort; label: string }> = {
@@ -43,9 +43,11 @@ interface RunnerCase {
 }
 
 let tree: TreeFolder[] | null = null;
+let excludePaths: string[] = [];
 
 export function loadRunnerCases(flow: string): RunnerCase[] {
   tree = loadTree(flow);
+  excludePaths = loadSampleConfig(flow).excludePaths;
   return loadCases(flow).map((c) => ({
     id: c.id,
     prompt: `${c.expectedFolderPath}  ·  ${c.expectedName}`,
@@ -60,10 +62,10 @@ export function loadRunnerCases(flow: string): RunnerCase[] {
   }));
 }
 
-/** What the model sees for this case: the whole tree, minus the document's own name. */
+/** What the model sees for this case: the active tree, minus the document's own name. */
 function foldersFor(c: EvalCase): FolderContext[] {
   if (!tree) throw new Error('loadRunnerCases must run first');
-  return toFolderContexts(tree, { excludeFileUids: new Set([c.fileUid]) });
+  return toFolderContexts(tree, { excludeFileUids: new Set([c.fileUid]), excludePaths });
 }
 
 export async function runCase(rc: RunnerCase, ctx: Ctx) {
