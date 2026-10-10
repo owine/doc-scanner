@@ -37,7 +37,7 @@ describe('DocumentRepo', () => {
     const r = repo();
     const a = r.insert(doc());
     expect(r.findActiveBySha256(a.sha256)?.id).toBe(a.id);
-    r.transition(a.id, 'received', 'discarded', { discardedAt: clock });
+    expect(r.transition(a.id, 'received', 'discarded', { discardedAt: clock })).toBe(true);
     expect(r.findActiveBySha256(a.sha256)).toBeNull();
   });
 
@@ -133,5 +133,102 @@ describe('DocumentRepo', () => {
     r.requestDiscard(a.id);
     expect(r.discardedBefore(new Date(clock.getTime() - 1000))).toEqual([]);
     expect(r.discardedBefore(new Date(clock.getTime() + 1000))).toEqual([a.id]);
+  });
+
+  it('does not discard a filed row that carries a stale discard flag', () => {
+    const r = repo();
+    const a = r.insert(doc());
+    r.transition(a.id, 'received', 'filing');
+    r.requestDiscard(a.id);
+    r.transition(a.id, 'filing', 'filed', {}, { ignorePendingDiscard: true });
+    expect(r.applyRequestedDiscard(a.id)).toBe(false);
+    expect(r.get(a.id)?.state).toBe('filed');
+  });
+
+  it('does not discard a filing row whose upload may have happened', () => {
+    const r = repo();
+    const a = r.insert(doc());
+    r.transition(a.id, 'received', 'filing', { filingTarget: { folderLinkId: 'L', name: 'X.pdf' } });
+    r.requestDiscard(a.id);
+    expect(r.applyRequestedDiscard(a.id)).toBe(false);
+    expect(r.get(a.id)?.state).toBe('filing');
+  });
+
+  it('discards a filing row that has no filing target yet', () => {
+    const r = repo();
+    const a = r.insert(doc());
+    r.transition(a.id, 'received', 'filing');
+    r.requestDiscard(a.id);
+    expect(r.applyRequestedDiscard(a.id)).toBe(true);
+    expect(r.get(a.id)).toMatchObject({ state: 'discarded', discardRequested: false });
+  });
+
+  it('leaves a column alone when its patch value is undefined', () => {
+    const r = repo();
+    const a = r.insert(doc());
+    r.transition(a.id, 'received', 'analyzing', { error: 'boom' });
+    r.transition(a.id, 'analyzing', 'received', { error: undefined });
+    expect(r.get(a.id)?.error).toBe('boom');
+  });
+
+  it('throws on an unknown patch field', () => {
+    const r = repo();
+    const a = r.insert(doc());
+    expect(() => r.transition(a.id, 'received', 'analyzing', { bogus: 1 } as never)).toThrow('unknown patch field bogus');
+  });
+
+  it('reports a missing id as not_found', () => {
+    expect(repo().requestDiscard('nope')).toBe('not_found');
+  });
+
+  it('leaves the row untouched when the compare-and-set fails', () => {
+    const r = repo();
+    const a = r.insert(doc());
+    clock = new Date(clock.getTime() + 5000);
+    expect(r.transition(a.id, 'ready', 'filing', { error: 'x', attempts: 3 })).toBe(false);
+    expect(r.get(a.id)).toEqual(a);
+  });
+
+  it('bumps seq and updated_at on a successful transition', () => {
+    const r = repo();
+    const a = r.insert(doc());
+    clock = new Date(clock.getTime() + 5000);
+    r.transition(a.id, 'received', 'analyzing');
+    const b = r.get(a.id)!;
+    expect(b.seq).toBeGreaterThan(a.seq);
+    expect(b.updatedAt).toBe(clock.toISOString());
+    expect(b.updatedAt).not.toBe(a.updatedAt);
+  });
+
+  it('accepts an array of from-states', () => {
+    const r = repo();
+    const a = r.insert(doc());
+    expect(r.transition(a.id, ['ready', 'received'], 'analyzing')).toBe(true);
+    expect(r.transition(a.id, ['ready', 'received'], 'preparing')).toBe(false);
+  });
+
+  it('keeps a working row requested when a discard is requested twice', () => {
+    const r = repo();
+    const a = r.insert(doc());
+    r.transition(a.id, 'received', 'analyzing');
+    expect(r.requestDiscard(a.id)).toBe('requested');
+    expect(r.requestDiscard(a.id)).toBe('requested');
+    expect(r.get(a.id)).toMatchObject({ state: 'analyzing', discardRequested: true });
+  });
+
+  it('discards a resting row despite a stale flag', () => {
+    const r = repo();
+    const a = r.insert(doc());
+    r.transition(a.id, 'received', 'needs_review', { discardRequested: true });
+    expect(r.requestDiscard(a.id)).toBe('discarded');
+    expect(r.get(a.id)).toMatchObject({ state: 'discarded', discardRequested: false });
+  });
+
+  it('restores a discarded row to review when discardedAt is cleared', () => {
+    const r = repo();
+    const a = r.insert(doc());
+    r.requestDiscard(a.id);
+    expect(r.transition(a.id, 'discarded', 'needs_review', { discardedAt: null })).toBe(true);
+    expect(r.get(a.id)).toMatchObject({ state: 'needs_review', discardedAt: null });
   });
 });

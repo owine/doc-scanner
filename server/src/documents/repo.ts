@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import type { DB } from '../db.js';
 import {
+  DISCARDABLE_STATES,
   RESTING_STATES,
   WORKABLE_STATES,
   WORKING_STATES,
@@ -135,7 +136,9 @@ export class DocumentRepo {
     opts: { ignorePendingDiscard?: boolean } = {},
   ): boolean {
     const froms = Array.isArray(from) ? from : [from];
-    const entries = Object.entries(patch) as [keyof DocumentPatch, unknown][];
+    // `undefined` means "leave the column alone"; only an explicit null clears it.
+    const entries = (Object.entries(patch) as [keyof DocumentPatch, unknown][]).filter(([, v]) => v !== undefined);
+    for (const [k] of entries) if (!(k in COLUMN)) throw new Error(`unknown patch field ${k}`);
     const sets = ['state = ?', 'seq = ?', 'updated_at = ?', ...entries.map(([k]) => `${COLUMN[k]} = ?`)];
     const params = [to, this.nextSeq(), iso(this.now()), ...entries.map(([k, v]) => toSql(k, v))];
     const res = this.db
@@ -148,9 +151,9 @@ export class DocumentRepo {
   }
 
   /** Discards a resting document now, or flags a working one for when its stage ends. */
-  requestDiscard(id: string): 'discarded' | 'requested' | 'not_allowed' {
+  requestDiscard(id: string): 'discarded' | 'requested' | 'not_allowed' | 'not_found' {
     const doc = this.get(id);
-    if (!doc) return 'not_allowed';
+    if (!doc) return 'not_found';
     if (RESTING_STATES.includes(doc.state)) {
       // A stale flag from an interrupted stage must not block discarding a resting document.
       return this.transition(id, doc.state, 'discarded', { discardedAt: this.now(), discardRequested: false }, { ignorePendingDiscard: true })
@@ -166,14 +169,21 @@ export class DocumentRepo {
     return 'not_allowed';
   }
 
-  /** Called by the worker when a stage could not move on: honours a pending discard. */
+  /**
+   * Called by the worker when a stage could not move on: honours a pending
+   * discard. Refuses a filed row, and a filing row whose upload may already
+   * have happened (filing_target is written just before the upload).
+   */
   applyRequestedDiscard(id: string): boolean {
+    const t = iso(this.now());
     const res = this.db
       .prepare(
         `UPDATE documents SET state = 'discarded', discard_requested = 0, discarded_at = ?, seq = ?, updated_at = ?
-         WHERE id = ? AND discard_requested = 1`,
+         WHERE id = ? AND discard_requested = 1
+           AND state IN (${placeholders(DISCARDABLE_STATES.length)})
+           AND NOT (state = 'filing' AND filing_target IS NOT NULL)`,
       )
-      .run(iso(this.now()), this.nextSeq(), iso(this.now()), id);
+      .run(t, this.nextSeq(), t, id, ...DISCARDABLE_STATES);
     return Number(res.changes) === 1;
   }
 
@@ -208,7 +218,10 @@ export class DocumentRepo {
     return moved;
   }
 
-  /** Makes deferred work due now (e.g. analyses waiting for a folder tree). */
+  /**
+   * Makes deferred work due now (e.g. analyses waiting for a folder tree).
+   * Deliberately doesn't bump seq: next_attempt_at isn't shown to clients.
+   */
   makeDueNow(state: DocumentState): void {
     this.db
       .prepare('UPDATE documents SET next_attempt_at = ? WHERE state = ? AND next_attempt_at > ?')
@@ -223,6 +236,7 @@ export class DocumentRepo {
     ).map((r) => r.id);
   }
 
+  /** Doesn't bump seq: it only purges rows discarded more than 7 days ago, which clients no longer track. */
   delete(id: string): void {
     this.db.prepare('DELETE FROM documents WHERE id = ?').run(id);
   }

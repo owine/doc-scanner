@@ -18,6 +18,9 @@ export const WORKING_STATES: readonly DocumentState[] = ['analyzing', 'preparing
 /** Discard applies at once here; in a working state it waits for the stage to end. */
 export const RESTING_STATES: readonly DocumentState[] = ['received', 'ready', 'needs_review', 'awaiting_login', 'failed'];
 
+/** States a pending discard may still be applied from; never 'filed' or 'discarded'. */
+export const DISCARDABLE_STATES: readonly DocumentState[] = [...RESTING_STATES, 'analyzing', 'preparing', 'filing'];
+
 /** What is being filed: the analysis's answer or the user's approved edit. */
 export interface Decision {
   name: string;
