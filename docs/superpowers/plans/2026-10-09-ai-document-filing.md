@@ -3381,6 +3381,8 @@ export function documentRoutes(deps: { store: SessionStore; pipeline: Pipeline }
     const result = repo.requestDiscard(c.req.param('id'));
     if (result === 'not_found') return c.json({ error: 'not_found' }, 404);
     if (result === 'not_allowed') return c.json({ error: 'not_allowed' }, 409);
+    // A working document's discard is applied by the worker; wake it so that happens now.
+    if (result === 'requested') void worker.wake();
     return c.json({ result });
   });
 
