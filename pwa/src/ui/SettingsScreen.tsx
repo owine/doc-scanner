@@ -35,9 +35,9 @@ export function SettingsScreen({ email, documents = documentsApi, onBack, onLogg
   const [picking, setPicking] = useState(false);
   const [busy, setBusy] = useState(false);
   const [refreshed, setRefreshed] = useState(false);
+  const [signOutError, setSignOutError] = useState<string | null>(null);
   // The threshold is edited as text: a number-bound input rewrites "0." to "0"
   // on every render, so a decimal could not be typed.
-  const [signOutError, setSignOutError] = useState<string | null>(null);
   const [thresholdText, setThresholdText] = useState('');
 
   // Set false on unmount so nothing is set after an await resolves late.
@@ -141,6 +141,8 @@ export function SettingsScreen({ email, documents = documentsApi, onBack, onLogg
               min="0.5"
               max="1"
               step="0.05"
+              aria-invalid={!thresholdValid}
+              {...(!thresholdValid && { 'aria-describedby': 'threshold-error' })}
               value={thresholdText}
               onInput={(e) => {
                 const text = (e.target as HTMLInputElement).value;
@@ -148,13 +150,26 @@ export function SettingsScreen({ email, documents = documentsApi, onBack, onLogg
                 if (text.trim() !== '' && Number.isFinite(Number(text))) set('autoFileThreshold', Number(text));
               }}
             />
-            {!thresholdValid && <span class="error-text">Enter a number between 0.5 and 1.</span>}
           </label>
+          {!thresholdValid && (
+            <span id="threshold-error" class="error-text">
+              Enter a number between 0.5 and 1.
+            </span>
+          )}
           <label class="field">
             <span class="field-label">Model</span>
-            <input value={draft.model} onInput={(e) => set('model', (e.target as HTMLInputElement).value)} />
-            {!modelValid && <span class="error-text">Enter a model name.</span>}
+            <input
+              value={draft.model}
+              aria-invalid={!modelValid}
+              {...(!modelValid && { 'aria-describedby': 'model-error' })}
+              onInput={(e) => set('model', (e.target as HTMLInputElement).value)}
+            />
           </label>
+          {!modelValid && (
+            <span id="model-error" class="error-text">
+              Enter a model name.
+            </span>
+          )}
           <label class="field">
             <span class="field-label">Effort</span>
             <select value={draft.effort} onChange={(e) => set('effort', (e.target as HTMLSelectElement).value as Settings['effort'])}>

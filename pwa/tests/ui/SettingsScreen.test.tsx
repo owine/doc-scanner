@@ -72,6 +72,16 @@ describe('SettingsScreen', () => {
     expect(api.saveSettings).not.toHaveBeenCalled();
   });
 
+  it('describes an invalid threshold instead of naming the field with the error', async () => {
+    setup();
+    const field = await screen.findByRole('spinbutton', { name: 'Auto-file threshold (0.5 to 1)' });
+    expect(field).not.toHaveAttribute('aria-invalid', 'true');
+    fireEvent.input(field, { target: { value: '0.3' } });
+    const invalid = screen.getByRole('spinbutton', { name: 'Auto-file threshold (0.5 to 1)' });
+    expect(invalid).toHaveAttribute('aria-invalid', 'true');
+    expect(invalid).toHaveAccessibleDescription(/between 0.5 and 1/);
+  });
+
   it('blocks a blank threshold', async () => {
     setup();
     fireEvent.input(await screen.findByRole('spinbutton', { name: /threshold/i }), { target: { value: '' } });
