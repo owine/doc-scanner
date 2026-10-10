@@ -2586,6 +2586,20 @@ describe('DocumentWorker', () => {
     expect(h.repo.get(doc.id)?.state).toBe('discarded');
   });
 
+  it('keeps retrying an upload that may have happened, even if a discard arrives', async () => {
+    h = makeHarness();
+    h.drive.uploadFile.mockRejectedValueOnce(new Error('network down'));
+    const doc = h.add();
+    const w = new DocumentWorker(h.ctx);
+    await w.wake();
+    // The failed attempt left a filing target: the upload may have reached Drive.
+    expect(h.repo.get(doc.id)).toMatchObject({ state: 'filing', attempts: 1, filingTarget: expect.anything() });
+    expect(h.repo.requestDiscard(doc.id)).toBe('requested');
+    h.advance(10 * 60_000);
+    await w.wake();
+    expect(h.repo.get(doc.id)?.state).toBe('filed');
+  });
+
   it('on login: refreshes the folder tree and files what was waiting', async () => {
     h = makeHarness();
     h.setLive(undefined);
@@ -2716,11 +2730,16 @@ export class DocumentWorker {
     const attempts = doc.attempts + 1;
     const error = err instanceof Error ? err.message : String(err);
     // The stage may have moved the row (received → analyzing) before throwing.
-    const state = this.d.repo.get(doc.id)?.state ?? doc.state;
+    const current = this.d.repo.get(doc.id);
+    const state = current?.state ?? doc.state;
     const stage = stageOf(state);
+    // An upload may already have happened once filing_target is set: a pending
+    // discard must not win here (the repo refuses it anyway), so retry or fail
+    // the filing regardless of the flag. The user can discard from `failed`.
+    const opts = { ignorePendingDiscard: state === 'filing' && !!current?.filingTarget };
     logger.warn({ documentId: doc.id, stage, attempts, err: error }, 'document stage failed');
     if (attempts >= MAX_ATTEMPTS) {
-      if (this.d.repo.transition(doc.id, state, 'failed', { attempts, error })) {
+      if (this.d.repo.transition(doc.id, state, 'failed', { attempts, error }, opts)) {
         this.d.report(err, stage, [doc.originalName ?? '', doc.decision?.name ?? '', doc.analysis?.name ?? '']);
       } else {
         this.d.repo.applyRequestedDiscard(doc.id);
@@ -2728,7 +2747,7 @@ export class DocumentWorker {
       return;
     }
     const nextAttemptAt = new Date(this.d.now().getTime() + BACKOFF_MS[attempts - 1]!);
-    if (!this.d.repo.transition(doc.id, state, state, { attempts, error, nextAttemptAt })) {
+    if (!this.d.repo.transition(doc.id, state, state, { attempts, error, nextAttemptAt }, opts)) {
       this.d.repo.applyRequestedDiscard(doc.id);
     }
   }
@@ -3281,6 +3300,7 @@ export function documentRoutes(deps: { store: SessionStore; pipeline: Pipeline }
 
   r.post('/:id/discard', (c) => {
     const result = repo.requestDiscard(c.req.param('id'));
+    if (result === 'not_found') return c.json({ error: 'not_found' }, 404);
     if (result === 'not_allowed') return c.json({ error: 'not_allowed' }, 409);
     return c.json({ result });
   });
