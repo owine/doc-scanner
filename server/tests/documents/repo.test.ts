@@ -177,6 +177,12 @@ describe('DocumentRepo', () => {
     expect(() => r.transition(a.id, 'received', 'analyzing', { bogus: 1 } as never)).toThrow('unknown patch field bogus');
   });
 
+  it('rejects inherited keys in a patch', () => {
+    const r = repo();
+    const a = r.insert(doc());
+    expect(() => r.transition(a.id, 'received', 'analyzing', { toString: 1 } as never)).toThrow(/unknown patch field toString/);
+  });
+
   it('reports a missing id as not_found', () => {
     expect(repo().requestDiscard('nope')).toBe('not_found');
   });

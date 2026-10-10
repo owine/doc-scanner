@@ -138,7 +138,7 @@ export class DocumentRepo {
     const froms = Array.isArray(from) ? from : [from];
     // `undefined` means "leave the column alone"; only an explicit null clears it.
     const entries = (Object.entries(patch) as [keyof DocumentPatch, unknown][]).filter(([, v]) => v !== undefined);
-    for (const [k] of entries) if (!(k in COLUMN)) throw new Error(`unknown patch field ${k}`);
+    for (const [k] of entries) if (!Object.hasOwn(COLUMN, k)) throw new Error(`unknown patch field ${k}`);
     const sets = ['state = ?', 'seq = ?', 'updated_at = ?', ...entries.map(([k]) => `${COLUMN[k]} = ?`)];
     const params = [to, this.nextSeq(), iso(this.now()), ...entries.map(([k, v]) => toSql(k, v))];
     const res = this.db
