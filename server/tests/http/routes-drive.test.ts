@@ -49,7 +49,7 @@ async function loggedIn() {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ email: 'e@x.test', password: 'p' }),
   });
-  return { app, cookie: login.headers.get('set-cookie')!.split(';')[0]! };
+  return { app, db: t.db, cookie: login.headers.get('set-cookie')!.split(';')[0]! };
 }
 
 describe('drive test upload', () => {
@@ -66,5 +66,20 @@ describe('drive test upload', () => {
     expect(await res.json()).toEqual({ error: 'upload_failed' });
     expect(warn).toHaveBeenCalledWith({ email: 'e@x.test', errName: 'TypeError' }, 'drive test upload failed');
     expect(JSON.stringify(warn.mock.calls)).not.toContain('Northwind');
+  });
+
+  it('falls back to a constructed URL, in the response and the audit row, when the SDK gives none', async () => {
+    const { app, db, cookie } = await loggedIn();
+    vi.spyOn(DriveClient.prototype, 'uploadFile').mockResolvedValue({ nodeUid: 'vol~node1', driveUrl: null, name: 'x.txt' });
+    const res = await app.request('/api/drive/test-upload', {
+      method: 'POST',
+      headers: { cookie, 'content-type': 'application/json' },
+      body: '{}',
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { driveUrl: string };
+    expect(body.driveUrl).toBe('https://drive.proton.me/vol~node1');
+    const row = db.prepare(`SELECT detail FROM audit_log WHERE event = 'drive_test_upload'`).get() as { detail: string };
+    expect(JSON.parse(row.detail).driveUrl).toBe('https://drive.proton.me/vol~node1');
   });
 });

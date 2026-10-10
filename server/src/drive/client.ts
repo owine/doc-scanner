@@ -60,6 +60,7 @@ export interface ListRootResult {
 
 export interface UploadResult {
   nodeUid: string;
+  /** The node's Drive web URL, or null when the SDK can't build one. */
   driveUrl: string | null;
   /** The name actually used, which may be de-duplicated by the SDK. */
   name: string;

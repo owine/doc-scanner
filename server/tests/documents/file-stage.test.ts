@@ -108,6 +108,16 @@ describe('fileStage', () => {
     expect(h.drive.nodeUrl).not.toHaveBeenCalled();
   });
 
+  it('saves the upload\'s Drive link with the filed transition, not a second one', async () => {
+    h = makeHarness();
+    const spy = vi.spyOn(h.repo, 'transition');
+    const doc = filingDoc(EXISTING);
+    await fileStage(doc, h.ctx);
+    const filed = spy.mock.calls.filter((c) => c[2] === 'filed');
+    expect(filed).toHaveLength(1);
+    expect(filed[0]![3]).toMatchObject({ driveUrl: 'https://drive.proton.me/share/file/n1' });
+  });
+
   it('looks up the Drive link of a file found by SHA-1', async () => {
     h = makeHarness();
     h.drive.findFileBySha1.mockResolvedValue({ uid: 'NODE0', name: 'Northwind Energy Sep 2026.pdf' });

@@ -114,6 +114,8 @@ export async function fileStage(doc: DocumentRow, ctx: StageContext): Promise<vo
         filedName: uploaded.name,
         filedFolderPath: folderPath,
         driveNodeUid: uploaded.nodeUid,
+        // Known right after an upload: saved with the transition so a crash can't lose it.
+        driveUrl: uploaded.driveUrl ?? undefined,
         discardRequested: false,
         error: null,
       },
@@ -145,10 +147,14 @@ export async function fileStage(doc: DocumentRow, ctx: StageContext): Promise<vo
     // Plaintext first: a blob left behind by a failure here is reclaimed by the purge sweep.
     afterFiled(doc.id, 'could not delete the inbox copy of a filed document', () => ctx.inbox.deleteAll(doc.id));
     // Best effort: the link is a convenience, and nothing after filing may
-    // throw into the retry path. A file found by SHA-1 has no URL yet.
+    // throw into the retry path. Only a file found by SHA-1 has no URL yet.
     try {
-      const url = uploaded.driveUrl !== undefined ? uploaded.driveUrl : await drive.nodeUrl(uploaded.nodeUid);
-      if (url) ctx.repo.transition(doc.id, 'filed', 'filed', { driveUrl: url });
+      if (uploaded.driveUrl === undefined) {
+        const url = await drive.nodeUrl(uploaded.nodeUid);
+        if (url && !ctx.repo.transition(doc.id, 'filed', 'filed', { driveUrl: url })) {
+          logger.debug({ documentId: doc.id }, 'document left filed before its Drive link was recorded');
+        }
+      }
     } catch (err) {
       logger.warn({ documentId: doc.id, errName: errorName(err) }, 'could not record the Drive link');
     }
