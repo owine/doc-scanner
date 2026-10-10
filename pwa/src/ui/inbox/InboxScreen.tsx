@@ -12,6 +12,7 @@ import { ReviewCard } from './ReviewCard.js';
 
 export interface InboxScreenProps {
   sync: DocumentSync;
+  /** Must be stable across renders: the folder list reloads whenever it changes. */
   documents?: DocumentsApi;
   now?: () => Date;
   onScan: () => void;
@@ -24,7 +25,7 @@ function Section({ id, title, children }: { id: string; title: string; children:
   return (
     <section aria-labelledby={`h-${id}`}>
       <h2 id={`h-${id}`}>{title}</h2>
-      <ul class="doc-list">{children}</ul>
+      <ul class="doc-list" role="list">{children}</ul>
     </section>
   );
 }
@@ -62,6 +63,7 @@ export function InboxScreen({
     try {
       sync.upsert(await documents.get(id));
     } catch {
+      // Best effort: this may join a poll already in flight, which can predate the discard.
       void sync.poll();
     }
   };

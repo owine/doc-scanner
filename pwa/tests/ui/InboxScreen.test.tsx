@@ -184,6 +184,22 @@ describe('InboxScreen', () => {
     await new Promise((r) => setTimeout(r, 20));
   });
 
+  it('describes every row action by its document and keeps list semantics', async () => {
+    const waiting = makeDoc({ state: 'awaiting_login', analysis: null, originalName: 'waiting.pdf' });
+    const failed = makeDoc({ state: 'failed', error: 'Drive was unavailable', analysis: null, originalName: 'failed.pdf' });
+    const discarded = makeDoc({ state: 'discarded', discardedAt: '2026-10-08T12:00:00.000Z', analysis: null, originalName: 'gone.pdf' });
+    const filed = makeDoc({ state: 'filed', originalName: 'filed.pdf', filed: { name: 'Filed One', folderPath: '/Bills', driveNodeUid: 'v~9', driveUrl: 'https://drive.proton.me/u/0/s/file/9' } });
+    setup([waiting, failed, discarded, filed]);
+    const inRegion = (name: string) => within(screen.getByRole('region', { name }));
+    expect(inRegion('In progress').getByRole('button', { name: 'Discard' })).toHaveAccessibleDescription('waiting.pdf');
+    expect(inRegion('Failed').getByRole('button', { name: 'Retry' })).toHaveAccessibleDescription('failed.pdf');
+    expect(inRegion('Failed').getByRole('button', { name: 'Discard' })).toHaveAccessibleDescription('failed.pdf');
+    expect(inRegion('Discarded').getByRole('button', { name: 'Restore' })).toHaveAccessibleDescription('gone.pdf');
+    expect(inRegion('Recently filed').getByRole('link', { name: /open in drive/i })).toHaveAccessibleDescription('Filed One');
+    expect(document.querySelectorAll('ul.doc-list:not([role="list"])')).toHaveLength(0);
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Inbox' })).toBeInTheDocument());
+  });
+
   it('opens the scanner, settings and saved scans', async () => {
     const { props } = setup([]);
     fireEvent.click(screen.getByRole('button', { name: 'Scan' }));

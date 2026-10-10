@@ -3,7 +3,19 @@ import { DISCARD_RETENTION_MS } from '../../documents/group.js';
 import type { DocumentView } from '../../documents/types.js';
 import { WAITING_LABEL, displayName, safeDriveUrl } from './labels.js';
 
-function ActionButton({ label, onClick, secondary = false }: { label: string; onClick: () => Promise<void>; secondary?: boolean }) {
+const nameId = (doc: DocumentView) => `doc-name-${doc.id}`;
+
+function ActionButton({
+  label,
+  describedBy,
+  onClick,
+  secondary = false,
+}: {
+  label: string;
+  describedBy: string;
+  onClick: () => Promise<void>;
+  secondary?: boolean;
+}) {
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
   async function run() {
@@ -18,7 +30,7 @@ function ActionButton({ label, onClick, secondary = false }: { label: string; on
     }
   }
   return (
-    <button class={secondary ? 'btn btn-secondary btn-small' : 'btn btn-small'} disabled={busy} onClick={() => void run()}>
+    <button class={secondary ? 'btn btn-secondary btn-small' : 'btn btn-small'} disabled={busy} aria-describedby={describedBy} onClick={() => void run()}>
       {failed ? `${label} (failed, try again)` : label}
     </button>
   );
@@ -28,13 +40,13 @@ export function WaitingRow({ doc, onDiscard }: { doc: DocumentView; onDiscard: (
   return (
     <li class="doc-row">
       <div class="doc-main">
-        <div class="doc-name">{displayName(doc)}</div>
+        <div class="doc-name" id={nameId(doc)}>{displayName(doc)}</div>
         <div class="muted">{doc.discardRequested ? 'Discarding…' : (WAITING_LABEL[doc.state] ?? doc.state)}</div>
       </div>
       {/* A working document's discard is applied when its current step ends.
           Not while an upload is under way: the server files it regardless. */}
       {!doc.discardRequested && !(doc.state === 'filing' && doc.possiblyInDrive) && (
-        <ActionButton label="Discard" onClick={onDiscard} secondary />
+        <ActionButton label="Discard" describedBy={nameId(doc)} onClick={onDiscard} secondary />
       )}
     </li>
   );
@@ -45,12 +57,12 @@ export function FiledRow({ doc }: { doc: DocumentView }) {
   return (
     <li class="doc-row">
       <div class="doc-main">
-        <div class="doc-name">{displayName(doc)}</div>
+        <div class="doc-name" id={nameId(doc)}>{displayName(doc)}</div>
         <div class="muted">{doc.filed?.folderPath ?? ''}</div>
       </div>
       <span class={doc.autoFiled ? 'chip chip-auto' : 'chip'}>{doc.autoFiled ? 'auto' : doc.userEdited ? 'you edited' : 'you approved'}</span>
       {url && (
-        <a class="btn btn-secondary btn-small" href={url} target="_blank" rel="noopener noreferrer">
+        <a class="btn btn-secondary btn-small" href={url} target="_blank" rel="noopener noreferrer" aria-describedby={nameId(doc)}>
           Open in Drive
         </a>
       )}
@@ -62,11 +74,11 @@ export function FailedRow({ doc, onRetry, onDiscard }: { doc: DocumentView; onRe
   return (
     <li class="doc-row">
       <div class="doc-main">
-        <div class="doc-name">{displayName(doc)}</div>
+        <div class="doc-name" id={nameId(doc)}>{displayName(doc)}</div>
         <div class="error-text">{doc.error ?? 'Failed'}</div>
       </div>
-      <ActionButton label="Retry" onClick={onRetry} />
-      <ActionButton label="Discard" onClick={onDiscard} secondary />
+      <ActionButton label="Retry" describedBy={nameId(doc)} onClick={onRetry} />
+      <ActionButton label="Discard" describedBy={nameId(doc)} onClick={onDiscard} secondary />
     </li>
   );
 }
@@ -77,10 +89,10 @@ export function DiscardedRow({ doc, now, onRestore }: { doc: DocumentView; now: 
   return (
     <li class="doc-row">
       <div class="doc-main">
-        <div class="doc-name">{displayName(doc)}</div>
+        <div class="doc-name" id={nameId(doc)}>{displayName(doc)}</div>
         <div class="muted">Deleted in {days} {days === 1 ? 'day' : 'days'}</div>
       </div>
-      <ActionButton label="Restore" onClick={onRestore} secondary />
+      <ActionButton label="Restore" describedBy={nameId(doc)} onClick={onRestore} secondary />
     </li>
   );
 }
