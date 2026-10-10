@@ -277,7 +277,10 @@ async function withBackoff(fn, retry, deadline = Infinity, tries = 5) {
     try { return await fn(); } catch (e) {
       const status = e?.status ?? e?.response?.status;
       const transient = status === 429 || status === 529 || (status >= 500 && status < 600)
-        || /overloaded|rate.?limit/i.test(String(e?.message ?? ''));
+        || /overloaded|rate.?limit/i.test(String(e?.message ?? ''))
+        // The Anthropic SDK reports dropped sockets as APIConnectionError
+        // ("Connection error.") with no status; those are transient too.
+        || e?.name === 'APIConnectionError' || /connection error|ECONNRESET|ETIMEDOUT/i.test(String(e?.message ?? ''));
       if (!transient || attempt >= tries - 1) throw e;
       const delay = Math.min(60_000, 1000 * 2 ** attempt) * (0.5 + Math.random());
       // Never start a retry that would outlive the case's wall-clock ceiling - 
