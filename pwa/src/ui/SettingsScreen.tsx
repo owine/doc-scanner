@@ -85,7 +85,7 @@ export function SettingsScreen({ email, documents = documentsApi, onBack, onLogg
       if (!mounted.current) return;
       setStatus(
         err instanceof ApiError && err.code === 'invalid_input'
-          ? "A value was rejected: the model can't be empty, and the threshold must be 0.5 to 1 with at most two decimals."
+          ? 'A value was rejected. Check the model name, a threshold between 0.5 and 1 with at most two decimals, and the excluded folders.'
           : 'Could not save settings.',
       );
     } finally {
@@ -199,6 +199,8 @@ export function SettingsScreen({ email, documents = documentsApi, onBack, onLogg
               <FolderPicker
                 folders={folders}
                 allowNew={false}
+                // The server refuses "/": excluding it would leave nowhere to file.
+                allowRoot={false}
                 onChoose={(f) => {
                   if (f.kind === 'existing' && !draft.excludePaths.includes(f.path)) set('excludePaths', [...draft.excludePaths, f.path]);
                   setPicking(false);

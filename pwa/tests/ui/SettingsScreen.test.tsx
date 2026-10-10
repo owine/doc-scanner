@@ -60,7 +60,11 @@ describe('SettingsScreen', () => {
     // Three decimals pass the client check; the server is the one to refuse them.
     fireEvent.input(await screen.findByRole('spinbutton', { name: /threshold/i }), { target: { value: '0.855' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    expect(await screen.findByText(/A value was rejected/i)).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        'A value was rejected. Check the model name, a threshold between 0.5 and 1 with at most two decimals, and the excluded folders.',
+      ),
+    ).toBeInTheDocument();
     expect(api.saveSettings).toHaveBeenCalledWith({ autoFileThreshold: 0.855 });
   });
 
@@ -129,6 +133,13 @@ describe('SettingsScreen', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(api.saveSettings).toHaveBeenCalledWith({ excludePaths: ['/Taxes/2026'] }));
     await screen.findByText('Saved.');
+  });
+
+  it('does not offer the root folder as never-file-here', async () => {
+    setup();
+    fireEvent.click(await screen.findByRole('button', { name: /add folder/i }));
+    expect(await screen.findByRole('button', { name: '/Bills' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '/' })).toBeNull();
   });
 
   it('reloads the folder list after the excluded folders change', async () => {

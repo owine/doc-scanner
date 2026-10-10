@@ -27,6 +27,15 @@ describe('FolderPicker', () => {
     expect(onChoose).toHaveBeenCalledWith({ kind: 'new', parentLinkId: 'L-bills', parentPath: '/Bills', name: 'Gas' });
   });
 
+  it('offers the root folder unless told not to', () => {
+    const { unmount } = render(<FolderPicker folders={folders()} allowNew={false} onChoose={() => {}} onCancel={() => {}} />);
+    expect(screen.getByRole('button', { name: '/' })).toBeInTheDocument();
+    unmount();
+    render(<FolderPicker folders={folders()} allowNew={false} allowRoot={false} onChoose={() => {}} onCancel={() => {}} />);
+    expect(screen.queryByRole('button', { name: '/' })).toBeNull();
+    expect(screen.getByRole('button', { name: '/Bills' })).toBeInTheDocument();
+  });
+
   it('offers no new folder when not allowed', () => {
     render(<FolderPicker folders={folders()} allowNew={false} onChoose={() => {}} onCancel={() => {}} />);
     expect(screen.queryByRole('button', { name: /new folder in/i })).toBeNull();

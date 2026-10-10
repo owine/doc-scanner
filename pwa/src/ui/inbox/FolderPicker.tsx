@@ -7,11 +7,13 @@ export interface FolderPickerProps {
   folders: FoldersState;
   /** Offer "new folder inside this one" on each result. */
   allowNew: boolean;
+  /** Offer the root folder ("/"). Off where it can't be used, such as never-file-here. */
+  allowRoot?: boolean;
   onChoose: (folder: FolderRef) => void;
   onCancel: () => void;
 }
 
-export function FolderPicker({ folders, allowNew, onChoose, onCancel }: FolderPickerProps) {
+export function FolderPicker({ folders, allowNew, allowRoot = true, onChoose, onCancel }: FolderPickerProps) {
   const [query, setQuery] = useState('');
   const [newIn, setNewIn] = useState<FolderEntry | null>(null);
   const [newName, setNewName] = useState('');
@@ -20,7 +22,11 @@ export function FolderPicker({ folders, allowNew, onChoose, onCancel }: FolderPi
   const plusRefs = useRef(new Map<string, HTMLButtonElement>());
   // Bumped on every "+" click so the name field takes focus again even for the same row.
   const [focusTick, setFocusTick] = useState(0);
-  const results = useMemo(() => (folders.folders ? searchFolders(folders.folders, query) : []), [folders.folders, query]);
+  const offered = useMemo(
+    () => (folders.folders && !allowRoot ? folders.folders.filter((f) => f.path !== '/') : folders.folders),
+    [folders.folders, allowRoot],
+  );
+  const results = useMemo(() => (offered ? searchFolders(offered, query) : []), [offered, query]);
 
   // Once, when the picker opens. (autoFocus is ignored on elements inserted
   // after page load, so focus explicitly.)
