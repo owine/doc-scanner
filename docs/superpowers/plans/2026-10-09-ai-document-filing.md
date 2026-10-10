@@ -32,8 +32,8 @@
 |---|---|
 | `server/src/crypto/at-rest.ts` | `AtRestCipher`: AES-256-GCM with a per-purpose HKDF subkey of the master key |
 | `server/src/migrations/004_classification_history.sql` | Ported verbatim from `origin/feat/phase-5-ai-organize` |
-| `server/src/migrations/005_documents.sql` | `documents`, `settings`, `folder_cache` tables |
-| `server/src/settings/settings-store.ts` | Effective settings = env defaults overridden by saved values |
+| `server/src/migrations/005_documents.sql` | `documents`, `document_seq`, `folder_cache` tables |
+| `server/src/settings/settings-store.ts` | Effective settings = env defaults overridden by values saved in `app_settings` |
 | `server/src/documents/types.ts` | `DocumentState`, `DocumentRow`, `Decision`, `FilingTarget` |
 | `server/src/documents/repo.ts` | All SQL for `documents`; compare-and-set transitions |
 | `server/src/documents/inbox-store.ts` | Encrypted blobs on disk, one per document and kind |
@@ -91,7 +91,7 @@ In `server/tests/analyze/analyzer.test.ts`, every `createAnalyzer({ ... })` call
 - [ ] **Step 2: Run them to see them fail**
 
 Run: `cd server && NODE_OPTIONS=--import=tsx pnpm exec vitest run tests/analyze`
-Expected: FAIL — `systemPrompt` is not exported; `autoFileThreshold` is not a known property (typecheck) and the system prompt still says 0.85.
+Expected: FAIL — `systemPrompt` is not exported and the system prompt still says 0.85. (vitest doesn't typecheck, and `tests/` is outside `tsc`, so the extra `autoFileThreshold` property itself doesn't fail anything.)
 
 - [ ] **Step 3: Implement**
 
@@ -136,7 +136,8 @@ In `server/evals/analyzer/harness.ts`:
 ```
 
 - in `runCase`: `createAnalyzer({ client, model: variant.model, effort: variant.effort, autoFileThreshold: variant.threshold })`;
-- in the transcript: `{ role: 'system', content: systemPrompt(variant.threshold) }` (import `systemPrompt` instead of `SYSTEM_PROMPT`).
+- in the transcript: `{ role: 'system', content: systemPrompt(variant.threshold) }` (import `systemPrompt` instead of `SYSTEM_PROMPT`);
+- in `gradeCase`, measure the per-case `confident` flag at the variant's own threshold: replace `a.confidence >= AUTO_FILE_THRESHOLD` with `a.confidence >= VARIANTS[ctx.variant]!.threshold` (give `gradeCase` a `ctx: Ctx` parameter and change `run-eval.mjs`'s `harness.gradeCase(input, run)` to `harness.gradeCase(input, run, _ctx)`), and delete the now-unused `AUTO_FILE_THRESHOLD` constant.
 
 - [ ] **Step 5: Run tests and typecheck**
 
@@ -163,8 +164,8 @@ Calibration check before auto-filing goes live: the v4 finalist with the prompt 
 Ask the user to approve the changed harness and run the calibration (about $1.20: 80 Haiku runs plus 80 judge calls):
 
 ```bash
-ANTHROPIC_API_KEY=$(op read "op://Docker/piwine-doc-scanner/anthropic_api_key") \
-  pnpm --filter @doc-scanner/server run eval:analyzer \
+# ANTHROPIC_API_KEY exported from the user's secret store
+pnpm --filter @doc-scanner/server run eval:analyzer \
   --flow "$PWD/.claude/hillclimb/analyzer" --variant v6 --model claude-haiku-5-5 --reps 2 --approve-harness
 ```
 
@@ -287,14 +288,14 @@ git commit -m "feat(crypto): per-purpose AES-GCM encryption at rest"
 
 - [ ] **Step 1: Update the version expectations (failing)**
 
-In `server/tests/db.test.ts`, change both `expect(v.v).toBe(3);` to `expect(v.v).toBe(5);`, and add:
+In `server/tests/db.test.ts`, change both `expect(v.v).toBe(3);` **and** `expect(secondCount).toBe(3);` (the re-open test counts applied migrations) to `5`, and add:
 
 ```ts
   it('creates the document pipeline tables', () => {
     const { db, cleanup } = createTestDb();
     try {
       const names = (db.prepare(`SELECT name FROM sqlite_master WHERE type IN ('table')`).all() as { name: string }[]).map((r) => r.name);
-      expect(names).toEqual(expect.arrayContaining(['documents', 'settings', 'folder_cache', 'classification_history']));
+      expect(names).toEqual(expect.arrayContaining(['documents', 'document_seq', 'folder_cache', 'classification_history']));
     } finally {
       cleanup();
     }
@@ -363,11 +364,17 @@ CREATE INDEX IF NOT EXISTS idx_documents_sha256 ON documents(sha256);
 CREATE INDEX IF NOT EXISTS idx_documents_work ON documents(state, next_attempt_at);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_documents_seq ON documents(seq);
 
--- Saved overrides of env-var defaults; value is JSON.
-CREATE TABLE IF NOT EXISTS settings (
-  key   TEXT PRIMARY KEY,
-  value TEXT NOT NULL CHECK (json_valid(value))
+-- Monotonic source for documents.seq. MAX(seq)+1 would hand a purged row's
+-- number to the next write, and a client polling with that cursor would
+-- miss the change.
+CREATE TABLE IF NOT EXISTS document_seq (
+  id     INTEGER PRIMARY KEY CHECK (id = 1),
+  value  INTEGER NOT NULL
 );
+INSERT OR IGNORE INTO document_seq (id, value) VALUES (1, 0);
+
+-- Saved settings reuse migration 003's app_settings table, under keys
+-- prefixed "filing." (see settings-store.ts).
 
 -- The last walked Drive folder tree (paths + recent filenames), encrypted,
 -- so documents can be analysed while no one is logged in.
@@ -388,7 +395,7 @@ Run: same as Step 2. Expected: PASS.
 git add server/src/migrations/004_classification_history.sql
 git commit -m "feat(db): port the filing history migration from Phase 5"
 git add server/src/migrations/005_documents.sql server/tests/db.test.ts
-git commit -m "feat(db): documents, settings and folder cache tables"
+git commit -m "feat(db): documents, sequence and folder cache tables"
 ```
 
 ---
@@ -493,6 +500,16 @@ describe('SettingsStore', () => {
     expect(s.get()).toEqual(defaults);
   });
 
+  it('leaves other modules\' app_settings rows alone', () => {
+    const t = createTestDb();
+    cleanup = t.cleanup;
+    t.db.prepare(`INSERT INTO app_settings (key, value) VALUES ('client_uid', 'not-json')`).run();
+    const s = new SettingsStore(t.db, defaults);
+    expect(s.get()).toEqual(defaults);
+    s.update({ effort: 'low' });
+    expect((t.db.prepare(`SELECT value FROM app_settings WHERE key = 'client_uid'`).get() as { value: string }).value).toBe('not-json');
+  });
+
   it('clearing an override falls back to the default', () => {
     const s = store();
     s.update({ effort: 'low' });
@@ -532,9 +549,13 @@ const PatchSchema = z
 
 type Key = keyof EffectiveSettings;
 
+/** Keys in migration 003's app_settings, which other modules share (client_uid). */
+const PREFIX = 'filing.';
+
 /**
  * Env vars supply the defaults; values saved here (from the PWA's settings
- * screen) override them. Stored one JSON value per key.
+ * screen) override them. Stored as JSON, one row per setting, in
+ * `app_settings` under `filing.<name>`.
  */
 export class SettingsStore {
   constructor(
@@ -543,20 +564,25 @@ export class SettingsStore {
   ) {}
 
   get(): EffectiveSettings {
-    const rows = this.db.prepare('SELECT key, value FROM settings').all() as { key: string; value: string }[];
+    const rows = this.db
+      .prepare(`SELECT key, value FROM app_settings WHERE key LIKE 'filing.%'`)
+      .all() as { key: string; value: string }[];
     const saved: Record<string, unknown> = {};
-    for (const r of rows) if (r.key in this.defaults) saved[r.key] = JSON.parse(r.value);
+    for (const r of rows) {
+      const name = r.key.slice(PREFIX.length);
+      if (name in this.defaults) saved[name] = JSON.parse(r.value);
+    }
     return { ...this.defaults, ...(saved as Partial<EffectiveSettings>) };
   }
 
   update(patch: Partial<EffectiveSettings>): EffectiveSettings {
     const valid = PatchSchema.parse(patch);
     const upsert = this.db.prepare(
-      'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+      'INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
     );
     this.db.exec('BEGIN');
     try {
-      for (const [key, value] of Object.entries(valid)) upsert.run(key, JSON.stringify(value));
+      for (const [key, value] of Object.entries(valid)) upsert.run(PREFIX + key, JSON.stringify(value));
       this.db.exec('COMMIT');
     } catch (err) {
       this.db.exec('ROLLBACK');
@@ -566,12 +592,12 @@ export class SettingsStore {
   }
 
   clear(key: Key): void {
-    this.db.prepare('DELETE FROM settings WHERE key = ?').run(key);
+    this.db.prepare('DELETE FROM app_settings WHERE key = ?').run(PREFIX + key);
   }
 }
 ```
 
-- [ ] **Step 4: Run to see it pass** — Expected: 4 passed.
+- [ ] **Step 4: Run to see it pass** — Expected: 5 passed.
 
 - [ ] **Step 5: Commit**
 
@@ -773,6 +799,23 @@ describe('DocumentRepo', () => {
     expect(r.nextWorkable()?.id).toBe(a.id);
   });
 
+  it('still hands the worker a document whose discard arrived during a backoff', () => {
+    const r = repo();
+    const a = r.insert(doc());
+    r.transition(a.id, 'received', 'analyzing', { nextAttemptAt: new Date(clock.getTime() + 60_000) });
+    r.requestDiscard(a.id);
+    clock = new Date(clock.getTime() + 61_000);
+    expect(r.nextWorkable()).toMatchObject({ id: a.id, discardRequested: true });
+  });
+
+  it('never reuses a seq after the newest row is deleted', () => {
+    const r = repo();
+    const a = r.insert(doc());
+    r.delete(a.id);
+    const b = r.insert(doc({ sha256: 'b'.repeat(64) }));
+    expect(b.seq).toBeGreaterThan(a.seq);
+  });
+
   it('round-trips JSON columns', () => {
     const r = repo();
     const a = r.insert(doc());
@@ -904,9 +947,10 @@ export class DocumentRepo {
     private readonly now: () => Date = () => new Date(),
   ) {}
 
+  /** Never reuses a number, even after the row that held the highest one is purged. */
   private nextSeq(): number {
-    const r = this.db.prepare('SELECT COALESCE(MAX(seq), 0) + 1 AS s FROM documents').get() as { s: number };
-    return r.s;
+    const r = this.db.prepare('UPDATE document_seq SET value = value + 1 WHERE id = 1 RETURNING value').get() as { value: number };
+    return r.value;
   }
 
   insert(d: NewDocument): DocumentRow {
@@ -988,13 +1032,17 @@ export class DocumentRepo {
     return Number(res.changes) === 1;
   }
 
-  /** The workable document due soonest, if any is due now. */
+  /**
+   * The workable document due soonest, if any is due now. Includes documents
+   * with a pending discard: one that was waiting out a retry backoff when the
+   * discard arrived has no running stage to apply it, so the worker must.
+   */
   nextWorkable(): DocumentRow | null {
     const r = this.db
       .prepare(
         `SELECT * FROM documents
-         WHERE state IN (${placeholders(WORKABLE_STATES.length)}) AND next_attempt_at <= ? AND discard_requested = 0
-         ORDER BY next_attempt_at, created_at LIMIT 1`,
+         WHERE state IN (${placeholders(WORKABLE_STATES.length)}) AND next_attempt_at <= ?
+         ORDER BY discard_requested DESC, next_attempt_at, created_at LIMIT 1`,
       )
       .get(...WORKABLE_STATES, iso(this.now())) as Raw | undefined;
     return r ? fromRow(r) : null;
@@ -1036,7 +1084,7 @@ export class DocumentRepo {
 }
 ```
 
-- [ ] **Step 5: Run to see them pass** — same command. Expected: 11 passed.
+- [ ] **Step 5: Run to see them pass** — same command. Expected: 13 passed.
 
 - [ ] **Step 6: Commit**
 
@@ -1245,6 +1293,33 @@ let cleanup: () => void = () => {};
 afterEach(() => cleanup());
 
 describe('FolderCacheStore', () => {
+  it('keeps only each folder\'s five most recent files, and only their uid, name and date', () => {
+    const t = createTestDb();
+    cleanup = t.cleanup;
+    const s = new FolderCacheStore(t.db, new AtRestCipher(Buffer.alloc(32, 4).toString('base64'), 'folder-cache'));
+    const files = Array.from({ length: 8 }, (_, i) => ({
+      uid: `F${i}`,
+      name: `Statement ${i}.pdf`,
+      mediaType: 'application/pdf',
+      size: 100,
+      modified: new Date(Date.UTC(2026, 0, i + 1)),
+    }));
+    s.save([{ linkId: 'L', path: '/Bills', files }], new Date());
+    const kept = s.load()!.tree[0].files;
+    expect(kept.map((f) => f.uid)).toEqual(['F7', 'F6', 'F5', 'F4', 'F3']);
+    expect(Object.keys(kept[0]).sort()).toEqual(['modified', 'name', 'uid']);
+  });
+
+  it('records a filing in the cached folder, so the next document sees the name', () => {
+    const t = createTestDb();
+    cleanup = t.cleanup;
+    const s = new FolderCacheStore(t.db, new AtRestCipher(Buffer.alloc(32, 4).toString('base64'), 'folder-cache'));
+    s.save([{ linkId: 'L', path: '/Bills', files: [] }], new Date());
+    s.recordFiled('L', { uid: 'N1', name: 'Northwind Energy Oct 2026.pdf', modified: new Date('2026-10-10T00:00:00Z') });
+    s.recordFiled('MISSING', { uid: 'N2', name: 'x.pdf', modified: new Date() });
+    expect(s.load()!.tree[0].files.map((f) => f.name)).toEqual(['Northwind Energy Oct 2026.pdf']);
+  });
+
   it('round-trips the tree, encrypted, with dates restored', () => {
     const t = createTestDb();
     cleanup = t.cleanup;
@@ -1338,12 +1413,25 @@ export function extensionFor(mime: string, originalName: string | null): string 
 ```ts
 import type { DB } from '../db.js';
 import type { AtRestCipher } from '../crypto/at-rest.js';
-import type { TreeFolder } from './folder-tree.js';
+import { RECENT_NAMES_PER_FOLDER, type TreeFile, type TreeFolder } from './folder-tree.js';
+
+/** Only what the analyzer and the folder picker use; nothing else is kept at rest (spec §4). */
+function trim(tree: TreeFolder[]): TreeFolder[] {
+  return tree.map((f) => ({
+    linkId: f.linkId,
+    path: f.path,
+    files: [...f.files]
+      .sort((a, b) => b.modified.getTime() - a.modified.getTime())
+      .slice(0, RECENT_NAMES_PER_FOLDER)
+      .map((file) => ({ uid: file.uid, name: file.name, modified: file.modified })),
+  }));
+}
 
 /**
- * The last walked folder tree — paths and each folder's recent filenames —
- * encrypted at rest, so documents can be analysed while no one is logged in.
- * Filing still needs a live session; this copy only feeds the analyzer.
+ * The last walked folder tree — paths and each folder's five most recent
+ * filenames — encrypted at rest, so documents can be analysed while no one
+ * is logged in. Filing still needs a live session; this copy only feeds the
+ * analyzer and the folder picker.
  */
 export class FolderCacheStore {
   constructor(
@@ -1351,8 +1439,17 @@ export class FolderCacheStore {
     private readonly cipher: AtRestCipher,
   ) {}
 
+  /** Adds a just-filed document to its folder, so the next analysis sees the name at once. */
+  recordFiled(folderLinkId: string, file: TreeFile): void {
+    const cached = this.load();
+    const folder = cached?.tree.find((f) => f.linkId === folderLinkId);
+    if (!cached || !folder) return;
+    folder.files.unshift(file);
+    this.save(cached.tree, cached.walkedAt);
+  }
+
   save(tree: TreeFolder[], walkedAt: Date): void {
-    const sealed = this.cipher.seal(new TextEncoder().encode(JSON.stringify(tree)));
+    const sealed = this.cipher.seal(new TextEncoder().encode(JSON.stringify(trim(tree))));
     this.db
       .prepare(
         `INSERT INTO folder_cache (id, encrypted_tree, walked_at) VALUES (1, ?, ?)
@@ -1373,7 +1470,7 @@ export class FolderCacheStore {
 }
 ```
 
-- [ ] **Step 6: Run to see them pass** — same command as Step 2. Expected: 5 passed.
+- [ ] **Step 6: Run to see them pass** — same command as Step 2. Expected: 7 passed.
 
 - [ ] **Step 7: Commit (three commits)**
 
@@ -1701,9 +1798,34 @@ git commit -m "feat(auth): let background work find the live session and hear ab
 
 - [ ] **Step 1: Write the failing test**
 
-Using the same Sentry harness as `drive-failures.test.ts`, assert that `captureDocumentFailure(new Error('analysis failed for Northwind Energy Sep 2026.pdf'), 'analyze', ['Northwind Energy Sep 2026.pdf'])`:
-- sends one event tagged `document.stage: analyze`;
-- whose serialized JSON does **not** contain `Northwind Energy Sep 2026.pdf`.
+```ts
+import { describe, it, expect, beforeEach } from 'vitest';
+import { flushEvents, initRecordingSentry } from '../helpers/sentry-transport.js';
+import { captureDocumentFailure } from '../../src/observability/report.js';
+
+const { events } = initRecordingSentry();
+
+// Built at runtime so the value never appears in this file's source: the
+// ContextLines integration attaches source lines around stack frames, and a
+// literal here would leak into the event through them.
+const docName = `${['Northwind', 'Energy'].join(' ')} ${Date.now()}.pdf`;
+
+describe('document failure reporting', () => {
+  beforeEach(() => {
+    events.length = 0;
+  });
+
+  it('tags the stage and keeps the document name out of the event', async () => {
+    captureDocumentFailure(new Error(`analysis failed for ${docName}`), 'analyze', [docName, '']);
+    await flushEvents();
+    expect(events).toHaveLength(1);
+    expect((events[0]!.tags as Record<string, unknown>)['document.stage']).toBe('analyze');
+    expect(JSON.stringify(events[0])).not.toContain(docName);
+  });
+});
+```
+
+(Check `tests/helpers/sentry-transport.ts` for `flushEvents`'s exact signature and copy its use from `drive-failures.test.ts` if it differs.)
 
 - [ ] **Step 2: Run to see it fail** — Expected: FAIL, `captureDocumentFailure` not exported.
 
@@ -2036,6 +2158,7 @@ export async function analyzeStage(doc: DocumentRow, ctx: StageContext): Promise
 
   const settings = ctx.settings.get();
   const folders = toFolderContexts(cache.tree, { excludePaths: settings.excludePaths });
+  const started = Date.now();
   const outcome = await ctx.analyzerFor(settings).analyze(
     {
       bytes: ctx.inbox.get(doc.id, 'original'),
@@ -2055,6 +2178,7 @@ export async function analyzeStage(doc: DocumentRow, ctx: StageContext): Promise
       inputTokens: outcome.usage.input_tokens,
       cacheReadTokens: outcome.usage.cache_read_input_tokens ?? 0,
       outputTokens: outcome.usage.output_tokens,
+      durationMs: Date.now() - started,
     },
     'document analysed',
   );
@@ -2190,6 +2314,8 @@ describe('fileStage', () => {
     expect(JSON.parse(audit.detail)).toMatchObject({ documentId: doc.id, driveNodeUid: 'NODE1', autoFiled: true });
     const hist = h.db.prepare('SELECT folder_path FROM classification_history').get() as { folder_path: string };
     expect(hist.folder_path).toBe('/Bills');
+    const bills = h.ctx.folderCache.load()!.tree.find((f) => f.linkId === 'BILLS')!;
+    expect(bills.files[0]!.name).toBe('Northwind Energy Sep 2026.pdf');
   });
 
   it('creates an approved new folder once, saving its uid before uploading', async () => {
@@ -2344,6 +2470,9 @@ export async function fileStage(doc: DocumentRow, ctx: StageContext): Promise<vo
           userEdited: doc.userEdited,
         }),
       );
+    // The filed name joins that folder's recent names right away (spec §5:
+    // edits teach the system), without waiting for the next tree walk.
+    ctx.folderCache.recordFiled(folderLinkId, { uid: uploaded.nodeUid, name: uploaded.name, modified: ctx.now() });
     ctx.inbox.deleteAll(doc.id);
     logger.info({ documentId: doc.id, autoFiled: doc.autoFiled, userEdited: doc.userEdited }, 'document filed');
   } catch (err) {
@@ -2430,6 +2559,19 @@ describe('DocumentWorker', () => {
     expect(h.repo.get(doc.id)).toMatchObject({ state: 'failed', attempts: MAX_ATTEMPTS });
     expect(h.report).toHaveBeenCalledTimes(1);
     expect(h.report.mock.calls[0][1]).toBe('analyze');
+  });
+
+  it('applies a discard that arrived while the document waited out a backoff', async () => {
+    h = makeHarness();
+    h.analyze.mockRejectedValueOnce(new Error('overloaded'));
+    const doc = h.add();
+    const w = new DocumentWorker(h.ctx);
+    await w.wake();
+    expect(h.repo.get(doc.id)).toMatchObject({ state: 'analyzing', attempts: 1 });
+    expect(h.repo.requestDiscard(doc.id)).toBe('requested');
+    h.advance(10 * 60_000);
+    await w.wake();
+    expect(h.repo.get(doc.id)?.state).toBe('discarded');
   });
 
   it('on login: refreshes the folder tree and files what was waiting', async () => {
@@ -2529,6 +2671,13 @@ export class DocumentWorker {
   async step(): Promise<boolean> {
     const doc = this.d.repo.nextWorkable();
     if (!doc) return false;
+    // A discard that arrived while this document waited out a backoff (or
+    // before a crash). An upload that may already have happened is finished
+    // instead: it can't be taken back.
+    if (doc.discardRequested && !(doc.state === 'filing' && doc.filingTarget)) {
+      this.d.repo.applyRequestedDiscard(doc.id);
+      return true;
+    }
     try {
       switch (doc.state) {
         case 'received':
@@ -2652,6 +2801,7 @@ import { AtRestCipher } from '../crypto/at-rest.js';
 import { FolderCacheStore } from '../drive/folder-cache-store.js';
 import { captureDocumentFailure } from '../observability/report.js';
 import { SettingsStore, type EffectiveSettings } from '../settings/settings-store.js';
+import { logger } from '../logger.js';
 import { FilingHistory } from './history.js';
 import { InboxStore } from './inbox-store.js';
 import { DocumentRepo } from './repo.js';
@@ -2711,7 +2861,9 @@ export function createPipeline(o: PipelineOptions): Pipeline {
     worker,
     start() {
       worker.start();
-      unsubscribe = onLiveSessionRegistered(() => void worker.onLogin());
+      unsubscribe = onLiveSessionRegistered(() => {
+        worker.onLogin().catch((err: unknown) => logger.error({ err }, 'document worker failed after login'));
+      });
     },
     stop() {
       worker.stop();
@@ -2940,6 +3092,9 @@ describe('document routes', () => {
     expect(put.status).toBe(200);
     const folders = (await (await app.request('/api/folders', { headers: { cookie } })).json()) as { folders: { path: string }[] };
     expect(folders.folders.map((f) => f.path)).toEqual(['/', '/Bills']);
+    // Unauthenticated refresh is refused by the guard. (A logged-in refresh
+    // would walk the real Drive, so it is exercised in Task 18, not here.)
+    expect((await app.request('/api/folders/refresh', { method: 'POST' })).status).toBe(401);
     const bad = await app.request('/api/settings', {
       method: 'PUT',
       headers: { cookie, 'content-type': 'application/json' },
@@ -3140,6 +3295,12 @@ export function documentRoutes(deps: { store: SessionStore; pipeline: Pipeline }
 
 export function folderRoutes(deps: { store: SessionStore; pipeline: Pipeline }) {
   const r = guarded(deps.store);
+  // On-demand re-walk (spec §4), e.g. after reorganising folders in Drive.
+  r.post('/refresh', async (c) => {
+    if (!c.get('auth')?.liveSession) return c.json({ error: 'not_logged_in' }, 409);
+    await deps.pipeline.worker.refreshFolderCache();
+    return c.json({ ok: true });
+  });
   r.get('/', (c) => {
     const cache = deps.pipeline.folderCache.load();
     if (!cache) return c.json({ error: 'folders_not_loaded' }, 503);
@@ -3284,9 +3445,11 @@ Expected: everything passes (the PWA is untouched by slice 1).
 
 - [ ] **Step 2: Manual run against the real Drive (with the user)**
 
-Ask the user to start the server locally with their real env (`op read` for the key), log in through the existing PWA login screen, and then:
+Ask the user to start the server locally with their real env (`ANTHROPIC_API_KEY` from their secret store, `INSECURE_COOKIES=true` because this is plain HTTP), then log in with curl so the session cookie lands in a jar (the PWA's cookie is HttpOnly and stays in the browser):
 
 ```bash
+curl -s -c cookies.txt -H 'content-type: application/json' \
+  -d '{"email":"…","password":"…"}' http://localhost:3000/api/auth/login   # add "totp" if 2FA is on
 curl -s -b cookies.txt -F file=@some-test-doc.pdf -F source=picker http://localhost:3000/api/documents
 curl -s -b cookies.txt 'http://localhost:3000/api/documents?since=0' | jq '.documents[0] | {state, analysis, reviewReason}'
 ```
