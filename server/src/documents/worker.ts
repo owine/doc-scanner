@@ -1,4 +1,5 @@
 import { logger } from '../logger.js';
+import { errorName } from '../observability/error-name.js';
 import type { DocumentStage } from '../observability/report.js';
 import type { PipelineDeps, StageContext } from './deps.js';
 import { InboxBlobMissingError } from './inbox-store.js';
@@ -16,6 +17,8 @@ const PURGE_EVERY_MS = 3600_000;
 const DISCARD_RETENTION_MS = 7 * 24 * 3600_000;
 /** Safety valve: a drain never spins forever on a document that won't move. */
 const MAX_STEPS_PER_DRAIN = 1000;
+/** How far an unexpected worker error pushes the row it came from. */
+const POSTPONE_MS = 10 * 60_000;
 
 function stageOf(state: DocumentState): DocumentStage {
   if (state === 'filing') return 'file';
@@ -39,33 +42,71 @@ export class DocumentWorker {
     this.ctx = { ...d, refreshFolderCache: () => this.refreshFolderCache() };
   }
 
-  /** Runs stages until nothing is due. Concurrent calls share one drain. */
+  /**
+   * Runs stages until nothing is due. Concurrent calls share one drain.
+   * Never rejects: callers fire it and forget.
+   */
   wake(): Promise<void> {
     if (this.draining) {
       this.again = true;
       return this.draining;
     }
     this.draining = (async () => {
-      do {
-        this.again = false;
-        for (let i = 0; i < MAX_STEPS_PER_DRAIN && (await this.step()); i++);
-      } while (this.again);
-    })().finally(() => {
-      this.draining = null;
-    });
+      try {
+        do {
+          this.again = false;
+          for (let i = 0; i < MAX_STEPS_PER_DRAIN && (await this.guardedStep()); i++);
+        } while (this.again);
+      } finally {
+        // Same tick as the last `again` check: a wake() after it starts a new
+        // drain instead of joining one that is already over.
+        this.draining = null;
+      }
+    })();
     return this.draining;
   }
 
-  /** One stage for the most overdue document. False when nothing is due. */
-  async step(): Promise<boolean> {
-    const doc = this.d.repo.nextWorkable();
-    if (!doc) return false;
+  /**
+   * step() with a backstop: an unexpected error is logged (its type only) and
+   * the row it came from, if any, is postponed, so one bad row can neither
+   * crash the drain nor spin it.
+   */
+  private async guardedStep(): Promise<boolean> {
+    let doc: DocumentRow | null = null;
+    try {
+      doc = this.d.repo.nextWorkable();
+      if (!doc) return false;
+      await this.step(doc);
+      return true;
+    } catch (err) {
+      logger.error({ documentId: doc?.id, errName: errorName(err) }, 'document worker step failed');
+      if (!doc) return false;
+      this.postpone(doc.id);
+      return true;
+    }
+  }
+
+  /** Pushes a row's next attempt out; best effort. */
+  private postpone(id: string): void {
+    try {
+      const state = this.d.repo.get(id)?.state;
+      if (!state) return;
+      // Only next_attempt_at changes, so it is safe past a pending discard
+      // (the flag stays, and the worker applies it when the row is due).
+      this.d.repo.transition(id, state, state, { nextAttemptAt: new Date(this.d.now().getTime() + POSTPONE_MS) }, { ignorePendingDiscard: true });
+    } catch (err) {
+      logger.error({ documentId: id, errName: errorName(err) }, 'could not postpone document');
+    }
+  }
+
+  /** One stage for `doc`, the most overdue document. */
+  private async step(doc: DocumentRow): Promise<void> {
     // A discard that arrived while this document waited out a backoff (or
     // before a crash). An upload that may already have happened is finished
     // instead: it can't be taken back.
     if (doc.discardRequested && !(doc.state === 'filing' && doc.filingTarget)) {
       this.d.repo.applyRequestedDiscard(doc.id);
-      return true;
+      return;
     }
     try {
       switch (doc.state) {
@@ -86,15 +127,24 @@ export class DocumentWorker {
     } catch (err) {
       this.retryOrFail(doc, err);
     }
-    return true;
   }
 
   /**
    * Errors reach GlitchTip via d.report with the document's names redacted;
    * stages must never throw errors that embed document content (the analyzer's
    * unusable answers become review reasons, not thrown errors).
+   * Never throws: if the failure can't be recorded, the row is postponed.
    */
   private retryOrFail(doc: DocumentRow, err: unknown): void {
+    try {
+      this.recordFailure(doc, err);
+    } catch (recordErr) {
+      logger.error({ documentId: doc.id, errName: errorName(recordErr) }, 'could not record document failure');
+      this.postpone(doc.id);
+    }
+  }
+
+  private recordFailure(doc: DocumentRow, err: unknown): void {
     // A missing inbox blob can never come back: fail now instead of retrying.
     const attempts = err instanceof InboxBlobMissingError ? MAX_ATTEMPTS : doc.attempts + 1;
     const error = err instanceof Error ? err.message : String(err);
@@ -109,19 +159,24 @@ export class DocumentWorker {
     // The error's type only: a message could quote a document or folder name.
     // The message itself is kept in the row, for the user's own inbox view.
     logger.warn(
-      { documentId: doc.id, stage, attempts, errName: err instanceof Error ? err.name : typeof err },
+      { documentId: doc.id, stage, attempts, errName: errorName(err) },
       'document stage failed',
     );
     if (attempts >= MAX_ATTEMPTS) {
       // discardRequested cleared: a failed document is resting, discardable on request.
       if (this.d.repo.transition(doc.id, state, 'failed', { attempts, error, discardRequested: false }, opts)) {
         const f = doc.decision?.folder;
-        this.d.report(err, stage, [
-          doc.originalName ?? '',
-          doc.decision?.name ?? '',
-          doc.analysis?.name ?? '',
-          f?.kind === 'new' ? f.name : '',
-        ]);
+        try {
+          this.d.report(err, stage, [
+            doc.originalName ?? '',
+            doc.decision?.name ?? '',
+            doc.analysis?.name ?? '',
+            f?.kind === 'new' ? f.name : '',
+          ]);
+        } catch (reportErr) {
+          // The row is already failed; reporting is best effort.
+          logger.error({ documentId: doc.id, errName: errorName(reportErr) }, 'could not report document failure');
+        }
       } else {
         this.d.repo.applyRequestedDiscard(doc.id);
       }
@@ -159,7 +214,7 @@ export class DocumentWorker {
     try {
       await this.refreshFolderCache();
     } catch (err) {
-      logger.warn({ errName: (err as Error).name }, 'folder cache refresh after login failed');
+      logger.warn({ errName: errorName(err) }, 'folder cache refresh after login failed');
     }
     this.d.repo.makeDueNow('received');
     await this.wake();
@@ -179,19 +234,23 @@ export class DocumentWorker {
     }
   }
 
+  /** Starts the timers and a first drain. A no-op if already started. */
   start(): void {
+    if (this.timers.length > 0) return;
+    // Through a promise chain so a synchronous throw (purgeDiscarded) is caught too.
+    const run = (fn: () => unknown) =>
+      void Promise.resolve()
+        .then(fn)
+        .catch((err: unknown) => logger.warn({ errName: errorName(err) }, 'worker timer failed'));
     const every = (ms: number, fn: () => unknown) => {
-      const t = setInterval(
-        () => void Promise.resolve(fn()).catch((err: unknown) => logger.warn({ errName: (err as Error).name }, 'worker timer failed')),
-        ms,
-      );
+      const t = setInterval(() => run(fn), ms);
       t.unref();
       this.timers.push(t);
     };
     every(POLL_MS, () => this.wake());
     every(FOLDER_REFRESH_MS, () => this.refreshFolderCache());
     every(PURGE_EVERY_MS, () => this.purgeDiscarded());
-    this.purgeDiscarded();
+    run(() => this.purgeDiscarded());
     void this.wake();
   }
 

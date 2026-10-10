@@ -1,9 +1,18 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { makeHarness } from './harness.js';
 import { DocumentWorker, MAX_ATTEMPTS } from '../../src/documents/worker.js';
+import type { DocumentRow } from '../../src/documents/types.js';
 
 let h: ReturnType<typeof makeHarness>;
-afterEach(() => h.cleanup());
+afterEach(() => {
+  vi.restoreAllMocks();
+  h.cleanup();
+});
+
+/** Runs `fn` after `depth` further microtask hops. */
+function afterMicrotasks(depth: number, fn: () => void): void {
+  queueMicrotask(() => (depth === 0 ? fn() : afterMicrotasks(depth - 1, fn)));
+}
 
 describe('DocumentWorker', () => {
   it('takes a document from received to filed when it can auto-file', async () => {
@@ -125,5 +134,87 @@ describe('DocumentWorker', () => {
     w.purgeDiscarded();
     expect(h.repo.get(doc.id)).toBeNull();
     expect(h.inbox.has(doc.id, 'original')).toBe(false);
+  });
+
+  // Each depth lands the wake-up at a different point while the drain winds
+  // down; one of them used to fall between the drain's last check and its
+  // reset, and was lost until the next poll.
+  it.each([0, 1, 2, 3, 4, 5, 6, 7])('honours a wake-up that arrives while a drain is finishing (depth %i)', async (depth) => {
+    h = makeHarness();
+    const w = new DocumentWorker(h.ctx);
+    const next = h.repo.nextWorkable.bind(h.repo);
+    let lateDoc: DocumentRow | undefined;
+    let late: Promise<void> | undefined;
+    let armed = true;
+    vi.spyOn(h.repo, 'nextWorkable').mockImplementation(() => {
+      const row = next();
+      if (!row && armed) {
+        armed = false;
+        afterMicrotasks(depth, () => {
+          lateDoc = h.add();
+          late = w.wake();
+        });
+      }
+      return row;
+    });
+    await w.wake();
+    await new Promise((r) => setImmediate(r));
+    await late;
+    expect(h.repo.get(lateDoc!.id)?.state).toBe('filed');
+  });
+
+  it('never rejects a wake-up when the queue itself fails, and carries on next time', async () => {
+    h = makeHarness();
+    const doc = h.add();
+    const w = new DocumentWorker(h.ctx);
+    vi.spyOn(h.repo, 'nextWorkable').mockImplementationOnce(() => {
+      throw new Error('database is locked');
+    });
+    await expect(w.wake()).resolves.toBeUndefined();
+    await w.wake();
+    expect(h.repo.get(doc.id)?.state).toBe('filed');
+  });
+
+  it('never rejects a wake-up when handling a failure fails too', async () => {
+    h = makeHarness();
+    h.report.mockImplementation(() => {
+      throw new Error('reporting down');
+    });
+    const doc = h.add();
+    h.inbox.deleteAll(doc.id);
+    await expect(new DocumentWorker(h.ctx).wake()).resolves.toBeUndefined();
+    expect(h.repo.get(doc.id)?.state).toBe('failed');
+  });
+
+  it('postpones a row whose failure could not be recorded, so it cannot stall the queue', async () => {
+    h = makeHarness();
+    h.analyze.mockRejectedValue(new Error('overloaded'));
+    const stuck = h.add();
+    const w = new DocumentWorker(h.ctx);
+    const transition = h.repo.transition.bind(h.repo);
+    // Recording the retry fails once; the postponement still goes through.
+    let failNext = true;
+    vi.spyOn(h.repo, 'transition').mockImplementation((...args) => {
+      if (failNext && args[1] === 'analyzing' && args[3]?.attempts !== undefined) {
+        failNext = false;
+        throw new Error('database is locked');
+      }
+      return transition(...args);
+    });
+    await expect(w.wake()).resolves.toBeUndefined();
+    expect(Date.parse(h.repo.get(stuck.id)!.nextAttemptAt)).toBeGreaterThan(h.ctx.now().getTime());
+  });
+
+  it('starts its timers once, and stop clears them', async () => {
+    h = makeHarness();
+    const set = vi.spyOn(globalThis, 'setInterval');
+    const clear = vi.spyOn(globalThis, 'clearInterval');
+    const w = new DocumentWorker(h.ctx);
+    w.start();
+    w.start();
+    await w.wake();
+    expect(set).toHaveBeenCalledTimes(3);
+    w.stop();
+    expect(clear).toHaveBeenCalledTimes(3);
   });
 });

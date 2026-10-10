@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { ServerError } from '@protontech/drive-sdk';
 import { FolderNameTakenError } from '../../drive/client.js';
 import { logger } from '../../logger.js';
+import { errorName } from '../../observability/error-name.js';
 import type { StageContext } from '../deps.js';
 import { extensionFor } from '../extension.js';
 import type { Decision, DocumentRow } from '../types.js';
@@ -153,11 +154,6 @@ async function resolveFolder(
     logger.warn({ documentId: id, err: errorName(err) }, 'folder cache refresh failed');
   }
   return { folderLinkId: createdLinkId, folderPath };
-}
-
-/** An error's class name only: messages can quote folder or file names. */
-function errorName(err: unknown): string {
-  return err instanceof Error ? err.name : typeof err;
 }
 
 /** Best-effort work after a document is filed: a failure is logged (fixed text), never thrown. */
