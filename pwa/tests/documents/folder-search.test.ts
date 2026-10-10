@@ -26,4 +26,10 @@ describe('searchFolders', () => {
   it('caps the number of results', () => {
     expect(paths('', 2)).toHaveLength(2);
   });
+
+  it('matches regardless of accents', () => {
+    const folders = [...FOLDERS, { linkId: 'L-energie', path: '/Bills/\u00c9nergie' }];
+    expect(searchFolders(folders, 'energie').map((f) => f.path)).toEqual(['/Bills/\u00c9nergie']);
+    expect(searchFolders(folders, '\u00e9nergie').map((f) => f.path)).toEqual(['/Bills/\u00c9nergie']);
+  });
 });

@@ -1,6 +1,6 @@
 import type { FolderEntry } from './types.js';
 
-const fold = (s: string) => s.normalize('NFC').toLowerCase();
+const fold = (s: string) => s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
 const byPath = (a: FolderEntry, b: FolderEntry) => a.path.localeCompare(b.path);
 
 /**
