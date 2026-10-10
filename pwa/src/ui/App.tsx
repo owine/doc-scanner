@@ -65,6 +65,13 @@ export function App() {
   async function signInAgain() {
     // The session's Drive access is gone; a fresh login restores it and
     // releases the documents waiting for it.
+    //
+    // Unlike Sign out in Settings, a failed logout still goes to the login
+    // screen. There, staying put protects the user: leaving would look signed
+    // out while the server still holds a working session. Here the session
+    // can no longer reach Drive, and the login that follows replaces this
+    // browser's session cookie, so nothing is left usable behind it. Saying
+    // so on the login screen would give the user nothing to act on.
     await api.logout().catch(() => {});
     signedOut();
   }
