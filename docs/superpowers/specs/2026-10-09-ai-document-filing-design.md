@@ -1,7 +1,7 @@
 # AI Document Filing — Design Spec
 
 **Date:** 2026-10-09
-**Status:** Approved in brainstorming; awaiting written-spec review
+**Status:** Approved; slice 1 implemented on `feat/ai-analyzer`
 **Parent spec:** [`2026-04-27-doc-scanner-design.md`](2026-04-27-doc-scanner-design.md)
 **Supersedes:** [`2026-05-08-phase-5-ai-organize-design.md`](2026-05-08-phase-5-ai-organize-design.md) (the scanner-shaped Phase 5 on `feat/phase-5-ai-organize`)
 **Branch:** `feat/ai-analyzer` (analyzer + model eval already built; see [Status](#status-of-the-branch))
@@ -41,7 +41,7 @@ Two entrypoints get their own short follow-up specs because they are independent
 | Processing model | **SQLite job queue worked in-process**; every source returns `202` immediately | One code path for interactive and unattended sources; survives restarts; no long-held requests from iOS Safari. |
 | Unattended filing | **Analyse while logged out, file after login** | Keeps today's posture: decrypted keys never touch disk. |
 | Model | **Claude Haiku 5.5, medium effort**, configurable | Ties Opus 5.5 on accuracy at ~1/37 the cost, with better-calibrated confidence. See [Model evaluation](#model-evaluation). |
-| Auto-file threshold | **0.80**, configurable; the prompt states the configured value | In the eval, 53% of documents auto-filed at 0.80 with no misfiles (measured with the prompt saying 0.85; re-checked at 0.80 before auto-filing goes live). |
+| Auto-file threshold | **0.80**, configurable from 0.5 to 1; the prompt states the configured value. Auto-filing ships **off** (`AUTO_FILE_ENABLED=false`) | In the eval, 53% of documents auto-filed at 0.80 with no misfiles (prompt saying 0.85). The re-check with the prompt saying 0.80 gave 41% coverage at 94% precision, one misfile short of the 95% bar, so auto-filing is switched on later from real-use data: after about 30 documents, at the threshold where the `audit_log` shows ≥95% of suggestions approved unchanged. |
 | Duplicate upload | Returns the **existing** document (unless that one failed, in which case it is retried) | Forwarded emails and double taps otherwise file twice. |
 | Discard | **Kept 7 days**, recoverable, then purged | Room to change one's mind; Drive remains the system of record. |
 
@@ -51,7 +51,7 @@ Unchanged from the parent spec, made explicit for unattended sources:
 
 - Decrypted Proton user and address keys live **only in memory**, for the lifetime of a login. A server restart forces re-login (`middleware.ts`). This spec does not change that: persisting the key passphrase would mean that a stolen database plus `SESSION_ENCRYPTION_KEY` decrypts the whole Drive, where today it yields only API tokens.
 - The **analysis needs no Proton keys** — the server has the file's plaintext — so documents are analysed and prepared immediately even with no one logged in. Only **filing** (decrypting folder names to pick a target, encrypting the upload) needs a live session; documents wait in `awaiting_login` until there is one.
-- Documents waiting in the inbox and the cached folder list are **encrypted at rest** (AES-GCM, key derived via HKDF from `SESSION_ENCRYPTION_KEY` with its own info label). A document's plaintext — the original, the prepared output and its thumbnail — is deleted once it is filed, and 7 days after it is discarded.
+- Documents waiting in the inbox, the cached folder list, and each `documents` row's names, paths, analysis, decision and arrival context are **encrypted at rest** (AES-GCM, key derived via HKDF from `SESSION_ENCRYPTION_KEY` with its own info label). A document's plaintext — the original, the prepared output and its thumbnail — is deleted once it is filed, and 7 days after it is discarded.
 - Anthropic sees document content during analysis, as it already did in Phase 5 v2.
 - Document content, filenames and folder paths are untrusted input to the model. The worst a hostile document can do is get itself misfiled: the model can only choose among folder IDs it was given, a new folder always needs review, and nothing the model returns is executed.
 
@@ -59,7 +59,7 @@ Unchanged from the parent spec, made explicit for unattended sources:
 
 ### 1. Document lifecycle and storage
 
-One table, `documents`, one state machine for every source. Migrations: the Phase 5 history table keeps its `004_classification_history.sql`; `documents` and `settings` are `005`.
+One table, `documents`, one state machine for every source. Migrations: the Phase 5 history table keeps its `004_classification_history.sql`; `documents` is `005`. Settings reuse the existing `app_settings` table under `filing.*` keys.
 
 | Field | Purpose |
 |---|---|
@@ -67,7 +67,7 @@ One table, `documents`, one state machine for every source. Migrations: the Phas
 | `original_name`, `mime`, `size`, `sha256` | `sha256` drives duplicate detection |
 | `source_context` | Free text about the arrival (email subject, etc.) |
 | `state`, `attempts`, `error`, `updated_at` | Lifecycle below |
-| `analysis` (JSON) | Name, folder choice (existing link ID or proposed new folder), confidence, rationale, `isDocument`, text snippet |
+| `analysis` (JSON) | Name, folder choice (existing link ID or proposed new folder), confidence, rationale, `isDocument` (the model's text snippet is not stored) |
 | `decision` (JSON) | The name and folder actually being filed: the analysis's, or the user's approved edit. Written before `filing`, so a restart never loses an approval |
 | `filing_target` | Target folder UID and intended name, written just before upload (crash recovery below) |
 | `filed_name`, `filed_folder_path`, `drive_node_uid`, `auto_filed`, `user_edited` | Outcome, for the activity log and history |
@@ -144,13 +144,13 @@ The system prompt asks for the user's naming conventions, an existing folder unl
 
 **Filing** (needs a live session; otherwise `awaiting_login`):
 
-1. Resolve the folder: an existing link ID, or for an approved new-folder proposal, **create the folder** under its parent, then refresh the folder cache.
+1. Resolve the folder: an existing link ID, or for an approved new-folder proposal, **create the folder** under its parent (the folder cache is refreshed after the upload). An auto-filed decision is re-checked against the current folder list and never-file-here paths first; if its folder is gone or excluded it goes to review.
 2. Upload via `DriveClient.uploadFile(name + ext, bytes, mime, { parentFolderUid })` (the branch's extension; collisions via the SDK's `getAvailableName`, e.g. `name (1).pdf`).
 3. Record an `audit_log` entry (ids and flags only), then delete the inbox blob.
 
 **Folder cache**: `walkFolderTree` (built; lists 6 folders concurrently by default) runs at login, every 6 hours, on demand, and after a folder is created. The result — paths plus each folder's five recent filenames, nothing else — is cached **encrypted at rest** so analysis works while logged out.
 
-**Settings** (a small `settings` table, editable in the PWA): never-file-here folder paths (default empty), and overrides for the auto-file threshold, model and effort (env vars supply the defaults).
+**Settings** (`app_settings`, `filing.*` keys; editable in the PWA): never-file-here folder paths (default empty), and overrides for the auto-file threshold, model and effort (env vars supply the defaults).
 
 **Docker**: add `ocrmypdf` (Tesseract, Ghostscript) to the Alpine image; measure the size impact in the plan.
 
@@ -176,7 +176,7 @@ Updates: the PWA polls `GET /api/documents?since=<cursor>` every few seconds whi
 |---|---|
 | Anthropic 429 / 5xx / network | Jittered backoff, 3 attempts, then `failed` with *Retry* |
 | Refusal, truncated or invalid answer | `needs_review` with the reason; never silently dropped |
-| Unreadable file | Analysed from metadata, then review |
+| Unreadable, oversized (>20 MB) or API-rejected file | Analysed from metadata, then review |
 | OCR failure / timeout | Filed without a text layer, with a note |
 | No live session | `awaiting_login` (not an error) |
 | Drive upload failure / dead session | Retry, or `awaiting_login` when the refresh token is dead (`isAuthExpired` from the branch) |
@@ -237,7 +237,7 @@ Carried over from `feat/phase-5-ai-organize` in implementation: the history migr
 
 The plan should ship this in independently useful slices:
 
-1. **Server pipeline** — `documents` table, inbox store, worker, intake endpoint, analyzer wired in, filing with auto-file, `awaiting_login`, settings. Usable through the API and a minimal list. Includes the **calibration check**: re-run the Haiku eval with the prompt stating 0.80 (about $1.20) before auto-filing is switched on; until it passes, everything goes to review.
+1. **Server pipeline** — `documents` table, inbox store, worker, intake endpoint, analyzer wired in, filing with auto-file, `awaiting_login`, settings. Usable through the API and a minimal list. Includes the **calibration check**: the Haiku eval re-run with the prompt stating 0.80 (done: 41% coverage, 94% precision). It missed the 95% bar, so slice 1 ships with auto-filing off and everything goes to review until real-use audit data supports switching it on.
 2. **Review UI** — the inbox screen, review card, folder picker, discard/restore, activity log, settings screen.
 3. **Preparing** — `ocrmypdf`, `img2pdf`, thumbnails, the Docker image.
 4. **Entrypoints** — Add screen and offline upload queue; the scanner posting image-only PDFs.

@@ -3604,9 +3604,7 @@ curl -s -b cookies.txt 'http://localhost:3000/api/documents?since=0' | jq '.docu
 
 Expected: the document reaches `needs_review` with a sensible analysis (auto-filing is still off). Approve it (`POST /api/documents/<id>/approve` with `{}`) and confirm it appears in Drive under the suggested name and folder.
 
-- [ ] **Step 3: Switch on auto-filing — only if Task 1's calibration passed**
-
-The user sets `AUTO_FILE_ENABLED=true` in the deployment env (or `PUT /api/settings {"autoFileEnabled": true}`). Upload one more confident document and confirm it files without review.
+- [ ] **Step 3: Leave auto-filing off** — the calibration (v6, prompt stating 0.80) gave 41% coverage at 94% precision, one misfile short of the 95% bar. Decision (user, 2026-10-09): ship with `AUTO_FILE_ENABLED=false`; after about 30 real documents, read `audit_log` (`document_filed` rows carry `userEdited` and `confidence`) and switch auto-filing on at the threshold (≥ 0.5) where ≥95% of suggestions were approved unchanged.
 
 - [ ] **Step 4: Open the slice-1 PR**
 
