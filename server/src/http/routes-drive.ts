@@ -27,7 +27,8 @@ export function driveRoutes(deps: { db: DB; store: SessionStore }) {
     const bytes = new TextEncoder().encode(payload);
 
     try {
-      const { nodeUid, driveUrl } = await auth.liveSession.driveClient.uploadFile(name, bytes, 'text/plain');
+      const { nodeUid, driveUrl: sdkUrl } = await auth.liveSession.driveClient.uploadFile(name, bytes, 'text/plain');
+      const driveUrl = sdkUrl ?? `https://drive.proton.me/${nodeUid}`;
       deps.db.prepare(`
         INSERT INTO audit_log (event, detail, remote_user)
         VALUES ('drive_test_upload', ?, ?)
