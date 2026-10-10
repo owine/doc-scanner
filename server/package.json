@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p src/vendor/tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p src/vendor/tsconfig.json && tsc -p evals/tsconfig.json",
     "start": "tsx src/index.ts",
     "test": "NODE_OPTIONS=--import=tsx vitest run",
     "test:watch": "NODE_OPTIONS=--import=tsx vitest",
