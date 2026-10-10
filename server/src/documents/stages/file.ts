@@ -50,13 +50,16 @@ export async function fileStage(doc: DocumentRow, ctx: StageContext): Promise<vo
 
     const kind = ctx.inbox.has(doc.id, 'prepared') ? 'prepared' : 'original';
     const bytes = ctx.inbox.get(doc.id, kind);
-    const mime = doc.preparedMime ?? doc.mime;
+    // The type of the blob actually sent: a recorded prepared type without its blob doesn't apply.
+    const mime = kind === 'prepared' ? (doc.preparedMime ?? doc.mime) : doc.mime;
     const fileName = doc.decision.name + extensionFor(mime, doc.originalName);
     const sha1 = createHash('sha1').update(bytes).digest('hex');
 
     let uploaded: { nodeUid: string; name: string } | null = null;
-    if (doc.filingTarget) {
-      const found = await drive.findFileBySha1(doc.filingTarget.folderLinkId, sha1);
+    // Only a target for this folder counts: one left by an earlier decision
+    // (discarded, restored, approved elsewhere) says nothing about this upload.
+    if (doc.filingTarget?.folderLinkId === folderLinkId) {
+      const found = await drive.findFileBySha1(folderLinkId, sha1);
       if (found) uploaded = { nodeUid: found.uid, name: found.name };
     }
     if (!uploaded) {
@@ -65,7 +68,7 @@ export async function fileStage(doc: DocumentRow, ctx: StageContext): Promise<vo
       uploaded = { nodeUid: res.nodeUid, name: res.name };
     }
 
-    ctx.repo.transition(
+    const filed = ctx.repo.transition(
       doc.id,
       'filing',
       'filed',
@@ -78,27 +81,34 @@ export async function fileStage(doc: DocumentRow, ctx: StageContext): Promise<vo
       },
       KEEP_GOING,
     );
-    ctx.db
-      .prepare(`INSERT INTO audit_log (event, detail) VALUES ('document_filed', ?)`)
-      .run(
-        JSON.stringify({
-          documentId: doc.id,
-          driveNodeUid: uploaded.nodeUid,
-          source: doc.source,
-          autoFiled: doc.autoFiled,
-          userEdited: doc.userEdited,
-        }),
-      );
-    // Plaintext first: nothing after this point may leave the blob behind.
-    ctx.inbox.deleteAll(doc.id);
+    if (!filed) {
+      // Something else moved the row; keep its blob for whatever state it is in now.
+      logger.warn({ documentId: doc.id }, 'document left filing before it could be marked filed');
+      return;
+    }
+    // From here the document is filed: nothing may throw into the worker's
+    // retry path, which would only upload it again.
+    const filedRef = { nodeUid: uploaded.nodeUid, name: uploaded.name };
+    afterFiled(doc.id, 'could not write the filing audit entry', () => {
+      ctx.db
+        .prepare(`INSERT INTO audit_log (event, detail) VALUES ('document_filed', ?)`)
+        .run(
+          JSON.stringify({
+            documentId: doc.id,
+            driveNodeUid: filedRef.nodeUid,
+            source: doc.source,
+            autoFiled: doc.autoFiled,
+            userEdited: doc.userEdited,
+          }),
+        );
+    });
+    // Plaintext first: a blob left behind by a failure here is reclaimed by the purge sweep.
+    afterFiled(doc.id, 'could not delete the inbox copy of a filed document', () => ctx.inbox.deleteAll(doc.id));
     // The filed name joins that folder's recent names right away (spec §5:
     // edits teach the system). Best-effort: the next tree walk catches up.
-    try {
-      ctx.folderCache.recordFiled(folderLinkId, { uid: uploaded.nodeUid, name: uploaded.name, modified: ctx.now() });
-    } catch {
-      // Fixed text only: the error could quote folder or file names.
-      logger.warn({ documentId: doc.id }, 'could not add the filed name to the folder cache');
-    }
+    afterFiled(doc.id, 'could not add the filed name to the folder cache', () =>
+      ctx.folderCache.recordFiled(folderLinkId, { uid: filedRef.nodeUid, name: filedRef.name, modified: ctx.now() }),
+    );
     logger.info({ documentId: doc.id, autoFiled: doc.autoFiled, userEdited: doc.userEdited }, 'document filed');
   } catch (err) {
     if (err instanceof FolderNameTakenError) {
@@ -139,9 +149,22 @@ async function resolveFolder(
   ctx.repo.transition(id, 'filing', 'filing', { decision: { ...decision, folder: { ...f, createdLinkId } } }, KEEP_GOING);
   try {
     await ctx.refreshFolderCache();
-  } catch {
-    // Fixed text only: the error could quote folder names.
-    logger.warn({ documentId: id }, 'folder cache refresh failed');
+  } catch (err) {
+    logger.warn({ documentId: id, err: errorName(err) }, 'folder cache refresh failed');
   }
   return { folderLinkId: createdLinkId, folderPath };
+}
+
+/** An error's class name only: messages can quote folder or file names. */
+function errorName(err: unknown): string {
+  return err instanceof Error ? err.name : typeof err;
+}
+
+/** Best-effort work after a document is filed: a failure is logged (fixed text), never thrown. */
+function afterFiled(documentId: string, what: string, fn: () => void): void {
+  try {
+    fn();
+  } catch (err) {
+    logger.warn({ documentId, err: errorName(err) }, what);
+  }
 }

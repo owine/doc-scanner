@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 import { ServerError } from '@protontech/drive-sdk';
 import { makeHarness, ANALYSIS } from './harness.js';
@@ -113,5 +113,110 @@ describe('fileStage', () => {
     });
     await fileStage(doc, h.ctx);
     expect(h.repo.get(doc.id)).toMatchObject({ state: 'filed', discardRequested: false });
+  });
+
+  it('ignores a filing target left by an earlier decision for another folder', async () => {
+    h = makeHarness();
+    const doc = filingDoc(
+      { name: ANALYSIS.name, folder: { kind: 'existing', linkId: 'ARCHIVE', path: '/Archive' } },
+      { filingTarget: { folderLinkId: 'BILLS', name: 'Northwind Energy Sep 2026.pdf' } },
+    );
+    await fileStage(doc, h.ctx);
+    expect(h.drive.findFileBySha1).not.toHaveBeenCalled();
+    expect(h.drive.uploadFile.mock.calls[0][3]).toEqual({ parentFolderUid: 'ARCHIVE' });
+    expect(h.repo.get(doc.id)).toMatchObject({ state: 'filed', filedFolderPath: '/Archive' });
+  });
+
+  it('with no session, parks a discard-pending document whose upload may have happened', async () => {
+    h = makeHarness();
+    h.setLive(undefined);
+    const doc = filingDoc(EXISTING, { filingTarget: { folderLinkId: 'BILLS', name: 'Northwind Energy Sep 2026.pdf' } });
+    h.repo.requestDiscard(doc.id);
+    await fileStage(h.repo.get(doc.id)!, h.ctx);
+    expect(h.repo.get(doc.id)).toMatchObject({ state: 'awaiting_login', discardRequested: false });
+  });
+
+  it('with no session, applies a pending discard when nothing was uploaded yet', async () => {
+    h = makeHarness();
+    h.setLive(undefined);
+    const doc = filingDoc(EXISTING);
+    h.repo.requestDiscard(doc.id);
+    await fileStage(h.repo.get(doc.id)!, h.ctx);
+    expect(h.repo.get(doc.id)?.state).toBe('discarded');
+  });
+
+  it('has saved the filing target and the created folder before the upload starts', async () => {
+    h = makeHarness();
+    const doc = filingDoc(NEW);
+    let seen: ReturnType<typeof h.repo.get> = null;
+    h.drive.uploadFile.mockImplementation(async () => {
+      seen = h.repo.get(doc.id);
+      return { nodeUid: 'NODE1', driveUrl: '', name: 'Water Sep 2026.pdf' };
+    });
+    await fileStage(doc, h.ctx);
+    expect(seen).toMatchObject({
+      filingTarget: { folderLinkId: 'NEWFOLDER', name: 'Water Sep 2026.pdf' },
+      decision: { folder: { kind: 'new', createdLinkId: 'NEWFOLDER' } },
+    });
+  });
+
+  it('a re-run after the folder was created neither looks it up nor creates it again', async () => {
+    h = makeHarness();
+    const created: Decision = {
+      name: 'Water Sep 2026',
+      folder: { kind: 'new', parentLinkId: 'BILLS', parentPath: '/Bills', name: 'Water', createdLinkId: 'NEWFOLDER' },
+    };
+    const doc = filingDoc(created);
+    await fileStage(doc, h.ctx);
+    expect(h.drive.findChildFolder).not.toHaveBeenCalled();
+    expect(h.drive.createFolder).not.toHaveBeenCalled();
+    expect(h.drive.uploadFile.mock.calls[0][3]).toEqual({ parentFolderUid: 'NEWFOLDER' });
+    expect(h.repo.get(doc.id)).toMatchObject({ state: 'filed', filedFolderPath: '/Bills/Water' });
+  });
+
+  it('files the document even when the folder-cache refresh and update fail', async () => {
+    h = makeHarness();
+    h.refreshFolderCache.mockRejectedValue(new Error('walk failed'));
+    vi.spyOn(h.ctx.folderCache, 'recordFiled').mockImplementation(() => {
+      throw new Error('cache broken');
+    });
+    const doc = filingDoc(NEW);
+    await fileStage(doc, h.ctx);
+    expect(h.repo.get(doc.id)?.state).toBe('filed');
+    expect(h.inbox.has(doc.id, 'original')).toBe(false);
+  });
+
+  it('never throws into the retry path once the document is filed', async () => {
+    h = makeHarness();
+    vi.spyOn(h.ctx.inbox, 'deleteAll').mockImplementation(() => {
+      throw new Error('disk error');
+    });
+    const doc = filingDoc(EXISTING);
+    await expect(fileStage(doc, h.ctx)).resolves.toBeUndefined();
+    expect(h.repo.get(doc.id)?.state).toBe('filed');
+  });
+
+  it('keeps the inbox copy when the document left filing before it could be marked filed', async () => {
+    h = makeHarness();
+    const doc = filingDoc(EXISTING);
+    h.drive.uploadFile.mockImplementation(async () => {
+      h.db.prepare(`UPDATE documents SET state = 'needs_review' WHERE id = ?`).run(doc.id);
+      return { nodeUid: 'NODE1', driveUrl: '', name: 'Northwind Energy Sep 2026.pdf' };
+    });
+    await fileStage(doc, h.ctx);
+    expect(h.repo.get(doc.id)?.state).toBe('needs_review');
+    expect(h.inbox.has(doc.id, 'original')).toBe(true);
+    expect(h.db.prepare(`SELECT COUNT(*) AS n FROM audit_log WHERE event = 'document_filed'`).get()).toMatchObject({ n: 0 });
+  });
+
+  it('uploads with the type of the blob it actually sends', async () => {
+    h = makeHarness();
+    const doc = h.add(new TextEncoder().encode('photo bytes'), 'image/jpeg');
+    // A prepared type is recorded, but no prepared blob exists: the original goes up as itself.
+    h.repo.transition(doc.id, 'received', 'filing', { decision: EXISTING, analysis: ANALYSIS, preparedMime: 'application/pdf' });
+    await fileStage(h.repo.get(doc.id)!, h.ctx);
+    expect(h.drive.uploadFile).toHaveBeenCalledWith('Northwind Energy Sep 2026.jpg', expect.any(Uint8Array), 'image/jpeg', {
+      parentFolderUid: 'BILLS',
+    });
   });
 });
