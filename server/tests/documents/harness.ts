@@ -41,7 +41,8 @@ export const okOutcome = (analysis: Analysis = ANALYSIS): AnalyzeOutcome => ({
 
 export function fakeDrive() {
   return {
-    uploadFile: vi.fn().mockResolvedValue({ nodeUid: 'NODE1', driveUrl: 'https://drive.example/NODE1', name: 'Northwind Energy Sep 2026.pdf' }),
+    uploadFile: vi.fn().mockResolvedValue({ nodeUid: 'NODE1', driveUrl: 'https://drive.proton.me/share/file/n1', name: 'Northwind Energy Sep 2026.pdf' }),
+    nodeUrl: vi.fn().mockResolvedValue('https://drive.proton.me/share/file/found'),
     findChildFolder: vi.fn().mockResolvedValue(null),
     createFolder: vi.fn().mockResolvedValue('NEWFOLDER'),
     findFileBySha1: vi.fn().mockResolvedValue(null),

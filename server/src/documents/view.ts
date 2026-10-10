@@ -24,7 +24,10 @@ export function toView(d: DocumentRow) {
       contentSeen: d.analysis.contentSeen,
     },
     decision: d.decision,
-    filed: d.state === 'filed' ? { name: d.filedName, folderPath: d.filedFolderPath, driveNodeUid: d.driveNodeUid } : null,
+    filed:
+      d.state === 'filed'
+        ? { name: d.filedName, folderPath: d.filedFolderPath, driveNodeUid: d.driveNodeUid, driveUrl: d.driveUrl }
+        : null,
     autoFiled: d.autoFiled,
     userEdited: d.userEdited,
     // An upload was started: discarding now may leave a copy in Drive (the PWA warns).

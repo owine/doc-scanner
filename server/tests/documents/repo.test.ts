@@ -453,6 +453,16 @@ describe('DocumentRepo', () => {
       expect(err.message).not.toContain(MARK);
     });
 
+    it('stores the Drive URL in plaintext and reads it back', () => {
+      const r = repo();
+      const a = r.insert(named());
+      const url = 'https://drive.proton.me/u/0/s/file/n1';
+      expect(r.transition(a.id, 'received', 'filed', { driveNodeUid: 'vol~n1', driveUrl: url })).toBe(true);
+      expect(r.get(a.id)!.driveUrl).toBe(url);
+      const raw = db.prepare('SELECT drive_url FROM documents WHERE id = ?').get(a.id) as { drive_url: unknown };
+      expect(raw.drive_url).toBe(url);
+    });
+
     it('keeps a filed or discarded row in its state when quarantining it', () => {
       const r = repo();
       const a = r.insert(named());

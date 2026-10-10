@@ -77,12 +77,12 @@ export async function fileStage(doc: DocumentRow, ctx: StageContext): Promise<vo
     const fileName = decision.name + extensionFor(mime, doc.originalName);
     const sha1 = createHash('sha1').update(bytes).digest('hex');
 
-    let uploaded: { nodeUid: string; name: string } | null = null;
+    let uploaded: { nodeUid: string; name: string; driveUrl: string | null | undefined } | null = null;
     // Only a target for this folder counts: one left by an earlier decision
     // (discarded, restored, approved elsewhere) says nothing about this upload.
     if (doc.filingTarget?.folderLinkId === folderLinkId) {
       const found = await drive.findFileBySha1(folderLinkId, sha1);
-      if (found) uploaded = { nodeUid: found.uid, name: found.name };
+      if (found) uploaded = { nodeUid: found.uid, name: found.name, driveUrl: undefined };
     }
     if (!uploaded) {
       // With no target yet, nothing has been uploaded, so a discard requested
@@ -103,7 +103,7 @@ export async function fileStage(doc: DocumentRow, ctx: StageContext): Promise<vo
         return;
       }
       const res = await drive.uploadFile(fileName, bytes, mime, { parentFolderUid: folderLinkId });
-      uploaded = { nodeUid: res.nodeUid, name: res.name };
+      uploaded = { nodeUid: res.nodeUid, name: res.name, driveUrl: res.driveUrl };
     }
 
     const filed = ctx.repo.transition(
@@ -144,6 +144,14 @@ export async function fileStage(doc: DocumentRow, ctx: StageContext): Promise<vo
     });
     // Plaintext first: a blob left behind by a failure here is reclaimed by the purge sweep.
     afterFiled(doc.id, 'could not delete the inbox copy of a filed document', () => ctx.inbox.deleteAll(doc.id));
+    // Best effort: the link is a convenience, and nothing after filing may
+    // throw into the retry path. A file found by SHA-1 has no URL yet.
+    try {
+      const url = uploaded.driveUrl !== undefined ? uploaded.driveUrl : await drive.nodeUrl(uploaded.nodeUid);
+      if (url) ctx.repo.transition(doc.id, 'filed', 'filed', { driveUrl: url });
+    } catch (err) {
+      logger.warn({ documentId: doc.id, errName: errorName(err) }, 'could not record the Drive link');
+    }
     if (decision.folder.kind === 'new') {
       // Spec §4: the cache is refreshed after a folder is created; done after
       // the upload so the walk doesn't hold up the filing. Not relied on: the
