@@ -3,8 +3,9 @@
 //   pnpm --filter @doc-scanner/server run eval:analyzer:judge-check [--n 5]
 //
 // For the first n cases it asks the judge about three proposals: the user's
-// own name (must pass), an empty name and a confidently wrong one (must both
-// fail). Any other result means the rubric is miscalibrated.
+// own name (must pass), and must reject an empty name, a confidently wrong
+// one, a generic one, and the user's own name with its year changed. Any other
+// result means the rubric is miscalibrated.
 
 import { parseArgs } from 'node:util';
 import { toFolderContexts } from '../../src/drive/folder-tree.js';
@@ -26,7 +27,12 @@ for (const c of loadCases(flow).slice(0, Number(args.n))) {
     { label: 'own name', proposed: stripExtension(c.expectedName), want: true },
     { label: 'empty', proposed: '', want: false },
     { label: 'wrong', proposed: 'Starbucks receipt 1999-01-01', want: false },
+    // Near-misses, which a too-lenient rubric would wave through.
+    { label: 'generic', proposed: 'Scan', want: false },
   ];
+  const own = stripExtension(c.expectedName);
+  const shifted = own.replace(/20(\d\d)/, (_, yy: string) => `20${String((Number(yy) + 95) % 100).padStart(2, '0')}`);
+  if (shifted !== own) probes.push({ label: 'year-5', proposed: shifted, want: false });
   for (const p of probes) {
     const verdict = await judgeName(c, p.proposed, folders);
     const ok = verdict.acceptable === p.want;

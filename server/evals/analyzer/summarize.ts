@@ -78,7 +78,8 @@ for (const [id, v] of Object.entries(VARIANTS)) {
   );
   const scored = rows.filter((r) => r.status === 'ok');
   const n = scored.length;
-  const g = (k: string) => scored.map((r) => r.grade[k] ?? 0);
+  // Folder-only cases leave the name metrics unset; average over the rows that have them.
+  const g = (k: string) => scored.map((r) => r.grade[k]).filter((v): v is number => typeof v === 'number');
   const fullOk = mean(g('full_ok'));
 
   // Every billed call counts, including attempts that failed.

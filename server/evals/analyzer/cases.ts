@@ -26,6 +26,8 @@ export interface EvalCase {
   expectedFolderPath: string;
   /** Other files in the same folder; 0 means no naming examples to learn from. */
   siblingCount: number;
+  /** false: grade the folder only, because the user's name can't be reproduced. */
+  scoreName?: boolean;
 }
 
 /** How the set was drawn; the harness applies the same folder exclusions. */
