@@ -26,6 +26,15 @@ function changedFields(draft: Settings, saved: Settings): Partial<Settings> {
   return patch as Partial<Settings>;
 }
 
+/**
+ * The threshold as typed, with a decimal comma read as a point. Null unless
+ * it is a plain decimal number ("0.85", ".9", "1"): no signs or exponents.
+ */
+function parseThreshold(input: string): { text: string; value: number } | null {
+  const text = input.trim().replace(',', '.');
+  return /^(\d+\.?\d*|\.\d+)$/.test(text) ? { text, value: Number(text) } : null;
+}
+
 export function SettingsScreen({ email, documents = documentsApi, onBack, onLoggedOut }: SettingsScreenProps) {
   const { pref, setPref } = useTheme();
   const folders = useFolders(documents);
@@ -37,7 +46,8 @@ export function SettingsScreen({ email, documents = documentsApi, onBack, onLogg
   const [refreshed, setRefreshed] = useState(false);
   const [signOutError, setSignOutError] = useState<string | null>(null);
   // The threshold is edited as text: a number-bound input rewrites "0." to "0"
-  // on every render, so a decimal could not be typed.
+  // on every render, so a decimal could not be typed, and iOS number keyboards
+  // can lack a decimal point or type a comma.
   const [thresholdText, setThresholdText] = useState('');
 
   // Set false on unmount so nothing is set after an await resolves late.
@@ -61,10 +71,16 @@ export function SettingsScreen({ email, documents = documentsApi, onBack, onLogg
       .catch(() => mounted.current && setStatus('Could not load settings.'));
   }, [documents]);
 
-  const set = <K extends keyof Settings>(key: K, value: Settings[K]) => setDraft((d) => (d ? { ...d, [key]: value } : d));
+  // "Saved." describes the form as it was saved; any edit makes it stale.
+  const clearSaved = () => setStatus((s) => (s === 'Saved.' ? null : s));
+  const set = <K extends keyof Settings>(key: K, value: Settings[K]) => {
+    clearSaved();
+    setDraft((d) => (d ? { ...d, [key]: value } : d));
+  };
   const patch = draft && saved ? changedFields(draft, saved) : {};
-  const thresholdNumber = Number(thresholdText);
-  const thresholdValid = thresholdText.trim() !== '' && Number.isFinite(thresholdNumber) && thresholdNumber >= 0.5 && thresholdNumber <= 1;
+  const threshold = parseThreshold(thresholdText);
+  const thresholdTooPrecise = threshold !== null && /\.\d{3,}$/.test(threshold.text);
+  const thresholdValid = threshold !== null && !thresholdTooPrecise && threshold.value >= 0.5 && threshold.value <= 1;
   const modelValid = draft === null || draft.model.trim() !== '';
   const dirty = Object.keys(patch).length > 0;
 
@@ -137,23 +153,24 @@ export function SettingsScreen({ email, documents = documentsApi, onBack, onLogg
           <label class="field">
             <span class="field-label">Auto-file threshold (0.5 to 1)</span>
             <input
-              type="number"
-              min="0.5"
-              max="1"
-              step="0.05"
+              type="text"
+              inputMode="decimal"
+              autoComplete="off"
               aria-invalid={!thresholdValid}
               {...(!thresholdValid && { 'aria-describedby': 'threshold-error' })}
               value={thresholdText}
               onInput={(e) => {
                 const text = (e.target as HTMLInputElement).value;
+                clearSaved();
                 setThresholdText(text);
-                if (text.trim() !== '' && Number.isFinite(Number(text))) set('autoFileThreshold', Number(text));
+                const parsed = parseThreshold(text);
+                if (parsed) set('autoFileThreshold', parsed.value);
               }}
             />
           </label>
           {!thresholdValid && (
             <span id="threshold-error" class="error-text">
-              Enter a number between 0.5 and 1.
+              {thresholdTooPrecise ? 'Use at most two decimals, such as 0.85.' : 'Enter a number between 0.5 and 1.'}
             </span>
           )}
           <label class="field">

@@ -28,7 +28,7 @@ describe('SettingsScreen', () => {
   it('loads the settings into the form', async () => {
     setup();
     expect(await screen.findByRole('checkbox', { name: /file automatically/i })).not.toBeChecked();
-    expect(screen.getByRole('spinbutton', { name: /threshold/i })).toHaveValue(0.8);
+    expect(screen.getByRole('textbox', { name: /threshold/i })).toHaveValue('0.8');
     expect(screen.getByText('/Archive')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
   });
@@ -36,7 +36,7 @@ describe('SettingsScreen', () => {
   it('saves only the changed settings, so the rest keep following their env defaults', async () => {
     const { api } = setup();
     fireEvent.click(await screen.findByRole('checkbox', { name: /file automatically/i }));
-    fireEvent.input(screen.getByRole('spinbutton', { name: /threshold/i }), { target: { value: '0.9' } });
+    fireEvent.input(screen.getByRole('textbox', { name: /threshold/i }), { target: { value: '0.9' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(api.saveSettings).toHaveBeenCalledWith({ autoFileEnabled: true, autoFileThreshold: 0.9 }));
     expect(await screen.findByText('Saved.')).toBeInTheDocument();
@@ -44,12 +44,11 @@ describe('SettingsScreen', () => {
 
   it('lets a decimal be typed one character at a time', async () => {
     const { api } = setup();
-    const field = await screen.findByRole('spinbutton', { name: /threshold/i });
+    const field = await screen.findByRole('textbox', { name: /threshold/i });
     fireEvent.input(field, { target: { value: '0.' } });
-    expect(field).toHaveValue(0);
-    expect((field as HTMLInputElement).value).toBe('0.');
+    expect(field).toHaveValue('0.');
     fireEvent.input(field, { target: { value: '0.9' } });
-    expect(field).toHaveValue(0.9);
+    expect(field).toHaveValue('0.9');
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(api.saveSettings).toHaveBeenCalledWith({ autoFileThreshold: 0.9 }));
     await screen.findByText('Saved.');
@@ -57,20 +56,46 @@ describe('SettingsScreen', () => {
 
   it('explains a rejected value', async () => {
     const { api } = setup({ saveSettings: vi.fn().mockRejectedValue(new ApiError('invalid_input', 400, 'invalid_input')) });
-    // Three decimals pass the client check; the server is the one to refuse them.
-    fireEvent.input(await screen.findByRole('spinbutton', { name: /threshold/i }), { target: { value: '0.855' } });
+    fireEvent.input(await screen.findByRole('textbox', { name: /threshold/i }), { target: { value: '0.85' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     expect(
       await screen.findByText(
         'A value was rejected. Check the model name, a threshold between 0.5 and 1 with at most two decimals, and the excluded folders.',
       ),
     ).toBeInTheDocument();
-    expect(api.saveSettings).toHaveBeenCalledWith({ autoFileThreshold: 0.855 });
+    expect(api.saveSettings).toHaveBeenCalledWith({ autoFileThreshold: 0.85 });
+  });
+
+  it('accepts a decimal comma, as some keyboards type it', async () => {
+    const { api } = setup();
+    const field = await screen.findByRole('textbox', { name: /threshold/i });
+    expect(field).toHaveAttribute('inputmode', 'decimal');
+    fireEvent.input(field, { target: { value: '0,85' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(api.saveSettings).toHaveBeenCalledWith({ autoFileThreshold: 0.85 }));
+    await screen.findByText('Saved.');
+  });
+
+  it('blocks a threshold with more than two decimals and says why', async () => {
+    const { api } = setup();
+    fireEvent.input(await screen.findByRole('textbox', { name: /threshold/i }), { target: { value: '0.855' } });
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+    expect(screen.getByRole('textbox', { name: /threshold/i })).toHaveAccessibleDescription('Use at most two decimals, such as 0.85.');
+    expect(api.saveSettings).not.toHaveBeenCalled();
+  });
+
+  it('clears "Saved." once the form changes again', async () => {
+    setup();
+    fireEvent.click(await screen.findByRole('checkbox', { name: /file automatically/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await screen.findByText('Saved.');
+    fireEvent.input(screen.getByRole('textbox', { name: /threshold/i }), { target: { value: '0.' } });
+    await waitFor(() => expect(screen.queryByText('Saved.')).toBeNull());
   });
 
   it('blocks a threshold below 0.5 before sending it', async () => {
     const { api } = setup();
-    fireEvent.input(await screen.findByRole('spinbutton', { name: /threshold/i }), { target: { value: '0.3' } });
+    fireEvent.input(await screen.findByRole('textbox', { name: /threshold/i }), { target: { value: '0.3' } });
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
     expect(screen.getByText('Enter a number between 0.5 and 1.')).toBeInTheDocument();
     expect(api.saveSettings).not.toHaveBeenCalled();
@@ -78,17 +103,17 @@ describe('SettingsScreen', () => {
 
   it('describes an invalid threshold instead of naming the field with the error', async () => {
     setup();
-    const field = await screen.findByRole('spinbutton', { name: 'Auto-file threshold (0.5 to 1)' });
+    const field = await screen.findByRole('textbox', { name: 'Auto-file threshold (0.5 to 1)' });
     expect(field).not.toHaveAttribute('aria-invalid', 'true');
     fireEvent.input(field, { target: { value: '0.3' } });
-    const invalid = screen.getByRole('spinbutton', { name: 'Auto-file threshold (0.5 to 1)' });
+    const invalid = screen.getByRole('textbox', { name: 'Auto-file threshold (0.5 to 1)' });
     expect(invalid).toHaveAttribute('aria-invalid', 'true');
     expect(invalid).toHaveAccessibleDescription(/between 0.5 and 1/);
   });
 
   it('blocks a blank threshold', async () => {
     setup();
-    fireEvent.input(await screen.findByRole('spinbutton', { name: /threshold/i }), { target: { value: '' } });
+    fireEvent.input(await screen.findByRole('textbox', { name: /threshold/i }), { target: { value: '' } });
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
   });
 
