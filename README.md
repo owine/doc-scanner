@@ -49,7 +49,11 @@ The repo is a pnpm workspace (`pnpm-workspace.yaml`) with two packages:
 | Variable                 | Purpose                                                                                                                                      |
 | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
 | `SESSION_ENCRYPTION_KEY` | **Required.** 32 random bytes, base64-encoded. Encrypts Proton session tokens at rest.                                                       |
-| `ANTHROPIC_API_KEY`      | **Required** at startup. Reserved for Phase 5's server-side vision OCR/classify; nothing on `main` calls the Claude API yet.                 |
+| `ANTHROPIC_API_KEY`      | **Required** at startup. Used by the document analyzer (Claude Haiku 5.5 by default; about $0.003 per document).                             |
+| `ANALYZER_MODEL`         | Model the analyzer calls (default `claude-haiku-5-5`).                                                                                       |
+| `ANALYZER_EFFORT`        | Analyzer reasoning effort: `low`, `medium` (default) or `high`. Limited to these three as a cost guard.                                      |
+| `AUTO_FILE_THRESHOLD`    | Minimum analyzer confidence, 0 to 1 with at most two decimals (default `0.80`), for a document to be filed without review.                   |
+| `AUTO_FILE_ENABLED`      | Default `false`: every document goes to review. Turn on only once real use shows the unchanged-approval rate is high enough at the threshold. |
 | `DB_PATH`                | Path to the SQLite database file (default `./data/app.db`, relative to the server's working directory).                                      |
 | `PORT`                   | HTTP port the server listens on (default `3000`).                                                                                            |
 | `LOG_LEVEL`              | Pino log level: `debug`, `info` (default), `warn`, or `error`.                                                                               |
