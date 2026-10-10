@@ -65,7 +65,7 @@ async function setup(opts: { liveSession?: () => LiveSession | undefined } = {})
     body: JSON.stringify({ email: 'e@x.test', password: 'p' }),
   });
   const cookie = login.headers.get('set-cookie')!.split(';')[0]!;
-  return { app, pipeline, cookie, analyze };
+  return { app, pipeline, cookie, analyze, db };
 }
 
 function upload(app: Awaited<ReturnType<typeof setup>>['app'], cookie: string, text = 'statement') {
@@ -464,6 +464,24 @@ describe('intake', () => {
 });
 
 describe('restore and retry', () => {
+  it('warns that a quarantined filing may be in Drive, and still retries it', async () => {
+    const { app, pipeline, cookie, db } = await setup();
+    const doc = pipeline.repo.insert({ source: 'picker', originalName: 'a.pdf', mime: 'application/pdf', size: 1, sha256: 'q', sourceContext: null });
+    pipeline.repo.transition(doc.id, 'received', 'filing', {
+      analysis: ANALYSIS,
+      decision: { name: ANALYSIS.name, folder: { kind: 'existing', linkId: 'BILLS', path: '/Bills' } },
+      filingTarget: { folderLinkId: 'BILLS', name: 'x.pdf' },
+    });
+    // As after a key change: the sealed decision no longer opens.
+    db.prepare('UPDATE documents SET decision = ? WHERE id = ?').run(new Uint8Array(40), doc.id);
+    const view = (await (await app.request(`/api/documents/${doc.id}`, { headers: { cookie } })).json()) as Record<string, unknown>;
+    expect(view).toMatchObject({ state: 'failed', possiblyInDrive: true, decision: null });
+    expect(view.error).toContain('check Drive before retrying');
+    const retried = await app.request(`/api/documents/${doc.id}/retry`, { method: 'POST', headers: { cookie } });
+    expect(retried.status).toBe(200);
+    expect(await retried.json()).toMatchObject({ state: 'received', possiblyInDrive: true });
+  });
+
   const post = (app: App, cookie: string, id: string, action: string) =>
     app.request(`/api/documents/${id}/${action}`, { method: 'POST', headers: { cookie } });
 

@@ -39,6 +39,9 @@ CREATE TABLE IF NOT EXISTS documents (
   user_edited        INTEGER NOT NULL DEFAULT 0 CHECK (user_edited IN (0, 1)),
   discard_requested  INTEGER NOT NULL DEFAULT 0 CHECK (discard_requested IN (0, 1)),
   discarded_at       TEXT,
+  -- Set when a row whose upload may have happened lost its filing target to
+  -- an unreadable value (see DocumentRepo): the PWA still warns about Drive.
+  upload_unverified  INTEGER NOT NULL DEFAULT 0 CHECK (upload_unverified IN (0, 1)),
   -- A discarded row without discarded_at would never be purged.
   CHECK ((state = 'discarded') = (discarded_at IS NOT NULL))
 );

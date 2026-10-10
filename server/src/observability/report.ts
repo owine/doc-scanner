@@ -46,7 +46,8 @@ export async function reportingDriveFailure<T>(
   }
 }
 
-export type DocumentStage = 'analyze' | 'prepare' | 'file';
+/** 'storage': a document row whose sealed details would not decrypt (see DocumentRepo). */
+export type DocumentStage = 'analyze' | 'prepare' | 'file' | 'storage';
 
 /**
  * Reports a document that reached `failed`, tagged with the stage that

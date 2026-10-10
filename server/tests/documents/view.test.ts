@@ -30,6 +30,7 @@ const row = (over: Partial<DocumentRow> = {}): DocumentRow => ({
   userEdited: false,
   discardRequested: false,
   discardedAt: null,
+  uploadUnverified: false,
   ...over,
 });
 
@@ -39,6 +40,9 @@ describe('toView', () => {
   it('flags a document whose upload may have happened as possibly in Drive', () => {
     expect(toView(row({ state: 'awaiting_login', filingTarget: TARGET })).possiblyInDrive).toBe(true);
     expect(toView(row({ state: 'failed', filingTarget: TARGET })).possiblyInDrive).toBe(true);
+    // The target was lost to an unreadable value, but the upload may still have happened.
+    expect(toView(row({ state: 'failed', filingTarget: null, uploadUnverified: true })).possiblyInDrive).toBe(true);
+    expect(toView(row({ state: 'filed', uploadUnverified: true })).possiblyInDrive).toBe(false);
   });
 
   it('does not flag a filed document, or one never sent', () => {

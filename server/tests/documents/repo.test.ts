@@ -1,8 +1,8 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { createTestDb } from '../helpers/test-db.js';
 import { AtRestCipher } from '../../src/crypto/at-rest.js';
 import type { DB } from '../../src/db.js';
-import { DocumentRepo } from '../../src/documents/repo.js';
+import { DocumentDataUnreadableError, DocumentRepo } from '../../src/documents/repo.js';
 import type { DocumentPatch, NewDocument } from '../../src/documents/types.js';
 
 const KEY = Buffer.alloc(32, 5).toString('base64');
@@ -406,11 +406,51 @@ describe('DocumentRepo', () => {
         decision: null,
         filingTarget: null,
         filedName: null,
-        error: 'stored document details could not be decrypted',
       });
+      expect(got.error).toMatch(/^stored document details could not be decrypted/);
       // Clients polling by seq see the change.
       expect(got.seq).toBeGreaterThan(seqBefore);
       for (const col of SEALED.filter((c) => c !== 'error')) expect([col, rawRow(a.id)[col]]).toEqual([col, null]);
+    });
+
+    it('keeps the upload warning when quarantining a row whose upload may have happened', () => {
+      const r = repo();
+      const a = r.insert(named());
+      r.transition(a.id, 'received', 'filing', everything);
+      db.prepare('UPDATE documents SET decision = ? WHERE id = ?').run(new Uint8Array(40), a.id);
+      expect(r.get(a.id)).toMatchObject({
+        state: 'failed',
+        // Cleared rather than kept as a placeholder: a set target would block
+        // discards and skip the auto-filed folder re-check on a retry.
+        filingTarget: null,
+        uploadUnverified: true,
+        error: 'stored document details could not be decrypted; an upload may already have happened, so check Drive before retrying',
+      });
+    });
+
+    it('does not flag an upload for a row that never had a filing target', () => {
+      const r = repo();
+      const a = r.insert(named());
+      db.prepare('UPDATE documents SET original_name = ? WHERE id = ?').run(new Uint8Array(40), a.id);
+      expect(r.get(a.id)).toMatchObject({ state: 'failed', uploadUnverified: false, error: 'stored document details could not be decrypted' });
+    });
+
+    it('reports each quarantine once, with nothing but the error type and column', () => {
+      const t = createTestDb();
+      cleanup = t.cleanup;
+      db = t.db;
+      const onUnreadable = vi.fn();
+      const r = new DocumentRepo(t.db, new AtRestCipher(KEY, 'documents'), () => clock, onUnreadable);
+      const a = r.insert(named());
+      db.prepare('UPDATE documents SET original_name = ? WHERE id = ?').run(new Uint8Array(40), a.id);
+      r.get(a.id);
+      r.listChangedSince(0);
+      r.get(a.id);
+      expect(onUnreadable).toHaveBeenCalledTimes(1);
+      const err = onUnreadable.mock.calls[0]![0] as Error & { column: string };
+      expect(err).toBeInstanceOf(DocumentDataUnreadableError);
+      expect(err.column).toBe('original_name');
+      expect(err.message).not.toContain(MARK);
     });
 
     it('keeps a filed or discarded row in its state when quarantining it', () => {

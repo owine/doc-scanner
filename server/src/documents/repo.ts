@@ -59,6 +59,7 @@ const SEALED = new Set<string>(SEALED_COLUMNS);
 
 /** What a quarantined row shows in place of its unreadable details. */
 const UNREADABLE_TEXT = 'stored document details could not be decrypted';
+const UNREADABLE_AFTER_UPLOAD_TEXT = `${UNREADABLE_TEXT}; an upload may already have happened, so check Drive before retrying`;
 
 /** A sealed column that would not open: the key changed, or the value was corrupted or moved. */
 export class DocumentDataUnreadableError extends Error {
@@ -120,6 +121,7 @@ function fromRow(r: Raw, unseal: Unseal): DocumentRow {
     userEdited: r.user_edited === 1,
     discardRequested: r.discard_requested === 1,
     discardedAt: r.discarded_at as string | null,
+    uploadUnverified: r.upload_unverified === 1,
   };
 }
 
@@ -140,6 +142,8 @@ export class DocumentRepo {
     private readonly db: DB,
     private readonly cipher: AtRestCipher,
     private readonly now: () => Date = () => new Date(),
+    /** Told once per quarantined row; gets the typed error only (fixed message, column name). */
+    private readonly onUnreadable: (err: DocumentDataUnreadableError) => void = () => {},
   ) {}
 
   /** Associated data: a ciphertext opens only in the row and column it was sealed for. */
@@ -180,24 +184,49 @@ export class DocumentRepo {
       if (!(err instanceof DocumentDataUnreadableError)) throw err;
       const id = String(r.id);
       logger.warn({ documentId: id, column: err.column }, 'document details could not be decrypted; quarantining the row');
-      this.quarantine(id, Number(r.seq));
+      if (this.quarantine(id, Number(r.seq))) {
+        try {
+          this.onUnreadable(err);
+        } catch {
+          // Reporting is best effort; the row is already safe.
+        }
+      }
       const again = this.db.prepare('SELECT * FROM documents WHERE id = ?').get(id) as Raw | undefined;
       if (!again) throw err;
       return fromRow(again, this.unsealer(again));
     }
   }
 
-  /** Compare-and-set on seq: only the version that was read is quarantined. */
-  private quarantine(id: string, seq: number): void {
+  /**
+   * Compare-and-set on seq: only the version that was read is quarantined.
+   * A row whose upload may have happened (a filing target, not yet filed)
+   * keeps that warning: a different error, and upload_unverified so the view
+   * still says it may be in Drive. The target itself is cleared, not kept as
+   * a placeholder: a set target blocks discards and skips the auto-filed
+   * folder re-check, which a retried row must not inherit. SET expressions
+   * see the old row, so the CASEs read the target before it is cleared.
+   */
+  private quarantine(id: string, seq: number): boolean {
     const t = iso(this.now());
-    this.db
+    const uploadMayHaveHappened = `filing_target IS NOT NULL AND state != 'filed'`;
+    const res = this.db
       .prepare(
         `UPDATE documents SET ${SEALED_COLUMNS.filter((c) => c !== 'error').map((c) => `${c} = NULL`).join(', ')},
-           error = ?, discard_requested = 0, seq = ?, updated_at = ?,
+           error = CASE WHEN ${uploadMayHaveHappened} THEN ? ELSE ? END,
+           upload_unverified = CASE WHEN ${uploadMayHaveHappened} THEN 1 ELSE upload_unverified END,
+           discard_requested = 0, seq = ?, updated_at = ?,
            state = CASE WHEN state IN ('filed', 'discarded') THEN state ELSE 'failed' END
          WHERE id = ? AND seq = ?`,
       )
-      .run(this.seal(id, 'error', UNREADABLE_TEXT), this.nextSeq(), t, id, seq);
+      .run(
+        this.seal(id, 'error', UNREADABLE_AFTER_UPLOAD_TEXT),
+        this.seal(id, 'error', UNREADABLE_TEXT),
+        this.nextSeq(),
+        t,
+        id,
+        seq,
+      );
+    return Number(res.changes) === 1;
   }
 
   /** Never reuses a number, even after the row that held the highest one is purged. */

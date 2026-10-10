@@ -28,7 +28,7 @@ export function toView(d: DocumentRow) {
     autoFiled: d.autoFiled,
     userEdited: d.userEdited,
     // An upload was started: discarding now may leave a copy in Drive (the PWA warns).
-    possiblyInDrive: d.state !== 'filed' && d.filingTarget !== null,
+    possiblyInDrive: d.state !== 'filed' && (d.filingTarget !== null || d.uploadUnverified),
     discardRequested: d.discardRequested,
     discardedAt: d.discardedAt,
   };

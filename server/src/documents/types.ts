@@ -69,6 +69,8 @@ export interface DocumentRow {
   userEdited: boolean;
   discardRequested: boolean;
   discardedAt: string | null;
+  /** The filing target was lost to an unreadable value while an upload may have happened. */
+  uploadUnverified: boolean;
 }
 
 export interface NewDocument {

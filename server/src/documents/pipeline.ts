@@ -42,7 +42,8 @@ export function analyzerForClient(client: Pick<Anthropic, 'messages'>): (s: Effe
 
 export function createPipeline(o: PipelineOptions): Pipeline {
   const now = o.now ?? (() => new Date());
-  const repo = new DocumentRepo(o.db, new AtRestCipher(o.encryptionKey, 'documents'), now);
+  // One report per quarantined row, so a changed key or corrupted data is heard.
+  const repo = new DocumentRepo(o.db, new AtRestCipher(o.encryptionKey, 'documents'), now, (err) => captureDocumentFailure(err, 'storage'));
   const inbox = new InboxStore(join(o.dataDir, 'inbox'), new AtRestCipher(o.encryptionKey, 'inbox'));
   const settings = new SettingsStore(o.db, o.defaults);
   const folderCache = new FolderCacheStore(o.db, new AtRestCipher(o.encryptionKey, 'folder-cache'));
