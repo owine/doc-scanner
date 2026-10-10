@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { makeHarness, okOutcome, ANALYSIS } from './harness.js';
+import { makeHarness, okOutcome, ANALYSIS, TREE } from './harness.js';
 import { analyzeStage } from '../../src/documents/stages/analyze.js';
 import { prepareStage } from '../../src/documents/stages/prepare.js';
 import { decideStage, reviewReason } from '../../src/documents/stages/decide.js';
@@ -52,7 +52,62 @@ describe('analyzeStage', () => {
   });
 });
 
+describe('analyzeStage retry state and recovery', () => {
+  it('resets retry state when an unusable answer goes to review', async () => {
+    h = makeHarness();
+    h.analyze.mockResolvedValue({ ...okOutcome(), status: 'refusal', detail: 'declined' });
+    const doc = h.add();
+    h.db.prepare('UPDATE documents SET attempts = 2, error = ? WHERE id = ?').run('x', doc.id);
+    await analyzeStage(h.repo.get(doc.id)!, h.ctx);
+    expect(h.repo.get(doc.id)).toMatchObject({ state: 'needs_review', attempts: 0, error: null });
+  });
+
+  it('refreshes the folder cache when a session is live and there is no tree', async () => {
+    h = makeHarness({ withTree: false });
+    h.refreshFolderCache.mockImplementation(async () => h.ctx.folderCache.save(TREE, new Date()));
+    const doc = h.add();
+    await analyzeStage(doc, h.ctx);
+    expect(h.refreshFolderCache).toHaveBeenCalledTimes(1);
+    expect(h.repo.get(doc.id)?.state).toBe('preparing');
+  });
+
+  it('defers if the refresh throws', async () => {
+    h = makeHarness({ withTree: false });
+    h.refreshFolderCache.mockRejectedValue(new Error('boom'));
+    const doc = h.add();
+    await analyzeStage(doc, h.ctx);
+    expect(h.repo.get(doc.id)?.state).toBe('received');
+  });
+
+  it('moves a crashed analyzing row without a tree back to received', async () => {
+    h = makeHarness({ withTree: false });
+    h.setLive(undefined);
+    const doc = h.add();
+    h.repo.transition(doc.id, 'received', 'analyzing');
+    await analyzeStage(h.repo.get(doc.id)!, h.ctx);
+    expect(h.repo.get(doc.id)?.state).toBe('received');
+    expect(h.refreshFolderCache).not.toHaveBeenCalled();
+  });
+
+  it('re-analyses a row found in analyzing after a crash', async () => {
+    h = makeHarness();
+    const doc = h.add();
+    h.repo.transition(doc.id, 'received', 'analyzing');
+    await analyzeStage(h.repo.get(doc.id)!, h.ctx);
+    expect(h.repo.get(doc.id)?.state).toBe('preparing');
+  });
+});
+
 describe('prepareStage (slice 1: pass-through)', () => {
+  it('honours a discard requested during preparation', async () => {
+    h = makeHarness();
+    const doc = h.add();
+    h.repo.transition(doc.id, 'received', 'preparing');
+    h.repo.requestDiscard(doc.id);
+    await prepareStage(h.repo.get(doc.id)!, h.ctx);
+    expect(h.repo.get(doc.id)?.state).toBe('discarded');
+  });
+
   it('marks the document ready with its own type', async () => {
     h = makeHarness();
     const doc = h.add();
@@ -95,7 +150,40 @@ describe('decideStage', () => {
     expect(reviewReason({ ...ANALYSIS, folder: { kind: 'new', parentLinkId: 'BILLS', parentPath: '/Bills', name: 'Water' } }, s)).toBe(
       'new folder proposed',
     );
-    expect(reviewReason({ ...ANALYSIS, confidence: 0.5 }, s)).toBe('confidence 0.50 is below 0.80');
+    expect(reviewReason({ ...ANALYSIS, confidence: 0.5 }, s)).toBe('confidence 0.500 is below 0.80');
     expect(reviewReason(ANALYSIS, s)).toBeNull();
+  });
+
+  it('files at exactly the threshold', () => {
+    h = makeHarness();
+    expect(reviewReason({ ...ANALYSIS, confidence: 0.8 }, h.ctx.settings.get())).toBeNull();
+  });
+
+  it('refuses a folder on the never-file-here list', () => {
+    h = makeHarness();
+    const a = { ...ANALYSIS, folder: { kind: 'existing' as const, linkId: 'ARCHIVE', path: '/Archive' } };
+    expect(reviewReason(a, h.ctx.settings.get())).toBe('folder is on the never-file-here list');
+  });
+
+  it('names the fixable reason before the auto-filing switch', () => {
+    h = makeHarness({ settings: { autoFileEnabled: false } });
+    const a = { ...ANALYSIS, folder: { kind: 'new' as const, parentLinkId: 'BILLS', parentPath: '/Bills', name: 'Water' } };
+    expect(reviewReason(a, h.ctx.settings.get())).toBe('new folder proposed');
+  });
+
+  it('resets retry state when it moves on', () => {
+    h = makeHarness();
+    const doc = readyDoc();
+    h.db.prepare('UPDATE documents SET attempts = 2, error = ? WHERE id = ?').run('x', doc.id);
+    decideStage(h.repo.get(doc.id)!, h.ctx);
+    expect(h.repo.get(doc.id)).toMatchObject({ state: 'filing', attempts: 0, error: null });
+  });
+
+  it('honours a pending discard', () => {
+    h = makeHarness();
+    const doc = readyDoc();
+    h.db.prepare('UPDATE documents SET discard_requested = 1 WHERE id = ?').run(doc.id);
+    decideStage(h.repo.get(doc.id)!, h.ctx);
+    expect(h.repo.get(doc.id)?.state).toBe('discarded');
   });
 });
