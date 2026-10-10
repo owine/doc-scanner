@@ -45,3 +45,19 @@ export async function reportingDriveFailure<T>(
     throw error;
   }
 }
+
+export type DocumentStage = 'analyze' | 'prepare' | 'file';
+
+/**
+ * Reports a document that reached `failed`, tagged with the stage that
+ * broke. Document names and content never leave the server: `sensitive`
+ * (original name, chosen name) is redacted wherever it appears.
+ */
+export function captureDocumentFailure(error: unknown, stage: DocumentStage, sensitive: readonly string[] = []): void {
+  Sentry.withScope((scope) => {
+    scope.setTag('document.stage', stage);
+    const values = sensitive.filter((v) => v.length > 0);
+    if (values.length > 0) scope.addEventProcessor((event) => redactExact(event, values));
+    Sentry.captureException(error);
+  });
+}
