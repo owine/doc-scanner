@@ -43,6 +43,14 @@ describe('AtRestCipher', () => {
     expect(c.open(Buffer.from(pinned, 'base64')).toString('utf8')).toBe('Northwind Energy invoice 0042');
   });
 
+  it('opens a pinned documents blob bound to its row id and column', () => {
+    // DocumentRepo's associated data: `${id}\0${column}`. Changing it strands every sealed row.
+    const pinned = '276BqljxoIgEgZg06wPFlGZVX2OMWEKEaKs/gjnLkwJHI9xS0WFN6tRW+5lc1tt3/j3wN2JSJ+O/';
+    const c = new AtRestCipher(MASTER, 'documents');
+    const aad = new TextEncoder().encode('doc-0001\u0000original_name');
+    expect(c.open(Buffer.from(pinned, 'base64'), aad).toString('utf8')).toBe('Northwind Energy Sep 2026.pdf');
+  });
+
   it('rejects a too-short blob', () => {
     const c = new AtRestCipher(MASTER, 'inbox');
     expect(() => c.open(new Uint8Array(20))).toThrow(/too short/);

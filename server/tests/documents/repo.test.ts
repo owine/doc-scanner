@@ -355,6 +355,21 @@ describe('DocumentRepo', () => {
       expect(r.applyRequestedDiscard(a.id)).toBe(true);
     });
 
+    it('reads a pinned sealed value, so the row/column binding format stays stable', () => {
+      const t = createTestDb();
+      cleanup = t.cleanup;
+      // Same blob as the pinned documents test in at-rest.test.ts.
+      const pinned = Buffer.from('276BqljxoIgEgZg06wPFlGZVX2OMWEKEaKs/gjnLkwJHI9xS0WFN6tRW+5lc1tt3/j3wN2JSJ+O/', 'base64');
+      t.db
+        .prepare(
+          `INSERT INTO documents (id, seq, created_at, updated_at, source, original_name, mime, size, sha256, state, next_attempt_at)
+           VALUES ('doc-0001', 1, 't', 't', 'picker', ?, 'application/pdf', 10, 'abc', 'received', 't')`,
+        )
+        .run(pinned);
+      const r = new DocumentRepo(t.db, new AtRestCipher(Buffer.alloc(32, 7).toString('base64'), 'documents'), () => clock);
+      expect(r.get('doc-0001')).toMatchObject({ state: 'received', originalName: 'Northwind Energy Sep 2026.pdf' });
+    });
+
     it('treats a value moved from another row as unreadable', () => {
       const r = repo();
       const a = r.insert(named());
