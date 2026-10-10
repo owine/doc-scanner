@@ -136,7 +136,15 @@ async function main(): Promise<void> {
     });
 
     console.error('walking the folder tree...');
-    const tree = await drive.walkFolderTree();
+    let lastReport = 0;
+    const tree = await drive.walkFolderTree({
+      concurrency: 8,
+      onProgress: ({ folders, files, pending }) => {
+        if (Date.now() - lastReport < 2000) return;
+        lastReport = Date.now();
+        console.error(`  ${folders} folders, ${files} files so far, ${pending} folders queued`);
+      },
+    });
     const fileCount = tree.reduce((sum, f) => sum + f.files.length, 0);
     console.error(`${tree.length} folders, ${fileCount} files`);
     writeFileSync(join(flow, 'inputs', 'tree.json'), JSON.stringify(tree, null, 2));

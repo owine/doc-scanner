@@ -23,25 +23,66 @@ function isNode(n: unknown): n is NodeEntity {
   return typeof n === 'object' && n !== null && 'uid' in n;
 }
 
-/**
- * Walks My files depth-first and returns every folder with its files. A node
- * whose name can't be decrypted is skipped, and a folder like that takes its
- * subtree with it: with no usable path it can be neither a filing target nor
- * a naming example. Trashed nodes are skipped.
- */
-export async function walkFolderTree(sdk: TreeSdk, signal?: AbortSignal): Promise<TreeFolder[]> {
-  const root = await sdk.getMyFilesRootFolder();
-  const out: TreeFolder[] = [];
-  await walk(sdk, root.uid, '/', out, signal);
-  return out;
+export interface WalkOptions {
+  signal?: AbortSignal;
+  /** Folders listed at once. Each listing is a few sequential round trips, so this is what makes a big tree fast. */
+  concurrency?: number;
+  onProgress?: (p: { folders: number; files: number; pending: number }) => void;
 }
 
-async function walk(sdk: TreeSdk, uid: string, path: string, out: TreeFolder[], signal?: AbortSignal): Promise<void> {
+/**
+ * Walks My files and returns every folder with its files, sorted by path. A
+ * node whose name can't be decrypted is skipped, and a folder like that takes
+ * its subtree with it: with no usable path it can be neither a filing target
+ * nor a naming example. Trashed nodes are skipped.
+ */
+export async function walkFolderTree(sdk: TreeSdk, opts: WalkOptions = {}): Promise<TreeFolder[]> {
+  const concurrency = Math.max(1, opts.concurrency ?? 6);
+  const root = await sdk.getMyFilesRootFolder();
+  const out: TreeFolder[] = [];
+  const queue: { uid: string; path: string }[] = [{ uid: root.uid, path: '/' }];
+  let active = 0;
+  let files = 0;
+
+  await new Promise<void>((resolve, reject) => {
+    let failed = false;
+    const pump = (): void => {
+      if (failed) return;
+      if (queue.length === 0 && active === 0) return resolve();
+      while (active < concurrency && queue.length > 0) {
+        const job = queue.shift()!;
+        active++;
+        listFolder(sdk, job.uid, job.path, opts.signal).then(
+          ({ folder, subfolders }) => {
+            active--;
+            out.push(folder);
+            files += folder.files.length;
+            queue.push(...subfolders);
+            opts.onProgress?.({ folders: out.length, files, pending: queue.length + active });
+            pump();
+          },
+          (err: unknown) => {
+            failed = true;
+            reject(err);
+          },
+        );
+      }
+    };
+    pump();
+  });
+  return out.sort((a, b) => a.path.localeCompare(b.path));
+}
+
+async function listFolder(
+  sdk: TreeSdk,
+  uid: string,
+  path: string,
+  signal?: AbortSignal,
+): Promise<{ folder: TreeFolder; subfolders: { uid: string; path: string }[] }> {
   const childUids: string[] = [];
   for await (const childUid of sdk.iterateFolderChildrenNodeUids(uid, undefined, signal)) childUids.push(childUid);
 
   const folder: TreeFolder = { linkId: uid, path, files: [] };
-  out.push(folder);
   const subfolders: { uid: string; path: string }[] = [];
 
   if (childUids.length > 0) {
@@ -62,8 +103,7 @@ async function walk(sdk: TreeSdk, uid: string, path: string, out: TreeFolder[], 
     }
   }
 
-  subfolders.sort((a, b) => a.path.localeCompare(b.path));
-  for (const sub of subfolders) await walk(sdk, sub.uid, sub.path, out, signal);
+  return { folder, subfolders };
 }
 
 export const RECENT_NAMES_PER_FOLDER = 5;
