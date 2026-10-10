@@ -1010,7 +1010,10 @@ export class DocumentRepo {
     const doc = this.get(id);
     if (!doc) return 'not_allowed';
     if (RESTING_STATES.includes(doc.state)) {
-      return this.transition(id, doc.state, 'discarded', { discardedAt: this.now() }) ? 'discarded' : 'not_allowed';
+      // A stale flag from an interrupted stage must not block discarding a resting document.
+      return this.transition(id, doc.state, 'discarded', { discardedAt: this.now(), discardRequested: false }, { ignorePendingDiscard: true })
+        ? 'discarded'
+        : 'not_allowed';
     }
     if (WORKING_STATES.includes(doc.state)) {
       this.db
@@ -2414,7 +2417,7 @@ export async function fileStage(doc: DocumentRow, ctx: StageContext): Promise<vo
     return;
   }
   if (!doc.decision) {
-    ctx.repo.transition(doc.id, 'filing', 'needs_review', { reviewReason: 'nothing decided to file' }, KEEP_GOING);
+    ctx.repo.transition(doc.id, 'filing', 'needs_review', { reviewReason: 'nothing decided to file', discardRequested: false }, KEEP_GOING);
     return;
   }
   const drive = live.driveClient;
@@ -2470,15 +2473,21 @@ export async function fileStage(doc: DocumentRow, ctx: StageContext): Promise<vo
           userEdited: doc.userEdited,
         }),
       );
-    // The filed name joins that folder's recent names right away (spec §5:
-    // edits teach the system), without waiting for the next tree walk.
-    ctx.folderCache.recordFiled(folderLinkId, { uid: uploaded.nodeUid, name: uploaded.name, modified: ctx.now() });
+    // Plaintext first: nothing after this point may leave the blob behind.
     ctx.inbox.deleteAll(doc.id);
+    // The filed name joins that folder's recent names right away (spec §5:
+    // edits teach the system). Best-effort: the next tree walk catches up.
+    try {
+      ctx.folderCache.recordFiled(folderLinkId, { uid: uploaded.nodeUid, name: uploaded.name, modified: ctx.now() });
+    } catch (err) {
+      logger.warn({ err: (err as Error).message }, 'could not add the filed name to the folder cache');
+    }
     logger.info({ documentId: doc.id, autoFiled: doc.autoFiled, userEdited: doc.userEdited }, 'document filed');
   } catch (err) {
     if (!isAuthExpired(err)) throw err;
     logger.warn({ documentId: doc.id }, 'proton session expired while filing; waiting for login');
-    ctx.repo.transition(doc.id, 'filing', 'awaiting_login', {}, KEEP_GOING);
+    // Clears a pending discard too: from awaiting_login the user can discard again.
+    ctx.repo.transition(doc.id, 'filing', 'awaiting_login', { discardRequested: false }, KEEP_GOING);
   }
 }
 
