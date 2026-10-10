@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/preact';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/preact';
 import { ReviewCard } from '../../src/ui/inbox/ReviewCard.js';
 import { ApiError } from '../../src/api.js';
 import type { FoldersState } from '../../src/documents/use-folders.js';
@@ -81,6 +81,12 @@ describe('ReviewCard', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
     expect(await screen.findByRole('alert')).toHaveTextContent(/no longer exists/i);
     await waitFor(() => expect(screen.getByRole('button', { name: 'Approve' })).toBeEnabled());
+  });
+
+  it('labels the folder control as a group named Folder', () => {
+    renderCard();
+    const group = screen.getByRole('group', { name: 'Folder' });
+    expect(within(group).getByRole('button', { name: 'Change' })).toBeInTheDocument();
   });
 
   it('notes an analysis from file details only', () => {

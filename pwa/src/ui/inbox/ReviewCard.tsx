@@ -88,8 +88,10 @@ export function ReviewCard({ doc, folders, onApprove, onDiscard }: ReviewCardPro
         <span class="field-label">Name</span>
         <input value={name} onInput={(e) => setName((e.target as HTMLInputElement).value)} />
       </label>
-      <div class="field">
-        <span class="field-label">Folder</span>
+      <div class="field" role="group" aria-labelledby={`folder-label-${doc.id}`}>
+        <span class="field-label" id={`folder-label-${doc.id}`}>
+          Folder
+        </span>
         {picking ? (
           <FolderPicker
             folders={folders}
