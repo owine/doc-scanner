@@ -42,6 +42,19 @@ describe('SettingsScreen', () => {
     expect(await screen.findByText('Saved.')).toBeInTheDocument();
   });
 
+  it('lets a decimal be typed one character at a time', async () => {
+    const { api } = setup();
+    const field = await screen.findByRole('spinbutton', { name: /threshold/i });
+    fireEvent.input(field, { target: { value: '0.' } });
+    expect(field).toHaveValue(0);
+    expect((field as HTMLInputElement).value).toBe('0.');
+    fireEvent.input(field, { target: { value: '0.9' } });
+    expect(field).toHaveValue(0.9);
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(api.saveSettings).toHaveBeenCalledWith({ autoFileThreshold: 0.9 }));
+    await screen.findByText('Saved.');
+  });
+
   it('explains a rejected value', async () => {
     setup({ saveSettings: vi.fn().mockRejectedValue(new ApiError('invalid_input', 400, 'invalid_input')) });
     fireEvent.input(await screen.findByRole('spinbutton', { name: /threshold/i }), { target: { value: '0.3' } });

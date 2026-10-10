@@ -35,6 +35,9 @@ export function SettingsScreen({ email, documents = documentsApi, onBack, onLogg
   const [picking, setPicking] = useState(false);
   const [busy, setBusy] = useState(false);
   const [refreshed, setRefreshed] = useState(false);
+  // The threshold is edited as text: a number-bound input rewrites "0." to "0"
+  // on every render, so a decimal could not be typed.
+  const [thresholdText, setThresholdText] = useState('');
 
   useEffect(() => {
     documents
@@ -42,22 +45,25 @@ export function SettingsScreen({ email, documents = documentsApi, onBack, onLogg
       .then((s) => {
         setSaved(s);
         setDraft(s);
+        setThresholdText(String(s.autoFileThreshold));
       })
       .catch(() => setStatus('Could not load settings.'));
   }, [documents]);
 
   const set = <K extends keyof Settings>(key: K, value: Settings[K]) => setDraft((d) => (d ? { ...d, [key]: value } : d));
   const patch = draft && saved ? changedFields(draft, saved) : {};
+  const thresholdValid = thresholdText.trim() !== '' && Number.isFinite(Number(thresholdText));
   const dirty = Object.keys(patch).length > 0;
 
   async function save() {
-    if (!dirty) return;
+    if (!dirty || !thresholdValid) return;
     setBusy(true);
     setStatus(null);
     try {
       const s = await documents.saveSettings(patch);
       setSaved(s);
       setDraft(s);
+      setThresholdText(String(s.autoFileThreshold));
       setStatus('Saved.');
     } catch (err) {
       setStatus(
@@ -108,9 +114,14 @@ export function SettingsScreen({ email, documents = documentsApi, onBack, onLogg
               min="0.5"
               max="1"
               step="0.05"
-              value={draft.autoFileThreshold}
-              onInput={(e) => set('autoFileThreshold', Number((e.target as HTMLInputElement).value))}
+              value={thresholdText}
+              onInput={(e) => {
+                const text = (e.target as HTMLInputElement).value;
+                setThresholdText(text);
+                if (text.trim() !== '' && Number.isFinite(Number(text))) set('autoFileThreshold', Number(text));
+              }}
             />
+            {!thresholdValid && <span class="error-text">Enter a number between 0.5 and 1.</span>}
           </label>
           <label class="field">
             <span class="field-label">Model</span>
@@ -162,7 +173,7 @@ export function SettingsScreen({ email, documents = documentsApi, onBack, onLogg
               {status}
             </p>
           )}
-          <button class="btn" disabled={busy || !dirty} onClick={() => void save()}>
+          <button class="btn" disabled={busy || !dirty || !thresholdValid} onClick={() => void save()}>
             Save
           </button>
         </div>
