@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { TwoFactorRequiredError, type ProtonAuth } from '../auth/srp.js';
 import type { SessionStore } from '../auth/session-store.js';
-import { issueSession, revokeSession, sessionMiddleware, type AuthContext } from './middleware.js';
+import { issueSession, revokeAllSessions, sessionMiddleware, type AuthContext } from './middleware.js';
 import { logger } from '../logger.js';
 import { captureAuthFailure } from '../observability/report.js';
 import { DriveClient } from '../drive/client.js';
@@ -93,7 +93,7 @@ export function authRoutes(deps: {
       }
     }
     deps.store.clear();
-    revokeSession(c);
+    revokeAllSessions(c);
     return c.json({ ok: true });
   });
 
