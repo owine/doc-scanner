@@ -1,14 +1,8 @@
 -- Schema version 4: filing history (FTS5-indexed; similarity recall is not switched on yet).
 --
--- `classification_history` records every confirmed Drive save so that future
--- /api/classify calls can include a `<examples>` block of prior filings as
--- in-context shots, helping Haiku align with the user's naming + folder
--- conventions over time.
---
--- The FTS5 virtual table is provisioned now even though slice 3 only uses
--- `findRecent(N)` (most-recent N saves regardless of similarity) — keeping
--- the inverted index in sync from day one means a future similarity-based
--- retrieval can flip the switch without a backfill migration.
+-- `classification_history` records every filing. An FTS5 index over it is kept
+-- in sync by triggers, so similarity recall can be switched on later without
+-- a backfill migration. Nothing reads this table yet.
 
 CREATE TABLE IF NOT EXISTS classification_history (
   id              INTEGER PRIMARY KEY AUTOINCREMENT,
