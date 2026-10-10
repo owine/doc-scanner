@@ -29,10 +29,12 @@ export function FolderPicker({ folders, allowNew, allowRoot = true, onChoose, on
   const results = useMemo(() => (offered ? searchFolders(offered, query) : []), [offered, query]);
 
   // Once, when the picker opens. (autoFocus is ignored on elements inserted
-  // after page load, so focus explicitly.)
+  // after page load, so focus explicitly.) The list is reloaded every time,
+  // so a folder created by an approval since it loaded is offered; the list
+  // already held stays up meanwhile.
   useEffect(() => {
     searchRef.current?.focus();
-    if (folders.folders === null) void folders.reload();
+    void folders.reload();
   }, []);
 
   useEffect(() => {

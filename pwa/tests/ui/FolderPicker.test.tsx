@@ -55,6 +55,14 @@ describe('FolderPicker', () => {
     expect(state.reload).toHaveBeenCalled();
   });
 
+  it('reloads the list on every open, showing the one it has meanwhile', () => {
+    // A folder created by an approval exists in Drive now, but not in a list loaded before it.
+    const state = folders();
+    render(<FolderPicker folders={state} allowNew={false} onChoose={() => {}} onCancel={() => {}} />);
+    expect(state.reload).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: '/Bills/Water' })).toBeInTheDocument();
+  });
+
   it('cancels with the button or Escape', () => {
     const onCancel = vi.fn();
     render(<FolderPicker folders={folders()} allowNew={false} onChoose={() => {}} onCancel={onCancel} />);
