@@ -1,5 +1,7 @@
 import { NodeType, type NodeEntity, type ProtonDriveClient } from '@protontech/drive-sdk';
 import type { FolderContext } from '../analyze/types.js';
+import { logger } from '../logger.js';
+import { rethrowUnlessBrokenNodes } from './broken-nodes.js';
 
 export interface TreeFile {
   uid: string;
@@ -34,7 +36,8 @@ export interface WalkOptions {
  * Walks My files and returns every folder with its files, sorted by path. A
  * node whose name can't be decrypted is skipped, and a folder like that takes
  * its subtree with it: with no usable path it can be neither a filing target
- * nor a naming example. Trashed nodes are skipped.
+ * nor a naming example. Trashed nodes are skipped, and so are nodes the SDK
+ * could not load at all; a transport error fails the walk.
  */
 export async function walkFolderTree(sdk: TreeSdk, opts: WalkOptions = {}): Promise<TreeFolder[]> {
   const concurrency = Math.max(1, opts.concurrency ?? 6);
@@ -86,20 +89,26 @@ async function listFolder(
   const subfolders: { uid: string; path: string }[] = [];
 
   if (childUids.length > 0) {
-    for await (const child of sdk.iterateNodes(childUids, signal)) {
-      if (!isNode(child) || child.trashTime || !child.name.ok) continue;
-      const name = child.name.value;
-      if (child.type === NodeType.Folder) {
-        subfolders.push({ uid: child.uid, path: path === '/' ? `/${name}` : `${path}/${name}` });
-      } else if (child.type === NodeType.File) {
-        folder.files.push({
-          uid: child.uid,
-          name,
-          mediaType: child.mediaType,
-          modified: child.activeRevision?.claimedModificationTime ?? child.modificationTime,
-          size: child.activeRevision?.claimedSize,
-        });
+    try {
+      for await (const child of sdk.iterateNodes(childUids, signal)) {
+        if (!isNode(child) || child.trashTime || !child.name.ok) continue;
+        const name = child.name.value;
+        if (child.type === NodeType.Folder) {
+          subfolders.push({ uid: child.uid, path: path === '/' ? `/${name}` : `${path}/${name}` });
+        } else if (child.type === NodeType.File) {
+          folder.files.push({
+            uid: child.uid,
+            name,
+            mediaType: child.mediaType,
+            modified: child.activeRevision?.claimedModificationTime ?? child.modificationTime,
+            size: child.activeRevision?.claimedSize,
+          });
+        }
       }
+    } catch (error) {
+      // One broken node must not cost the whole tree; a transport failure still fails the walk.
+      rethrowUnlessBrokenNodes(error);
+      logger.warn({ folderUid: uid }, 'some folder children could not be loaded');
     }
   }
 

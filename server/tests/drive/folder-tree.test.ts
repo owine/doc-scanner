@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { NodeType } from '@protontech/drive-sdk';
+import { NodeType, ProtonDriveError, ServerError } from '@protontech/drive-sdk';
 import { toFolderContexts, walkFolderTree, type TreeSdk } from '../../src/drive/folder-tree.js';
 
 interface FakeNode {
@@ -50,6 +50,41 @@ describe('walkFolderTree', () => {
     expect(tree.map((f) => f.path)).toEqual(['/', '/Bills', '/Bills/Northwind Energy']);
     expect(tree[0].files.map((f) => f.name)).toEqual(['loose.pdf']);
     expect(tree[2].files.map((f) => f.uid).sort()).toEqual(['c1', 'c2', 'c3']);
+  });
+});
+
+/** The SDK's wrapper, thrown by iterateNodes after it yielded every node it could load. */
+function wrapper(cause: unknown[]): ProtonDriveError {
+  return Object.assign(new ProtonDriveError('Some items could not be loaded'), { cause });
+}
+
+/** fakeSdk, but listing `failingParent`'s children ends with `error` after the loadable ones. */
+function sdkFailingIn(failingParent: string, error: unknown): TreeSdk {
+  const base = fakeSdk(nodes);
+  const parentOf = new Map(nodes.map((n) => [n.uid, n.parent]));
+  return {
+    ...base,
+    async *iterateNodes(uids: string[]) {
+      yield* base.iterateNodes(uids);
+      if (uids.some((u) => parentOf.get(u) === failingParent)) throw error;
+    },
+  } as unknown as TreeSdk;
+}
+
+describe('walkFolderTree with broken nodes', () => {
+  it('skips a node the SDK could not load and walks the rest', async () => {
+    const tree = await walkFolderTree(sdkFailingIn('bills', wrapper([new Error('cannot decrypt')])));
+    expect(tree.map((f) => f.path)).toEqual(['/', '/Bills', '/Bills/Northwind Energy']);
+    expect(tree[2].files).toHaveLength(3);
+  });
+
+  it('still fails the walk on a transport error behind the wrapper', async () => {
+    const leaf = new ServerError('unavailable');
+    await expect(walkFolderTree(sdkFailingIn('bills', wrapper([new Error('x'), leaf])))).rejects.toBe(leaf);
+  });
+
+  it('still fails the walk on a wrapper with no cause', async () => {
+    await expect(walkFolderTree(sdkFailingIn('bills', wrapper([])))).rejects.toBeInstanceOf(ProtonDriveError);
   });
 });
 

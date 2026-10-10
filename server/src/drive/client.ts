@@ -3,10 +3,6 @@ import {
   ProtonDriveClient,
   NullFeatureFlagProvider,
   NodeType,
-  ProtonDriveError,
-  ServerError,
-  ConnectionError,
-  AbortError,
   NodeWithSameNameExistsValidationError,
   type ProtonDriveTelemetry,
   type Logger,
@@ -26,6 +22,7 @@ import { getOpenPGPModule } from './crypto-module.js';
 import { reportingDriveFailure } from '../observability/report.js';
 import { logger } from '../logger.js';
 import { walkFolderTree, isNode, type TreeFolder, type WalkOptions } from './folder-tree.js';
+import { rethrowUnlessBrokenNodes } from './broken-nodes.js';
 
 /** Proton's production Drive API host. The SDK config wants a host, not a URL. */
 const DEFAULT_DRIVE_HOST = 'drive-api.proton.me';
@@ -79,22 +76,6 @@ export class FolderNameTakenError extends Error {
     super('a node with this name already exists in the folder');
     this.name = 'FolderNameTakenError';
   }
-}
-
-/**
- * The leaf errors behind an SDK wrapper: `cause` may be an error or an array
- * of them, and wrappers can nest.
- */
-function leafErrors(error: unknown): unknown[] {
-  const cause = (error as { cause?: unknown } | null)?.cause;
-  if (cause === undefined || cause === null) return [];
-  const out: unknown[] = [];
-  for (const c of Array.isArray(cause) ? cause : [cause]) {
-    const inner = leafErrors(c);
-    if (inner.length > 0) out.push(...inner);
-    else out.push(c);
-  }
-  return out;
 }
 
 /** A node whose name decrypted. */
@@ -262,8 +243,8 @@ export class DriveClient {
    * undecryptable ones are skipped). The SDK yields every loadable node, then
    * throws a base ProtonDriveError wrapping whatever failed. With
    * `tolerateBrokenSiblings` that is swallowed when every cause is a
-   * per-node problem; a transport failure (ServerError incl. 401/429,
-   * ConnectionError, AbortError) always propagates.
+   * per-node problem; a transport failure always propagates (see
+   * rethrowUnlessBrokenNodes).
    */
   private async *children(
     parentUid: string,
@@ -277,13 +258,8 @@ export class DriveClient {
         if (isNode(n) && !n.trashTime && n.name.ok) yield n as NamedNode;
       }
     } catch (error) {
-      if (!opts.tolerateBrokenSiblings || error?.constructor !== ProtonDriveError) throw error;
-      const leaves = leafErrors(error);
-      const transport = leaves.find(
-        (e) => e instanceof ServerError || e instanceof ConnectionError || e instanceof AbortError,
-      );
-      if (transport !== undefined) throw transport;
-      if (leaves.length === 0) throw error;
+      if (!opts.tolerateBrokenSiblings) throw error;
+      rethrowUnlessBrokenNodes(error);
       logger.warn({ parentUid }, 'some folder children could not be loaded');
     }
   }
