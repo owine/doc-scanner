@@ -37,6 +37,7 @@ export function SettingsScreen({ email, documents = documentsApi, onBack, onLogg
   const [refreshed, setRefreshed] = useState(false);
   // The threshold is edited as text: a number-bound input rewrites "0." to "0"
   // on every render, so a decimal could not be typed.
+  const [signOutError, setSignOutError] = useState<string | null>(null);
   const [thresholdText, setThresholdText] = useState('');
 
   useEffect(() => {
@@ -83,9 +84,15 @@ export function SettingsScreen({ email, documents = documentsApi, onBack, onLogg
   }
 
   async function logout() {
-    // Signed out locally either way: a failed request leaves at worst a
-    // server session that expires on its own.
-    await api.logout().catch(() => {});
+    setSignOutError(null);
+    try {
+      await api.logout();
+    } catch {
+      // The server keeps the live session until it restarts, so leaving the
+      // screen now would look signed out while it is not.
+      setSignOutError('Could not sign out. Check your connection and try again.');
+      return;
+    }
     onLoggedOut();
   }
 
@@ -213,6 +220,9 @@ export function SettingsScreen({ email, documents = documentsApi, onBack, onLogg
         <button class="btn btn-secondary" onClick={() => void logout()}>
           Sign out
         </button>
+        <p role="status" class="error-text">
+          {signOutError}
+        </p>
       </div>
     </main>
   );

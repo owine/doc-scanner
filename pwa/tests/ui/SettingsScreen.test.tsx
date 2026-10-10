@@ -86,6 +86,14 @@ describe('SettingsScreen', () => {
     await waitFor(() => expect(onLoggedOut).toHaveBeenCalled());
   });
 
+  it('stays signed in and says so when sign-out fails', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('offline')));
+    const { onLoggedOut } = setup();
+    fireEvent.click(await screen.findByRole('button', { name: /sign out/i }));
+    expect(await screen.findByText('Could not sign out. Check your connection and try again.')).toBeInTheDocument();
+    expect(onLoggedOut).not.toHaveBeenCalled();
+  });
+
   it('goes back', async () => {
     const { onBack } = setup();
     fireEvent.click(await screen.findByRole('button', { name: /back/i }));
