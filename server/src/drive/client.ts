@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import {
   ProtonDriveClient,
   NullFeatureFlagProvider,
+  NodeType,
   type ProtonDriveTelemetry,
   type Logger,
   type NodeEntity,
@@ -61,6 +62,11 @@ export interface UploadResult {
   name: string;
 }
 
+export interface UploadOptions {
+  /** Folder to upload into; defaults to the root of My files. */
+  parentFolderUid?: string;
+}
+
 const NOOP_LOGGER: Logger = {
   debug: () => {},
   info: () => {},
@@ -94,7 +100,10 @@ function toHost(baseUrl: string): string {
  * the OpenPGP crypto module, and exposes the narrow Phase 2 surface:
  *
  *   - listRoot()              — list children of "My files" root
- *   - uploadFile(name, bytes) — upload a single Uint8Array as a new file
+ *   - uploadFile(name, bytes) — upload a single Uint8Array as a new file,
+ *                               into the root or a given folder
+ *   - findChildFolder / createFolder — resolve or create a folder by name
+ *   - findFileBySha1()        — find an already-uploaded file in a folder
  *   - clearCaches()           — drop persisted state on logout
  *
  * Construction is cheap; the adapters do the heavy lifting lazily.
@@ -162,21 +171,26 @@ export class DriveClient {
     };
   }
 
-  async uploadFile(name: string, bytes: Uint8Array, mimeType: string): Promise<UploadResult> {
+  async uploadFile(
+    name: string,
+    bytes: Uint8Array,
+    mimeType: string,
+    opts: UploadOptions = {},
+  ): Promise<UploadResult> {
     // Failures are reported by stage (a failed upload is a lost document).
     // The name is passed as sensitive so it is redacted wherever the SDK
     // echoes it; the bytes are never handed to the reporter at all.
-    const { root, availableName } = await reportingDriveFailure('folder-lookup', async () => {
-      const root = await this.sdk.getMyFilesRootFolder();
+    const { parentUid, availableName } = await reportingDriveFailure('folder-lookup', async () => {
+      const parentUid = opts.parentFolderUid ?? (await this.sdk.getMyFilesRootFolder()).uid;
       // `getFileUploader` rejects outright when the name is taken, so resolve
       // a free name first ("scan.pdf" -> "scan (1).pdf") instead of surfacing
       // a collision as an upload failure.
-      const availableName = await this.sdk.getAvailableName(root.uid, name);
-      return { root, availableName };
+      const availableName = await this.sdk.getAvailableName(parentUid, name);
+      return { parentUid, availableName };
     }, [name]);
 
     const { nodeUid } = await reportingDriveFailure('upload', async () => {
-      const uploader = await this.sdk.getFileUploader(root.uid, availableName, {
+      const uploader = await this.sdk.getFileUploader(parentUid, availableName, {
         mediaType: mimeType,
         expectedSize: bytes.byteLength,
         // We hold the whole buffer, so let the SDK verify what it uploaded
@@ -208,6 +222,46 @@ export class DriveClient {
     }
 
     return { nodeUid, driveUrl, name: availableName };
+  }
+
+  /** A folder's children whose names decrypt; trashed nodes are skipped. */
+  private async *children(parentUid: string): AsyncGenerator<NodeEntity> {
+    const uids: string[] = [];
+    for await (const uid of this.sdk.iterateFolderChildrenNodeUids(parentUid)) uids.push(uid);
+    if (uids.length === 0) return;
+    for await (const n of this.sdk.iterateNodes(uids)) {
+      if ('uid' in n && !n.trashTime && n.name.ok) yield n;
+    }
+  }
+
+  /** The uid of `parentUid`'s child folder called `name`, if there is one. */
+  async findChildFolder(parentUid: string, name: string): Promise<string | null> {
+    return reportingDriveFailure('folder-lookup', async () => {
+      for await (const n of this.children(parentUid)) {
+        if (n.type === NodeType.Folder && nodeName(n) === name) return n.uid;
+      }
+      return null;
+    }, [name]);
+  }
+
+  /** Creates a folder; the SDK throws if the name is taken, so look it up first. */
+  async createFolder(parentUid: string, name: string): Promise<string> {
+    return reportingDriveFailure('folder-create', async () => (await this.sdk.createFolder(parentUid, name)).uid, [name]);
+  }
+
+  /**
+   * A file in `parentUid` whose claimed SHA-1 matches: how filing tells,
+   * after a crash, whether its upload already happened.
+   */
+  async findFileBySha1(parentUid: string, sha1: string): Promise<{ uid: string; name: string } | null> {
+    return reportingDriveFailure('folder-lookup', async () => {
+      for await (const n of this.children(parentUid)) {
+        if (n.type === NodeType.File && n.activeRevision?.claimedDigests?.sha1 === sha1) {
+          return { uid: n.uid, name: nodeName(n) ?? '' };
+        }
+      }
+      return null;
+    });
   }
 
   /** Every folder in My files with its files; see folder-tree.ts. */
