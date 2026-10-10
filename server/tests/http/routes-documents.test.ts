@@ -312,6 +312,37 @@ describe('approve', () => {
     expect(pipeline.repo.get(doc.id)?.state).toBe('needs_review');
   });
 
+  it('refuses an as-suggested approval into a folder now on the never-file-here list, but allows an explicit pick', async () => {
+    const { app, cookie, pipeline } = await setup();
+    pipeline.folderCache.save(TREE, new Date());
+    pipeline.settings.update({ excludePaths: ['/Bills'] });
+    const doc = inReview(pipeline);
+    const res = await approve(app, cookie, doc.id);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'excluded_folder' });
+    expect(pipeline.repo.get(doc.id)?.state).toBe('needs_review');
+    // The user chose it themselves: that overrides the list.
+    expect((await approve(app, cookie, doc.id, JSON.stringify({ folder: { kind: 'existing', linkId: 'BILLS' } }))).status).toBe(200);
+  });
+
+  it('refuses an as-suggested new folder under a never-file-here folder', async () => {
+    const { app, cookie, pipeline } = await setup();
+    pipeline.folderCache.save(TREE, new Date());
+    pipeline.settings.update({ excludePaths: ['/Bills'] });
+    const doc = pipeline.repo.insert({ source: 'picker', originalName: 'a.pdf', mime: 'application/pdf', size: 1, sha256: 'x1', sourceContext: null });
+    pipeline.repo.transition(doc.id, 'received', 'needs_review', {
+      analysis: { ...ANALYSIS, folder: { kind: 'new', parentLinkId: 'BILLS', parentPath: '/Bills', name: 'Water' } },
+    });
+    const res = await approve(app, cookie, doc.id);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'excluded_folder' });
+    // A new folder whose own path is excluded is refused too.
+    pipeline.settings.update({ excludePaths: ['/Bills/Water'] });
+    expect(await (await approve(app, cookie, doc.id)).json()).toEqual({ error: 'excluded_folder' });
+    pipeline.settings.update({ excludePaths: ['/Archive'] });
+    expect((await approve(app, cookie, doc.id)).status).toBe(200);
+  });
+
   it('checks a suggested new folder against the current tree too', async () => {
     const { app, cookie, pipeline } = await setup();
     pipeline.folderCache.save(TREE.filter((f) => f.linkId !== 'BILLS'), new Date());

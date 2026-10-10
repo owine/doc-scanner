@@ -14,6 +14,7 @@ export interface ReviewCardProps {
 
 const APPROVE_ERRORS: Record<string, string> = {
   unknown_folder: 'That folder no longer exists in Drive. Pick another.',
+  excluded_folder: 'That folder is on your never-file-here list. Pick another.',
   folders_not_loaded: 'The folder list has not loaded from Drive yet. Try again in a moment.',
   name_required: 'Give the document a name.',
   folder_required: 'Pick a folder.',

@@ -79,6 +79,13 @@ describe('ReviewCard', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Approve' })).toBeEnabled());
   });
 
+  it('explains a suggested folder that is now on the never-file-here list', async () => {
+    renderCard(makeDoc(), { onApprove: vi.fn().mockRejectedValue(new ApiError('x', 400, 'excluded_folder')) });
+    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('That folder is on your never-file-here list. Pick another.');
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Approve' })).toBeEnabled());
+  });
+
   it('explains a document that no longer exists', async () => {
     renderCard(makeDoc(), { onApprove: vi.fn().mockRejectedValue(new ApiError('x', 404, 'not_found')) });
     fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
