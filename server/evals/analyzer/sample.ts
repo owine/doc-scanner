@@ -3,7 +3,7 @@
 //
 //   PROTON_EMAIL=... PROTON_PASSWORD=... [PROTON_TOTP=123456] \
 //     pnpm --filter @doc-scanner/server run eval:analyzer:sample [--n 40] [--seed 1] \
-//       [--exclude /Archive --exclude '/Vault/z Past'] [--since 2024-01-01] [--reuse-tree | --dry-run]
+//       [--exclude /Some/Archive ...] [--since 2024-01-01] [--reuse-tree | --dry-run]
 //
 // Logs in once, snapshots the folder tree, samples documents stratified across
 // folders, and downloads them. Everything lands under the flow directory,
@@ -32,8 +32,9 @@ const { values: args } = parseArgs({
     n: { type: 'string', default: '40' },
     seed: { type: 'string', default: '1' },
     flow: { type: 'string', default: DEFAULT_FLOW },
-    // "Never file here" folders: not sampled, and hidden from the model.
-    exclude: { type: 'string', multiple: true, default: ['/Archive', '/Vault/z Past'] },
+    // "Never file here" folders (an archive, closed projects): not sampled,
+    // and hidden from the model. Repeat the flag for each folder path.
+    exclude: { type: 'string', multiple: true, default: [] },
     // Recent documents reflect current folders and naming conventions.
     since: { type: 'string', default: '2024-01-01' },
     'per-folder': { type: 'string', default: '3' },
