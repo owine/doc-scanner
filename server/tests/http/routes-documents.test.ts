@@ -7,7 +7,8 @@ import { createApp } from '../../src/http/server.js';
 import { createTestDb } from '../helpers/test-db.js';
 import type { ProtonAuth } from '../../src/auth/srp.js';
 import { _resetSids } from '../../src/http/middleware.js';
-import { _resetLiveSessions, type LiveSession } from '../../src/auth/live-session.js';
+import { _resetLiveSessions, registerLiveSession, type LiveSession } from '../../src/auth/live-session.js';
+import type { DriveClient } from '../../src/drive/client.js';
 import { MailboxSecret } from '../../src/auth/secrets/mailbox-password.js';
 import type { DecryptedUserKey } from '../../src/auth/keys.js';
 import { createPipeline, type Pipeline } from '../../src/documents/pipeline.js';
@@ -394,5 +395,72 @@ describe('intake', () => {
     const res = await send(app, cookie, new File(['not really a pdf'], 'statement.pdf', { type: '' }));
     const { id } = (await res.json()) as { id: string };
     expect(pipeline.repo.get(id)?.mime).toBe('application/pdf');
+  });
+});
+
+describe('restore and retry', () => {
+  const post = (app: App, cookie: string, id: string, action: string) =>
+    app.request(`/api/documents/${id}/${action}`, { method: 'POST', headers: { cookie } });
+
+  it('404 an unknown document', async () => {
+    const { app, cookie } = await setup();
+    for (const action of ['restore', 'retry']) {
+      const res = await post(app, cookie, 'nope', action);
+      expect(res.status).toBe(404);
+      expect(await res.json()).toEqual({ error: 'not_found' });
+    }
+  });
+
+  it('restores into review with a fresh slate', async () => {
+    const { app, cookie, pipeline } = await setup();
+    const doc = inReview(pipeline);
+    pipeline.repo.transition(doc.id, 'needs_review', 'failed', { error: 'boom', attempts: 3 });
+    expect((await post(app, cookie, doc.id, 'discard')).status).toBe(200);
+    expect((await post(app, cookie, doc.id, 'restore')).status).toBe(200);
+    expect(pipeline.repo.get(doc.id)).toMatchObject({ state: 'needs_review', reviewReason: 'restored after discard', error: null, attempts: 0 });
+  });
+
+  it('restores an unanalysed document without a review reason', async () => {
+    const { app, cookie, pipeline } = await setup();
+    const doc = pipeline.repo.insert({ source: 'picker', originalName: 'a.pdf', mime: 'application/pdf', size: 1, sha256: 's', sourceContext: null });
+    pipeline.repo.transition(doc.id, 'received', 'failed', { error: 'boom', attempts: 3, reviewReason: 'stale' });
+    expect((await post(app, cookie, doc.id, 'discard')).status).toBe(200);
+    expect((await post(app, cookie, doc.id, 'restore')).status).toBe(200);
+    expect(pipeline.repo.get(doc.id)).toMatchObject({ state: 'received', reviewReason: null, error: null, attempts: 0 });
+  });
+});
+
+describe('folder refresh', () => {
+  it('walks Drive, caches the tree and analyses what was waiting for it', async () => {
+    const { app, cookie, pipeline, analyze } = await setup({ liveSession: walking(async () => TREE) });
+    const doc = pipeline.repo.insert({ source: 'picker', originalName: 'a.txt', mime: 'text/plain', size: 9, sha256: 'w', sourceContext: null });
+    pipeline.inbox.put(doc.id, 'original', new TextEncoder().encode('Northwind'));
+    // Parked as the analyze stage parks it when no tree has been walked.
+    pipeline.repo.transition(doc.id, 'received', 'received', { nextAttemptAt: new Date(Date.now() + 3600_000) });
+    const res = await app.request('/api/folders/refresh', { method: 'POST', headers: { cookie } });
+    expect(res.status).toBe(200);
+    expect(pipeline.folderCache.load()?.tree.map((f) => f.path)).toEqual(TREE.map((f) => f.path));
+    expect(analyze).toHaveBeenCalledTimes(1);
+    await pipeline.worker.wake(); // let the drain finish before the database closes
+    expect(pipeline.repo.get(doc.id)).toMatchObject({ state: 'needs_review', reviewReason: 'auto-filing is off' });
+  });
+});
+
+describe('pipeline', () => {
+  it('subscribes to logins once however often it is started', async () => {
+    const { pipeline } = await setup();
+    const onLogin = vi.spyOn(pipeline.worker, 'onLogin').mockResolvedValue();
+    pipeline.start();
+    pipeline.start();
+    pipeline.stop();
+    registerLiveSession({
+      sid: 'later',
+      session: { uid: 'u', accessToken: 'a', refreshToken: 'r', email: 'e@x.test' },
+      mailboxSecret: new MailboxSecret(new Uint8Array([0])),
+      decryptedKeys: keys,
+      driveClient: {} as DriveClient,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(onLogin).not.toHaveBeenCalled();
   });
 });

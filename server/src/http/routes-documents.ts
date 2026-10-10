@@ -206,17 +206,27 @@ export function documentRoutes(deps: { store: SessionStore; pipeline: Pipeline }
 
   r.post('/:id/restore', (c) => {
     const doc = repo.get(c.req.param('id'));
-    if (!doc || doc.state !== 'discarded') return c.json({ error: 'not_discarded' }, 409);
+    if (!doc) return c.json({ error: 'not_found' }, 404);
+    if (doc.state !== 'discarded') return c.json({ error: 'not_discarded' }, 409);
     const to: DocumentState = doc.analysis ? 'needs_review' : 'received';
-    repo.transition(doc.id, 'discarded', to, { discardedAt: null, reviewReason: 'restored after discard', nextAttemptAt: new Date() });
+    const moved = repo.transition(doc.id, 'discarded', to, {
+      discardedAt: null,
+      reviewReason: to === 'needs_review' ? 'restored after discard' : null,
+      error: null,
+      attempts: 0,
+      nextAttemptAt: new Date(),
+    });
+    if (!moved) return c.json({ error: 'conflict' }, 409);
     void worker.wake();
     return c.json(toView(repo.get(doc.id)!));
   });
 
   r.post('/:id/retry', (c) => {
     const doc = repo.get(c.req.param('id'));
-    if (!doc || doc.state !== 'failed') return c.json({ error: 'not_failed' }, 409);
-    repo.transition(doc.id, 'failed', restartState(doc), { attempts: 0, error: null, nextAttemptAt: new Date() });
+    if (!doc) return c.json({ error: 'not_found' }, 404);
+    if (doc.state !== 'failed') return c.json({ error: 'not_failed' }, 409);
+    const moved = repo.transition(doc.id, 'failed', restartState(doc), { attempts: 0, error: null, nextAttemptAt: new Date() });
+    if (!moved) return c.json({ error: 'conflict' }, 409);
     void worker.wake();
     return c.json(toView(repo.get(doc.id)!));
   });
@@ -238,6 +248,9 @@ export function folderRoutes(deps: { store: SessionStore; pipeline: Pipeline }) 
       captureDriveFailure(err, 'folder-lookup');
       return c.json({ error: 'refresh_failed' }, 502);
     }
+    // Analyses parked for want of a tree can run now.
+    deps.pipeline.repo.makeDueNow('received');
+    void deps.pipeline.worker.wake();
     return c.json({ ok: true });
   });
   r.get('/', (c) => {

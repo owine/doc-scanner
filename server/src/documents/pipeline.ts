@@ -65,6 +65,7 @@ export function createPipeline(o: PipelineOptions): Pipeline {
     folderCache,
     worker,
     start() {
+      if (unsubscribe) return;
       worker.start();
       unsubscribe = onLiveSessionRegistered(() => {
         worker.onLogin().catch((err: unknown) => logger.error({ errName: errorName(err) }, 'document worker failed after login'));
