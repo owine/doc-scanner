@@ -2897,6 +2897,16 @@ git commit -m "feat(documents): worker with retries, backoff, login hook and pur
 - Modify: `server/src/http/server.ts`
 - Test: `server/tests/http/routes-documents.test.ts`
 
+> **Review outcome (2026-10-09):** the code below is what landed first (813a0a9). Review fixes then changed `routes-documents.ts`, `extension.ts`, `repo.ts`, `pipeline.ts` and `server.ts`; the committed code is authoritative where it differs from the blocks below. The fixes:
+> - **Approve:** only a blank body means "as suggested"; malformed JSON → 400. The folder (chosen or suggested) is re-resolved against the current tree; if it's gone → `unknown_folder`.
+> - **Errors:** an `app.onError` logs error types only. A failed refresh → 502, and the walk reports itself as `folder-walk`.
+> - **Intake MIME:** normalised (parameters stripped; then magic bytes; then the stored name).
+> - **Arrival text:** control and bidi characters stripped, length capped, short extension kept.
+> - **Duplicates:** re-uploading a failed document restores its missing original; a re-upload cancels a pending discard.
+> - **Restore/retry:** 404 for an unknown id, 409 on a lost transition. Restore clears stale fields.
+> - **Refresh:** a successful refresh wakes parked analyses.
+> - **`pipeline.start()`:** idempotent.
+
 > **Routing trap:** never mount these routes as one sub-app at `/api` with `use('*', …)`. Hono would apply that sub-app's auth guard to **every** `/api/*` request, including `/api/auth/login`, and nobody could log in. Mount each resource at its own prefix, as `driveRoutes` does at `/api/drive`.
 
 - [ ] **Step 1: Write `pipeline.ts`** (exercised by the route tests)
@@ -3531,7 +3541,13 @@ git commit -m "feat(server): run the document pipeline"
 |---|---|---|
 | Document worker | A document reaches `failed` after 3 attempts at a stage. Its original and chosen names are redacted from the event. | `document.stage: analyze \| prepare \| file` |
 
-and add `folder-create` to the documented `drive.operation` values.
+and add rows for the three `drive.operation` values this slice introduced, in the same style as the existing `DriveClient` rows:
+
+| Where | When | Tags |
+|---|---|---|
+| `DriveClient.createFolder` | Failure creating a folder the user approved. A name clash is not reported; the document goes back to review. | `drive.operation: folder-create` |
+| `DriveClient.walkFolderTree` | Failure listing My files, from any caller: the login hook, the 6-hourly timer, the analyze stage, filing after a folder is created, or `POST /api/folders/refresh`. While no tree is cached, every analysis waits on this. | `drive.operation: folder-walk` |
+| `DriveClient.downloadFile` | Failure downloading or verifying a file. | `drive.operation: download` |
 
 - [ ] **Step 2: `CLAUDE.md`** — in Architecture → Server, add bullets for `analyze/` (the analyzer; structured outputs; short folder IDs), `documents/` (repo, inbox store, stages, worker, pipeline; compare-and-set transitions; working states re-run after a crash), `settings/` (env defaults, saved overrides), `crypto/at-rest.ts` (per-purpose HKDF subkeys). In Required environment, list `ANALYZER_MODEL`, `ANALYZER_EFFORT`, `AUTO_FILE_THRESHOLD`, `AUTO_FILE_ENABLED` with defaults. Mention `server/evals/analyzer/` and that `--approve-harness` is the user's step.
 
