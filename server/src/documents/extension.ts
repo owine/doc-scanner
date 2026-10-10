@@ -5,8 +5,10 @@ const BY_TYPE: Record<string, string> = {
   'image/webp': '.webp',
   'image/gif': '.gif',
   'image/heic': '.heic',
+  'image/heif': '.heif',
   'image/tiff': '.tif',
   'text/plain': '.txt',
+  'text/html': '.html',
   'text/csv': '.csv',
   'text/markdown': '.md',
   'application/json': '.json',
@@ -17,8 +19,8 @@ const BY_TYPE: Record<string, string> = {
 
 /** The extension a filed document gets: from its (prepared) type, else its original name, else none. */
 export function extensionFor(mime: string, originalName: string | null): string {
-  const known = BY_TYPE[mime];
+  const known = BY_TYPE[mime.split(';')[0]!.trim().toLowerCase()];
   if (known) return known;
-  const dot = originalName?.lastIndexOf('.') ?? -1;
-  return originalName && dot > 0 ? originalName.slice(dot).toLowerCase() : '';
+  const m = originalName?.match(/(?<=[^.])\.([\p{L}\p{N}]{1,10})$/u);
+  return m ? `.${m[1]!.toLowerCase()}` : '';
 }
