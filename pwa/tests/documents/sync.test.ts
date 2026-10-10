@@ -102,10 +102,53 @@ describe('DocumentSync', () => {
   it('calls onUnauthorized and stops on a 401', async () => {
     const onUnauthorized = vi.fn();
     const list = vi.fn().mockRejectedValue(new ApiError('not_authenticated', 401, 'not_authenticated'));
-    const sync = new DocumentSync({ list, onUnauthorized });
+    vi.useFakeTimers();
+    const sync = new DocumentSync({ list, onUnauthorized, intervalMs: 1000 });
+    try {
+      sync.start();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(onUnauthorized).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(list).toHaveBeenCalledTimes(1);
+    } finally {
+      sync.stop();
+    }
+  });
+
+  it('runs one timer loop after stop and start with a poll in flight', async () => {
+    vi.useFakeTimers();
+    let release!: (v: { documents: never[]; cursor: number }) => void;
+    const list = vi.fn()
+      .mockReturnValueOnce(new Promise((r) => { release = r; }))
+      .mockResolvedValue({ documents: [], cursor: 0 });
+    const sync = new DocumentSync({ list, intervalMs: 1000 });
+    try {
+      sync.start();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(list).toHaveBeenCalledTimes(1);
+      sync.stop();
+      sync.start();
+      release({ documents: [], cursor: 0 });
+      await vi.advanceTimersByTimeAsync(0);
+      const before = list.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(list).toHaveBeenCalledTimes(before + 1);
+    } finally {
+      sync.stop();
+    }
+  });
+
+  it('does not poll on visibility after stop', async () => {
+    const list = vi.fn().mockResolvedValue({ documents: [], cursor: 0 });
+    const sync = new DocumentSync({ list });
+    await sync.poll();
     sync.start();
-    await vi.waitFor(() => expect(onUnauthorized).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(list).toHaveBeenCalledTimes(2));
+    await new Promise((r) => setTimeout(r, 0));
     sync.stop();
+    setVisibility('visible');
+    await Promise.resolve();
+    expect(list).toHaveBeenCalledTimes(2);
   });
 
   it('reset forgets everything', async () => {
