@@ -496,6 +496,7 @@ describe('SettingsStore', () => {
   it('rejects invalid values without saving anything', () => {
     const s = store();
     expect(() => s.update({ autoFileThreshold: 2 })).toThrow();
+    expect(() => s.update({ autoFileThreshold: 0.875 })).toThrow();
     expect(() => s.update({ excludePaths: ['relative/path'] })).toThrow();
     expect(s.get()).toEqual(defaults);
   });
@@ -525,6 +526,7 @@ describe('SettingsStore', () => {
 
 ```ts
 import { z } from 'zod';
+import { autoFileThresholdSchema } from '../config.js';
 import type { DB } from '../db.js';
 
 export interface EffectiveSettings {
@@ -540,7 +542,8 @@ const PatchSchema = z
   .object({
     model: z.string().min(1),
     effort: z.enum(['low', 'medium', 'high']),
-    autoFileThreshold: z.number().min(0).max(1),
+    // Same rule as the env var: 0..1, at most two decimals (the prompt prints it with toFixed(2)).
+    autoFileThreshold: autoFileThresholdSchema,
     autoFileEnabled: z.boolean(),
     excludePaths: z.array(z.string().regex(/^\/.+/, 'must be an absolute folder path')),
   })
@@ -3430,12 +3433,30 @@ and add `folder-create` to the documented `drive.operation` values.
 
 - [ ] **Step 2: `CLAUDE.md`** — in Architecture → Server, add bullets for `analyze/` (the analyzer; structured outputs; short folder IDs), `documents/` (repo, inbox store, stages, worker, pipeline; compare-and-set transitions; working states re-run after a crash), `settings/` (env defaults, saved overrides), `crypto/at-rest.ts` (per-purpose HKDF subkeys). In Required environment, list `ANALYZER_MODEL`, `ANALYZER_EFFORT`, `AUTO_FILE_THRESHOLD`, `AUTO_FILE_ENABLED` with defaults. Mention `server/evals/analyzer/` and that `--approve-harness` is the user's step.
 
-- [ ] **Step 3: `README.md`** — env-var table rows for the four new variables; replace the `ANTHROPIC_API_KEY` row's "nothing on main calls the Claude API yet" with "Used by the document analyzer (Claude Haiku 5.5 by default; about $0.003 per document)".
+- [ ] **Step 3: `compose.yml` and `.env.example`** — the container only sees variables `compose.yml` forwards. Add to the server's `environment:` block:
 
-- [ ] **Step 4: Commit**
+```yaml
+      ANALYZER_MODEL: ${ANALYZER_MODEL:-claude-haiku-5-5}
+      ANALYZER_EFFORT: ${ANALYZER_EFFORT:-medium}
+      AUTO_FILE_THRESHOLD: ${AUTO_FILE_THRESHOLD:-0.80}
+      AUTO_FILE_ENABLED: ${AUTO_FILE_ENABLED:-false}
+```
+
+and to `.env.example`, with a comment that auto-filing stays off until real use shows the analyzer's unchanged-approval rate is high enough at the threshold:
+
+```
+ANALYZER_MODEL=claude-haiku-5-5
+ANALYZER_EFFORT=medium
+AUTO_FILE_THRESHOLD=0.80
+AUTO_FILE_ENABLED=false
+```
+
+- [ ] **Step 4: `README.md`** — env-var table rows for the four new variables (note `ANALYZER_EFFORT` is limited to low/medium/high as a cost guard); replace the `ANTHROPIC_API_KEY` row's "nothing on main calls the Claude API yet" with "Used by the document analyzer (Claude Haiku 5.5 by default; about $0.003 per document)".
+
+- [ ] **Step 5: Commit**
 
 ```bash
-git add docs/observability.md CLAUDE.md README.md
+git add docs/observability.md CLAUDE.md README.md compose.yml .env.example
 git commit -m "docs: document pipeline, analyzer settings and failure reporting"
 ```
 
