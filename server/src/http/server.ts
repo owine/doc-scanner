@@ -9,6 +9,8 @@ import { ProtonAuth } from '../auth/srp.js';
 import { ProtonApi } from '../auth/proton-api.js';
 import { authRoutes } from './routes-auth.js';
 import { driveRoutes } from './routes-drive.js';
+import { documentRoutes, folderRoutes, settingsRoutes } from './routes-documents.js';
+import type { Pipeline } from '../documents/pipeline.js';
 
 export interface AppDeps {
   db: DB;
@@ -18,6 +20,7 @@ export interface AppDeps {
   appVersion?: string;
   secureCookie?: boolean;
   pwaDistPath?: string;
+  pipeline?: Pipeline;
 }
 
 export function createApp(deps: AppDeps): Hono {
@@ -39,6 +42,12 @@ export function createApp(deps: AppDeps): Hono {
   app.get('/api/health', (c) => c.json({ ok: true }));
   app.route('/api/auth', authRoutes({ store, protonAuth, db: deps.db, encryptionKey: deps.encryptionKey, appVersion: deps.appVersion, secureCookie: deps.secureCookie }));
   app.route('/api/drive', driveRoutes({ db: deps.db, store }));
+  if (deps.pipeline) {
+    const pipelineDeps = { store, pipeline: deps.pipeline };
+    app.route('/api/documents', documentRoutes(pipelineDeps));
+    app.route('/api/folders', folderRoutes(pipelineDeps));
+    app.route('/api/settings', settingsRoutes(pipelineDeps));
+  }
 
   if (deps.pwaDistPath) {
     const root = deps.pwaDistPath;
