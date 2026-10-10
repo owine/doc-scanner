@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { autoFileThresholdSchema } from '../config.js';
 import type { DB } from '../db.js';
+import { logger } from '../logger.js';
 
 export interface EffectiveSettings {
   model: string;
@@ -11,17 +12,27 @@ export interface EffectiveSettings {
   excludePaths: string[];
 }
 
-const PatchSchema = z
-  .object({
-    model: z.string().min(1),
-    effort: z.enum(['low', 'medium', 'high']),
-    // Same rule as the env var: 0..1, at most two decimals (the prompt prints it with toFixed(2)).
-    autoFileThreshold: autoFileThresholdSchema,
-    autoFileEnabled: z.boolean(),
-    excludePaths: z.array(z.string().regex(/^\/.+/, 'must be an absolute folder path')),
-  })
-  .partial()
-  .strict();
+// One entry of "never file here": absolute, no empty segments or control characters,
+// no trailing slash. The root is rejected because excluding it would exclude everything.
+const excludePathSchema = z
+  .string()
+  .trim()
+  .regex(/^\/.*$/, 'must be an absolute folder path')
+  .refine((p) => !/[\u0000-\u001f\u007f]/.test(p), 'must not contain control characters')
+  .transform((p) => (p.length > 1 && p.endsWith('/') ? p.slice(0, -1) : p))
+  .refine((p) => p !== '/', 'must not be the root')
+  .refine((p) => !p.slice(1).split('/').some((seg) => seg === ''), 'must not have empty segments');
+
+const FieldsSchema = z.object({
+  model: z.string().trim().min(1),
+  effort: z.enum(['low', 'medium', 'high']),
+  // Same rule as the env var: 0..1, at most two decimals (the prompt prints it with toFixed(2)).
+  autoFileThreshold: autoFileThresholdSchema,
+  autoFileEnabled: z.boolean(),
+  excludePaths: z.array(excludePathSchema).transform((a) => [...new Set(a)]),
+});
+const FIELDS = FieldsSchema.shape;
+const PatchSchema = FieldsSchema.partial().strict();
 
 type Key = keyof EffectiveSettings;
 
@@ -41,17 +52,24 @@ export class SettingsStore {
 
   get(): EffectiveSettings {
     const rows = this.db
-      .prepare(`SELECT key, value FROM app_settings WHERE key LIKE 'filing.%'`)
+      .prepare(`SELECT key, value FROM app_settings WHERE substr(key, 1, 7) = 'filing.'`)
       .all() as { key: string; value: string }[];
     const saved: Record<string, unknown> = {};
     for (const r of rows) {
       const name = r.key.slice(PREFIX.length);
-      if (name in this.defaults) saved[name] = JSON.parse(r.value);
+      if (!Object.hasOwn(FIELDS, name)) continue;
+      try {
+        const parsed = FIELDS[name as Key].safeParse(JSON.parse(r.value));
+        if (!parsed.success) throw new Error('invalid');
+        saved[name] = parsed.data;
+      } catch {
+        logger.warn({ key: r.key }, 'ignoring unreadable saved setting; using default');
+      }
     }
     return { ...this.defaults, ...(saved as Partial<EffectiveSettings>) };
   }
 
-  update(patch: Partial<EffectiveSettings>): EffectiveSettings {
+  update(patch: unknown): EffectiveSettings {
     const valid = PatchSchema.parse(patch);
     const upsert = this.db.prepare(
       'INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
@@ -61,7 +79,7 @@ export class SettingsStore {
       for (const [key, value] of Object.entries(valid)) upsert.run(PREFIX + key, JSON.stringify(value));
       this.db.exec('COMMIT');
     } catch (err) {
-      this.db.exec('ROLLBACK');
+      if (this.db.isTransaction) this.db.exec('ROLLBACK');
       throw err;
     }
     return this.get();

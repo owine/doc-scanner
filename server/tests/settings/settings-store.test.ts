@@ -40,7 +40,7 @@ describe('SettingsStore', () => {
 
   it('rejects a null threshold instead of coercing it to 0', () => {
     const s = store();
-    expect(() => s.update({ autoFileThreshold: null as unknown as number })).toThrow();
+    expect(() => s.update({ autoFileThreshold: null })).toThrow();
     expect(s.get()).toEqual(defaults);
   });
 
@@ -59,5 +59,47 @@ describe('SettingsStore', () => {
     s.update({ effort: 'low' });
     s.clear('effort');
     expect(s.get().effort).toBe('medium');
+  });
+
+  it('persists across a new store on the same db', () => {
+    const t = createTestDb();
+    cleanup = t.cleanup;
+    new SettingsStore(t.db, defaults).update({ effort: 'high' });
+    expect(new SettingsStore(t.db, defaults).get().effort).toBe('high');
+  });
+
+  it('saves nothing when any field of a mixed patch is invalid', () => {
+    const s = store();
+    expect(() => s.update({ effort: 'low', autoFileThreshold: 2 })).toThrow();
+    expect(s.get()).toEqual(defaults);
+  });
+
+  it('rejects unknown keys, __proto__ and wrongly typed values', () => {
+    const s = store();
+    expect(() => s.update({ foo: 1 })).toThrow();
+    expect(() => s.update(JSON.parse('{"__proto__":{"x":1}}'))).toThrow();
+    expect(() => s.update({ autoFileEnabled: 'true' })).toThrow();
+    expect(s.get()).toEqual(defaults);
+  });
+
+  it('normalises never-file-here paths', () => {
+    const s = store();
+    s.update({ excludePaths: ['/Archive/', ' /Archive ', '/Tax/2024'] });
+    expect(s.get().excludePaths).toEqual(['/Archive', '/Tax/2024']);
+    for (const bad of ['/', '//x', 'relative', '/a//b', '/a\nb', '']) {
+      expect(() => s.update({ excludePaths: [bad] })).toThrow();
+    }
+    expect(s.get().excludePaths).toEqual(['/Archive', '/Tax/2024']);
+  });
+
+  it('falls back to defaults for corrupt or unknown saved rows', () => {
+    const t = createTestDb();
+    cleanup = t.cleanup;
+    const ins = t.db.prepare('INSERT INTO app_settings (key, value) VALUES (?, ?)');
+    ins.run('filing.effort', '{bad');
+    ins.run('filing.autoFileEnabled', '"yes"');
+    ins.run('filing.constructor', '1');
+    ins.run('FILING.model', '"x"');
+    expect(new SettingsStore(t.db, defaults).get()).toEqual(defaults);
   });
 });
