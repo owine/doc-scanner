@@ -2613,6 +2613,24 @@ describe('DocumentWorker', () => {
     expect(h.repo.get(doc.id)?.state).toBe('filed');
   });
 
+  it('fails a document at once when its inbox blob is missing', async () => {
+    h = makeHarness();
+    const doc = h.add();
+    h.inbox.deleteAll(doc.id);
+    await new DocumentWorker(h.ctx).wake();
+    expect(h.repo.get(doc.id)).toMatchObject({ state: 'failed', attempts: MAX_ATTEMPTS });
+  });
+
+  it('sweeps orphaned inbox blobs: no row, or already filed', async () => {
+    h = makeHarness();
+    h.inbox.put('ghost123', 'original', new Uint8Array([1]));
+    const filed = h.add();
+    h.repo.transition(filed.id, 'received', 'filed');
+    const pending = h.add();
+    new DocumentWorker(h.ctx).purgeDiscarded();
+    expect(h.inbox.listIds().sort()).toEqual([pending.id].sort());
+  });
+
   it('purges documents discarded more than seven days ago, blobs included', async () => {
     h = makeHarness();
     const doc = h.add();
@@ -2639,6 +2657,7 @@ Note: the harness's `refreshFolderCache` mock is replaced by the worker's own (t
 import { logger } from '../logger.js';
 import type { DocumentStage } from '../observability/report.js';
 import type { PipelineDeps, StageContext } from './deps.js';
+import { InboxBlobMissingError } from './inbox-store.js';
 import { analyzeStage } from './stages/analyze.js';
 import { decideStage } from './stages/decide.js';
 import { fileStage } from './stages/file.js';
@@ -2727,7 +2746,8 @@ export class DocumentWorker {
   }
 
   private retryOrFail(doc: DocumentRow, err: unknown): void {
-    const attempts = doc.attempts + 1;
+    // A missing inbox blob can never come back: fail now instead of retrying.
+    const attempts = err instanceof InboxBlobMissingError ? MAX_ATTEMPTS : doc.attempts + 1;
     const error = err instanceof Error ? err.message : String(err);
     // The stage may have moved the row (received → analyzing) before throwing.
     const current = this.d.repo.get(doc.id);
@@ -2778,6 +2798,13 @@ export class DocumentWorker {
     for (const id of this.d.repo.discardedBefore(new Date(this.d.now().getTime() - DISCARD_RETENTION_MS))) {
       this.d.inbox.deleteAll(id);
       this.d.repo.delete(id);
+    }
+    // Orphans: blobs whose row is gone (a failed intake) or already filed (a
+    // crash between the filed transition and the inbox delete). The trust
+    // boundary promises no document data outlives its filing.
+    for (const id of this.d.inbox.listIds()) {
+      const row = this.d.repo.get(id);
+      if (!row || row.state === 'filed') this.d.inbox.deleteAll(id);
     }
   }
 
