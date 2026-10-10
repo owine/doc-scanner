@@ -58,4 +58,35 @@ describe('FolderPicker', () => {
     render(<FolderPicker folders={folders()} allowNew={false} onChoose={() => {}} onCancel={() => {}} />);
     expect(screen.getByRole('searchbox', { name: /search folders/i })).toHaveFocus();
   });
+
+  it('Escape in the new-folder name closes only that form', () => {
+    const onCancel = vi.fn();
+    render(<FolderPicker folders={folders()} allowNew onChoose={() => {}} onCancel={onCancel} />);
+    const plus = screen.getByRole('button', { name: 'New folder in /Bills' });
+    fireEvent.click(plus);
+    fireEvent.keyDown(screen.getByRole('textbox', { name: /new folder name/i }), { key: 'Escape' });
+    expect(onCancel).not.toHaveBeenCalled();
+    expect(screen.queryByRole('textbox', { name: /new folder name/i })).toBeNull();
+    expect(plus).toHaveFocus();
+    expect(screen.getByRole('searchbox', { name: /search folders/i })).toBeInTheDocument();
+  });
+
+  it('re-focuses the name field when + is clicked again', () => {
+    render(<FolderPicker folders={folders()} allowNew onChoose={() => {}} onCancel={() => {}} />);
+    const plus = screen.getByRole('button', { name: 'New folder in /Bills' });
+    fireEvent.click(plus);
+    const input = screen.getByRole('textbox', { name: /new folder name/i });
+    expect(input).toHaveFocus();
+    plus.focus();
+    fireEvent.click(plus);
+    expect(screen.getByRole('textbox', { name: /new folder name/i })).toHaveFocus();
+  });
+
+  it('announces a load error and the loading state', () => {
+    const { unmount } = render(<FolderPicker folders={folders({ folders: null, error: 'Could not load the folder list.' })} allowNew={false} onChoose={() => {}} onCancel={() => {}} />);
+    expect(screen.getByRole('alert')).toHaveTextContent(/could not load/i);
+    unmount();
+    render(<FolderPicker folders={folders({ folders: null })} allowNew={false} onChoose={() => {}} onCancel={() => {}} />);
+    expect(screen.getByRole('status')).toHaveTextContent(/loading folders/i);
+  });
 });
