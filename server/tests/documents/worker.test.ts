@@ -246,6 +246,27 @@ describe('DocumentWorker', () => {
     expect(sensitive).toEqual(expect.arrayContaining(['statement.txt', 'Northwind Energy Sep 2026', '/Bills']));
   });
 
+  it('also redacts each folder path segment of three or more characters, once', async () => {
+    h = makeHarness();
+    h.drive.uploadFile.mockRejectedValue(new Error('network down'));
+    const doc = h.add();
+    h.repo.transition(doc.id, 'received', 'filing', {
+      analysis: { ...ANALYSIS, folder: { kind: 'existing', linkId: 'LAB', path: '/Health/Lab' } },
+      decision: { name: 'Lab results', folder: { kind: 'existing', linkId: 'DR', path: '/Health/Dr Patel/Al' } },
+    });
+    const w = new DocumentWorker(h.ctx);
+    for (let i = 0; i < MAX_ATTEMPTS; i++) {
+      await w.wake();
+      h.advance(10 * 60_000);
+    }
+    expect(h.report).toHaveBeenCalledTimes(1);
+    const sensitive = h.report.mock.calls[0][2] as string[];
+    expect(sensitive).toEqual(expect.arrayContaining(['/Health/Dr Patel/Al', '/Health/Lab', 'Health', 'Dr Patel', 'Lab']));
+    // Too short to redact without mangling unrelated text.
+    expect(sensitive).not.toContain('Al');
+    expect(sensitive.filter((v) => v === 'Health')).toHaveLength(1);
+  });
+
   it.each([
     ['BILLS', '/Bills', ['Northwind Energy', '/Bills']],
     ['ROOT', '/', ['Northwind Energy']],

@@ -28,9 +28,21 @@ function backoffMs(attempts: number): number {
 
 type Folder = NonNullable<DocumentRow['decision']>['folder'] | NonNullable<DocumentRow['analysis']>['folder'] | undefined;
 
+/**
+ * Shorter path segments are left alone: redacting "Tax" is fine, but "Al"
+ * would mangle unrelated text all over the event.
+ */
+const MIN_REDACTED_SEGMENT_CHARS = 3;
+
+/**
+ * A folder's full path(s) and new name, plus each path segment on its own:
+ * an error can name one folder of a path without the rest.
+ */
 function folderValues(f: Folder): string[] {
   if (!f) return [];
-  return f.kind === 'new' ? [f.parentPath, f.name] : [f.path];
+  const paths = f.kind === 'new' ? [f.parentPath] : [f.path];
+  const segments = paths.flatMap((p) => p.split('/')).filter((s) => s.length >= MIN_REDACTED_SEGMENT_CHARS);
+  return [...paths, ...(f.kind === 'new' ? [f.name] : []), ...segments];
 }
 
 /** Everything in a failure report that could name the user's documents or folders. */
