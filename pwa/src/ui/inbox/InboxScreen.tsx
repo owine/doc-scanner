@@ -104,7 +104,7 @@ export function InboxScreen({
         </div>
       </header>
 
-      {Boolean(error) && loaded && (
+      {Boolean(error) && loaded && docs.length > 0 && (
         <p class="warn" role="status">
           Can't reach the server. Showing what was last loaded.
         </p>
@@ -124,7 +124,7 @@ export function InboxScreen({
         {!loaded ? (
           <p class="muted">Loading…</p>
         ) : g.review.length === 0 ? (
-          <p class="muted">Nothing to review.</p>
+          <p class="muted">{error && docs.length === 0 ? "Can't reach the server." : 'Nothing to review.'}</p>
         ) : (
           g.review.map((d) => (
             <ReviewCard key={d.id} doc={d} folders={folders} onApprove={(b) => approve(d.id, b)} onDiscard={() => discard(d.id)} />

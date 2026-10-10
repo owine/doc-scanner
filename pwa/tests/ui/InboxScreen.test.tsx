@@ -158,6 +158,32 @@ describe('InboxScreen', () => {
     }
   });
 
+  it('says the server is unreachable instead of showing an empty inbox', async () => {
+    const sync = new DocumentSync({ list: vi.fn().mockResolvedValue({ documents: [], cursor: 0 }) });
+    sync.loaded = true;
+    sync.error = new Error('offline');
+    const api = { folders: vi.fn().mockResolvedValue({ walkedAt: NOW.toISOString(), folders: FOLDERS }), refreshFolders: vi.fn() } as unknown as DocumentsApi;
+    render(<InboxScreen sync={sync} documents={api} now={() => NOW} onScan={vi.fn()} onSavedScans={vi.fn()} onSettings={vi.fn()} onSignInAgain={vi.fn()} />);
+    expect(screen.getByText("Can't reach the server.")).toBeInTheDocument();
+    expect(screen.queryByText(/nothing to review/i)).toBeNull();
+    expect(screen.queryByText(/showing what was last loaded/i)).toBeNull();
+    await waitFor(() => expect(api.folders).toHaveBeenCalled());
+    await new Promise((r) => setTimeout(r, 20));
+  });
+
+  it('keeps the documents and warns when the server becomes unreachable', async () => {
+    const sync = new DocumentSync({ list: vi.fn().mockResolvedValue({ documents: [], cursor: 0 }) });
+    sync.loaded = true;
+    sync.upsert(makeDoc());
+    sync.error = new Error('offline');
+    const api = { folders: vi.fn().mockResolvedValue({ walkedAt: NOW.toISOString(), folders: FOLDERS }), refreshFolders: vi.fn() } as unknown as DocumentsApi;
+    render(<InboxScreen sync={sync} documents={api} now={() => NOW} onScan={vi.fn()} onSavedScans={vi.fn()} onSettings={vi.fn()} onSignInAgain={vi.fn()} />);
+    expect(screen.getByText(/showing what was last loaded/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument();
+    await waitFor(() => expect(api.folders).toHaveBeenCalled());
+    await new Promise((r) => setTimeout(r, 20));
+  });
+
   it('opens the scanner, settings and saved scans', async () => {
     const { props } = setup([]);
     fireEvent.click(screen.getByRole('button', { name: 'Scan' }));
