@@ -259,6 +259,26 @@ describe('InboxScreen', () => {
     await waitFor(() => expect(screen.getAllByText('Waiting for sign-in')).toHaveLength(2));
   });
 
+  it('does not report a failure when the read-back after a refusal fails, and polls instead', async () => {
+    const doc = makeDoc({ state: 'failed', error: 'Drive was unavailable' });
+    const { sync } = setup([doc], {
+      retry: vi.fn().mockRejectedValue(new ApiError('not allowed', 409, 'not_allowed')),
+      get: vi.fn().mockRejectedValue(new Error('network')),
+    });
+    const poll = vi.spyOn(sync, 'poll').mockResolvedValue();
+    fireEvent.click(within(screen.getByRole('region', { name: 'Failed' })).getByRole('button', { name: 'Retry' }));
+    await waitFor(() => expect(poll).toHaveBeenCalled());
+    expect(screen.queryByText(/failed, try again/i)).toBeNull();
+  });
+
+  it('forgets a document the server no longer has', async () => {
+    const doc = makeDoc({ state: 'discarded', discardedAt: '2026-10-08T12:00:00.000Z' });
+    setup([doc], { restore: vi.fn().mockRejectedValue(new ApiError('gone', 404, 'not_found')) });
+    fireEvent.click(within(screen.getByRole('region', { name: 'Discarded' })).getByRole('button', { name: 'Restore' }));
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Discarded' })).toBeNull());
+    expect(screen.queryByText(/failed, try again/i)).toBeNull();
+  });
+
   it('opens the scanner, settings and saved scans', async () => {
     const { props } = setup([]);
     fireEvent.click(screen.getByRole('button', { name: 'Scan' }));

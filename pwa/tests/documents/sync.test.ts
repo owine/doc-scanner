@@ -12,6 +12,21 @@ beforeEach(() => { setVisibility('visible'); });
 afterEach(() => { vi.useRealTimers(); });
 
 describe('DocumentSync', () => {
+  it('forgets a removed document, and emits only when something was removed', () => {
+    const sync = new DocumentSync({ list: vi.fn() });
+    const doc = makeDoc({ seq: 1 });
+    sync.upsert(doc);
+    const before = sync.all();
+    const seen = vi.fn();
+    sync.subscribe(seen);
+    sync.remove('nope');
+    expect(seen).not.toHaveBeenCalled();
+    expect(sync.all()).toBe(before);
+    sync.remove(doc.id);
+    expect(seen).toHaveBeenCalledTimes(1);
+    expect(sync.all()).toEqual([]);
+  });
+
   it('pulls pages until one is empty and advances the cursor', async () => {
     const a = makeDoc({ seq: 1 });
     const b = makeDoc({ seq: 2 });

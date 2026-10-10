@@ -54,6 +54,13 @@ export class DocumentSync {
     if (this.put(doc)) this.emit();
   }
 
+  /** Forgets a document the server no longer has. A purge doesn't bump seq, so no poll would ever drop it. */
+  remove(id: string): void {
+    if (!this.docs.delete(id)) return;
+    this.snapshot = null;
+    this.emit();
+  }
+
   poll(): Promise<void> {
     if (!this.inflight) {
       const p: Promise<void> = this.pull().finally(() => {

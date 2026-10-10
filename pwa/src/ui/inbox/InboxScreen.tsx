@@ -51,46 +51,54 @@ export function InboxScreen({
   const g = groupDocuments(docs, now());
 
   const approve = async (id: string, body: ApproveBody) => sync.upsert(await documents.approve(id, body));
-  // Read the document back: a poll already in flight may predate the discard.
-  const discard = async (id: string) => {
-    try {
-      await documents.discard(id);
-    } catch (err) {
-      await readBackIfRefused(id, err);
-      return;
-    }
-    // The discard has happened; failing to read it back must not report it as failed.
+  // Read the document back: a poll already in flight may predate the action.
+  // Failing to read it back must not report the action as failed.
+  const readBack = async (id: string) => {
     try {
       sync.upsert(await documents.get(id));
-    } catch {
-      // Best effort: this may join a poll already in flight, which can predate the discard.
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) {
+        sync.remove(id);
+        return;
+      }
+      // Best effort: this may join a poll already in flight, which can predate the change.
       void sync.poll();
     }
+  };
+  // A 409 means the document already moved on (another device, or the worker):
+  // show where it is now. A 404 means it is gone (purged). Either way the action
+  // is not reported as failed.
+  const handleRefused = async (id: string, err: unknown) => {
+    if (err instanceof ApiError && err.status === 404) {
+      sync.remove(id);
+      return;
+    }
+    if (!(err instanceof ApiError && err.status === 409)) throw err;
+    await readBack(id);
+  };
+  const act = async (id: string, run: () => Promise<DocumentView | null>) => {
+    try {
+      const doc = await run();
+      if (doc) sync.upsert(doc);
+    } catch (err) {
+      await handleRefused(id, err);
+    }
+  };
+  const discard = async (id: string) => {
+    let done = false;
+    await act(id, async () => {
+      await documents.discard(id);
+      done = true;
+      return null;
+    });
+    if (done) await readBack(id);
   };
   // Rows outside the review card confirm here; the card confirms itself.
   const confirmedDiscard = async (d: DocumentView) => {
     if (confirmDiscard(d)) await discard(d.id);
   };
-  // A 409 means the document already moved on (another device, or the worker):
-  // show where it is now instead of reporting the action as failed.
-  const readBackIfRefused = async (id: string, err: unknown) => {
-    if (!(err instanceof ApiError && err.status === 409)) throw err;
-    sync.upsert(await documents.get(id));
-  };
-  const restore = async (id: string) => {
-    try {
-      sync.upsert(await documents.restore(id));
-    } catch (err) {
-      await readBackIfRefused(id, err);
-    }
-  };
-  const retry = async (id: string) => {
-    try {
-      sync.upsert(await documents.retry(id));
-    } catch (err) {
-      await readBackIfRefused(id, err);
-    }
-  };
+  const restore = (id: string) => act(id, () => documents.restore(id));
+  const retry = (id: string) => act(id, () => documents.retry(id));
 
   return (
     <main class="inbox">
