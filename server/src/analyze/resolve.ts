@@ -28,18 +28,22 @@ const MAX_NAME_CHARS = 120;
 const MAX_SNIPPET_CHARS = 500;
 // Characters Drive, or an OS the file is later downloaded to, would reject.
 const ILLEGAL_NAME_CHARS = /[\u0000-\u001f\u007f/\\:*?"<>|]/g;
+// Bidirectional embedding, override and isolate controls: invisible, and able
+// to make "fdp.exe" display as "exe.pdf".
+const BIDI_CONTROLS = /[\u202a-\u202e\u2066-\u2069]/g;
 const TRAILING_EXTENSION = /\.(pdf|jpe?g|png|heic|webp|gif|tiff?|docx?|xlsx?|pptx?|txt|csv|md|json|html?|heif)$/i;
 
 export function sanitiseName(raw: string, fallback: string): string {
-  const cleaned = raw
+  const stripped = raw
+    .replace(BIDI_CONTROLS, '')
     .replace(ILLEGAL_NAME_CHARS, ' ')
     .replace(TRAILING_EXTENSION, '')
     .replace(/\s+/g, ' ')
     .trim()
     // Leading dots would make a hidden file on download.
-    .replace(/^\.+/, '')
-    .slice(0, MAX_NAME_CHARS)
-    .trim();
+    .replace(/^\.+/, '');
+  // By code point: a UTF-16 slice could cut an emoji in half.
+  const cleaned = [...stripped].slice(0, MAX_NAME_CHARS).join('').trim();
   return cleaned.length > 0 ? cleaned : fallback;
 }
 

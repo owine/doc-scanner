@@ -44,6 +44,19 @@ describe('sanitiseName', () => {
   it('caps the length', () => {
     expect(sanitiseName('a'.repeat(300), 'x')).toHaveLength(120);
   });
+
+  it('strips bidirectional override and isolate controls', () => {
+    // U+202E would display "Invoice fdp.exe" as "Invoice exe.pdf".
+    expect(sanitiseName('Invoice \u202Efdp.exe', 'x')).toBe('Invoice fdp.exe');
+    expect(sanitiseName('\u202A\u202B\u202C\u202D\u2066\u2067\u2068\u2069Receipt', 'x')).toBe('Receipt');
+  });
+
+  it('caps the length by code point, never splitting a surrogate pair', () => {
+    const out = sanitiseName('a' + '\u{1F4C4}'.repeat(200), 'x');
+    expect([...out]).toHaveLength(120);
+    expect(out.endsWith('\u{1F4C4}')).toBe(true);
+    expect(out).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
+  });
 });
 
 describe('resolveAnalysis', () => {
