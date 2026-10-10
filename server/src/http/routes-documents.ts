@@ -45,6 +45,19 @@ function sameFolder(a: Decision['folder'] | null | undefined, b: Decision['folde
   return a.kind === 'existing' ? a.linkId === (b as typeof a).linkId : a.parentLinkId === (b as typeof a).parentLinkId && a.name === (b as typeof a).name;
 }
 
+type FolderChoice = { kind: 'existing'; linkId: string } | { kind: 'new'; parentLinkId: string; name: string };
+
+/** `want` with its path(s) taken from the current folder tree, or null if its folder is gone. */
+function currentFolder(want: FolderChoice, pathOf: ReadonlyMap<string, string>): Decision['folder'] | null {
+  if (want.kind === 'existing') {
+    const path = pathOf.get(want.linkId);
+    return path ? { kind: 'existing', linkId: want.linkId, path } : null;
+  }
+  const parentPath = pathOf.get(want.parentLinkId);
+  const name = sanitiseName(want.name, '');
+  return parentPath && name ? { kind: 'new', parentLinkId: want.parentLinkId, parentPath, name } : null;
+}
+
 /** Where a failed document picks up on retry: as late as what it already has allows. */
 function restartState(d: DocumentRow): DocumentState {
   return d.decision ? 'filing' : d.analysis ? 'ready' : 'received';
@@ -115,7 +128,18 @@ export function documentRoutes(deps: { store: SessionStore; pipeline: Pipeline }
     const doc = repo.get(c.req.param('id'));
     if (!doc) return c.json({ error: 'not_found' }, 404);
     if (doc.state !== 'needs_review') return c.json({ error: 'not_in_review' }, 409);
-    const body = ApproveSchema.safeParse(await c.req.json().catch(() => ({})));
+    // Only an empty body means "as suggested": a truncated one must not file
+    // anything, because an upload can't be taken back.
+    const text = await c.req.text();
+    let raw: unknown = {};
+    if (text.trim()) {
+      try {
+        raw = JSON.parse(text);
+      } catch {
+        return c.json({ error: 'invalid_input' }, 400);
+      }
+    }
+    const body = ApproveSchema.safeParse(raw);
     if (!body.success) return c.json({ error: 'invalid_input' }, 400);
     const cache = folderCache.load();
     if (!cache) return c.json({ error: 'folders_not_loaded' }, 503);
@@ -124,22 +148,12 @@ export function documentRoutes(deps: { store: SessionStore; pipeline: Pipeline }
     const name = sanitiseName(body.data.name ?? doc.analysis?.name ?? '', '');
     if (!name) return c.json({ error: 'name_required' }, 400);
 
-    let folder: Decision['folder'];
-    const want = body.data.folder;
-    if (want?.kind === 'existing') {
-      const path = pathOf.get(want.linkId);
-      if (!path) return c.json({ error: 'unknown_folder' }, 400);
-      folder = { kind: 'existing', linkId: want.linkId, path };
-    } else if (want?.kind === 'new') {
-      const parentPath = pathOf.get(want.parentLinkId);
-      const folderName = sanitiseName(want.name, '');
-      if (!parentPath || !folderName) return c.json({ error: 'unknown_folder' }, 400);
-      folder = { kind: 'new', parentLinkId: want.parentLinkId, parentPath, name: folderName };
-    } else if (doc.analysis?.folder) {
-      folder = doc.analysis.folder;
-    } else {
-      return c.json({ error: 'folder_required' }, 400);
-    }
+    // The user's choice, else the suggestion; either way checked against the
+    // current tree, since a suggested folder may have moved or gone since.
+    const want = body.data.folder ?? doc.analysis?.folder;
+    if (!want) return c.json({ error: 'folder_required' }, 400);
+    const folder = currentFolder(want, pathOf);
+    if (!folder) return c.json({ error: 'unknown_folder' }, 400);
 
     const userEdited = name !== doc.analysis?.name || !sameFolder(folder, doc.analysis?.folder);
     const moved = repo.transition(doc.id, 'needs_review', 'filing', {

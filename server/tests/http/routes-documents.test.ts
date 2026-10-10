@@ -7,7 +7,7 @@ import { createApp } from '../../src/http/server.js';
 import { createTestDb } from '../helpers/test-db.js';
 import type { ProtonAuth } from '../../src/auth/srp.js';
 import { _resetSids } from '../../src/http/middleware.js';
-import { _resetLiveSessions } from '../../src/auth/live-session.js';
+import { _resetLiveSessions, type LiveSession } from '../../src/auth/live-session.js';
 import { MailboxSecret } from '../../src/auth/secrets/mailbox-password.js';
 import type { DecryptedUserKey } from '../../src/auth/keys.js';
 import { createPipeline, type Pipeline } from '../../src/documents/pipeline.js';
@@ -35,7 +35,7 @@ afterEach(() => {
   cleanups = [];
 });
 
-async function setup() {
+async function setup(opts: { liveSession?: () => LiveSession | undefined } = {}) {
   const { db, cleanup } = createTestDb();
   const dir = mkdtempSync(join(tmpdir(), 'routes-docs-'));
   cleanups.push(cleanup, () => rmSync(dir, { recursive: true, force: true }));
@@ -46,7 +46,7 @@ async function setup() {
     encryptionKey: KEY,
     defaults: { model: 'm', effort: 'medium', autoFileThreshold: 0.8, autoFileEnabled: false, excludePaths: [] },
     analyzerFor: () => ({ analyze }),
-    liveSession: () => undefined,
+    liveSession: opts.liveSession ?? (() => undefined),
   });
   const fakeAuth = {
     login: vi.fn().mockResolvedValue({
@@ -183,5 +183,108 @@ describe('document routes', () => {
       body: JSON.stringify({ autoFileThreshold: 7 }),
     });
     expect(bad.status).toBe(400);
+  });
+});
+
+type App = Awaited<ReturnType<typeof setup>>['app'];
+
+/** A document waiting in review with the harness's analysis. */
+function inReview(pipeline: Pipeline, sha256 = 'r') {
+  const doc = pipeline.repo.insert({ source: 'picker', originalName: 'a.pdf', mime: 'application/pdf', size: 1, sha256, sourceContext: null });
+  pipeline.repo.transition(doc.id, 'received', 'needs_review', { analysis: ANALYSIS });
+  return doc;
+}
+
+function approve(app: App, cookie: string, id: string, body?: string) {
+  return app.request(`/api/documents/${id}/approve`, {
+    method: 'POST',
+    headers: { cookie, 'content-type': 'application/json' },
+    ...(body === undefined ? {} : { body }),
+  });
+}
+
+describe('approve', () => {
+  it('404s an unknown document and 409s one not in review', async () => {
+    const { app, cookie, pipeline } = await setup();
+    pipeline.folderCache.save(TREE, new Date());
+    expect((await approve(app, cookie, 'nope')).status).toBe(404);
+    const doc = pipeline.repo.insert({ source: 'picker', originalName: 'a.pdf', mime: 'application/pdf', size: 1, sha256: 'q', sourceContext: null });
+    expect((await approve(app, cookie, doc.id)).status).toBe(409);
+  });
+
+  it('503s while no folder tree has been walked', async () => {
+    const { app, cookie, pipeline } = await setup();
+    const doc = inReview(pipeline);
+    expect((await approve(app, cookie, doc.id)).status).toBe(503);
+    expect(pipeline.repo.get(doc.id)?.state).toBe('needs_review');
+  });
+
+  it('approves as suggested with an empty body, without marking it edited', async () => {
+    const { app, cookie, pipeline } = await setup();
+    pipeline.folderCache.save(TREE, new Date());
+    const doc = inReview(pipeline);
+    expect((await approve(app, cookie, doc.id, '  ')).status).toBe(200);
+    expect(pipeline.repo.get(doc.id)).toMatchObject({ userEdited: false, decision: { name: ANALYSIS.name, folder: ANALYSIS.folder } });
+  });
+
+  it('rejects a malformed body instead of approving as suggested', async () => {
+    const { app, cookie, pipeline } = await setup();
+    pipeline.folderCache.save(TREE, new Date());
+    const doc = inReview(pipeline);
+    const res = await approve(app, cookie, doc.id, '{"name": "Northwind');
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'invalid_input' });
+    expect(pipeline.repo.get(doc.id)?.state).toBe('needs_review');
+  });
+
+  it('files into a new folder under a known parent, and rejects an unknown parent', async () => {
+    const { app, cookie, pipeline } = await setup();
+    pipeline.folderCache.save(TREE, new Date());
+    const doc = inReview(pipeline);
+    const unknown = await approve(app, cookie, doc.id, JSON.stringify({ folder: { kind: 'new', parentLinkId: 'NOPE', name: 'Water' } }));
+    expect(unknown.status).toBe(400);
+    const res = await approve(app, cookie, doc.id, JSON.stringify({ folder: { kind: 'new', parentLinkId: 'BILLS', name: 'Water' } }));
+    expect(res.status).toBe(200);
+    expect(pipeline.repo.get(doc.id)).toMatchObject({
+      userEdited: true,
+      decision: { folder: { kind: 'new', parentLinkId: 'BILLS', parentPath: '/Bills', name: 'Water' } },
+    });
+  });
+
+  it('uses the current path of a suggested folder that moved since the analysis', async () => {
+    const { app, cookie, pipeline } = await setup();
+    pipeline.folderCache.save(
+      TREE.map((f) => (f.linkId === 'BILLS' ? { ...f, path: '/Household/Bills' } : f)),
+      new Date(),
+    );
+    const doc = inReview(pipeline);
+    expect((await approve(app, cookie, doc.id)).status).toBe(200);
+    expect(pipeline.repo.get(doc.id)).toMatchObject({
+      userEdited: false,
+      decision: { folder: { kind: 'existing', linkId: 'BILLS', path: '/Household/Bills' } },
+    });
+  });
+
+  it('rejects approving as suggested when the suggested folder is gone', async () => {
+    const { app, cookie, pipeline } = await setup();
+    pipeline.folderCache.save(TREE.filter((f) => f.linkId !== 'BILLS'), new Date());
+    const doc = inReview(pipeline);
+    const res = await approve(app, cookie, doc.id);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'unknown_folder' });
+    expect(pipeline.repo.get(doc.id)?.state).toBe('needs_review');
+  });
+
+  it('checks a suggested new folder against the current tree too', async () => {
+    const { app, cookie, pipeline } = await setup();
+    pipeline.folderCache.save(TREE.filter((f) => f.linkId !== 'BILLS'), new Date());
+    const doc = pipeline.repo.insert({ source: 'picker', originalName: 'a.pdf', mime: 'application/pdf', size: 1, sha256: 'n', sourceContext: null });
+    pipeline.repo.transition(doc.id, 'received', 'needs_review', {
+      analysis: { ...ANALYSIS, folder: { kind: 'new', parentLinkId: 'BILLS', parentPath: '/Bills', name: 'Water' } },
+    });
+    expect((await approve(app, cookie, doc.id)).status).toBe(400);
+    pipeline.folderCache.save(TREE.map((f) => (f.linkId === 'BILLS' ? { ...f, path: '/Household/Bills' } : f)), new Date());
+    expect((await approve(app, cookie, doc.id)).status).toBe(200);
+    expect(pipeline.repo.get(doc.id)?.decision?.folder).toEqual({ kind: 'new', parentLinkId: 'BILLS', parentPath: '/Household/Bills', name: 'Water' });
   });
 });
