@@ -22,6 +22,11 @@ function answer(over: Partial<ModelAnswer> = {}): ModelAnswer {
 }
 
 describe('sanitiseName', () => {
+  it('strips markdown, json and html extensions', () => {
+    expect(sanitiseName('Notes.md', 'x')).toBe('Notes');
+    expect(sanitiseName('data.json', 'x')).toBe('data');
+  });
+
   it('keeps the user-style punctuation the old ASCII regex rejected', () => {
     expect(sanitiseName('Lab results - Patel (Aug)', 'x')).toBe('Lab results - Patel (Aug)');
     expect(sanitiseName('Café receipt — €12', 'x')).toBe('Café receipt — €12');

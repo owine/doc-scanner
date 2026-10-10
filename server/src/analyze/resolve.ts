@@ -28,7 +28,7 @@ const MAX_NAME_CHARS = 120;
 const MAX_SNIPPET_CHARS = 500;
 // Characters Drive, or an OS the file is later downloaded to, would reject.
 const ILLEGAL_NAME_CHARS = /[\u0000-\u001f\u007f/\\:*?"<>|]/g;
-const TRAILING_EXTENSION = /\.(pdf|jpe?g|png|heic|webp|gif|tiff?|docx?|xlsx?|pptx?|txt|csv)$/i;
+const TRAILING_EXTENSION = /\.(pdf|jpe?g|png|heic|webp|gif|tiff?|docx?|xlsx?|pptx?|txt|csv|md|json|html?|heif)$/i;
 
 export function sanitiseName(raw: string, fallback: string): string {
   const cleaned = raw
