@@ -36,6 +36,7 @@ interface Row {
   judge_usage?: Usage;
   latency_s: number;
   confidence: number | null;
+  auto_eligible?: boolean;
   grade: Record<string, number>;
 }
 
@@ -54,6 +55,14 @@ function readJsonl<T>(path: string): T[] {
     .split('\n')
     .filter((l) => l.trim())
     .map((l) => JSON.parse(l) as T);
+}
+
+// Rows written before auto_eligible was recorded: read the folder kind
+// back from the trace's final answer.
+function autoEligible(r: Row, variant: string): boolean {
+  if (r.auto_eligible !== undefined) return r.auto_eligible;
+  const trace = JSON.parse(readFileSync(join(args.flow!, variant, 'traces', `${r.prompt_id}_rep0.json`), 'utf8'));
+  return JSON.parse(trace.at(-1).content)?.folder?.kind === 'existing';
 }
 
 const pct = (x: number) => `${(100 * x).toFixed(0)}%`;
@@ -96,7 +105,7 @@ for (const [id, v] of Object.entries(VARIANTS)) {
     '  threshold   coverage   precision   misfiled (of all docs)',
   );
   for (const t of THRESHOLDS) {
-    const confident = scored.filter((r) => r.confidence !== null && r.confidence >= t);
+    const confident = scored.filter((r) => r.confidence !== null && r.confidence >= t && autoEligible(r, id));
     const right = confident.filter((r) => r.grade.full_ok === 1).length;
     lines.push(
       `  ${t.toFixed(2)}        ${pct(confident.length / n).padStart(4)}       ${

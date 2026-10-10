@@ -187,7 +187,9 @@ export async function gradeCase(rc: RunnerCase, run: Awaited<ReturnType<typeof r
   const judge = c.scoreName === false ? null : await judgeName(c, a.name, run.folders);
   const nameOk = judge === null ? 1 : judge.acceptable ? 1 : 0;
   const fullOk = folderExact && nameOk ? 1 : 0;
-  const confident = a.confidence >= AUTO_FILE_THRESHOLD ? 1 : 0;
+  // The design's auto-file rule: confident AND an existing folder. An
+  // unresolved folder or a new-folder proposal always goes to review.
+  const confident = a.confidence >= AUTO_FILE_THRESHOLD && a.folder?.kind === 'existing' ? 1 : 0;
   const folderSaid =
     a.folder === null ? '(unresolved)' : a.folder.kind === 'existing' ? a.folder.path : `NEW ${a.folder.parentPath}/${a.folder.name}`;
   return {
@@ -219,5 +221,7 @@ export function perfFrom(run: Awaited<ReturnType<typeof runCase>>) {
     out_tokens: u.output_tokens,
     // Raw, so summarize.ts can sweep the auto-file threshold per model.
     confidence: outcome.status === 'ok' ? outcome.analysis.confidence : null,
+    // Only an existing-folder answer can be auto-filed, whatever its confidence.
+    auto_eligible: outcome.status === 'ok' && outcome.analysis.folder?.kind === 'existing',
   };
 }
