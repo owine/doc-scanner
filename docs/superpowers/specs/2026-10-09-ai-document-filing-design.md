@@ -168,6 +168,8 @@ Primary actions: **Add** and **Scan**. **Settings** sits behind a menu.
 
 Updates: the PWA polls `GET /api/documents?since=<cursor>` every few seconds while visible.
 
+Slice 2 (2026-10-10) ships without thumbnails (slice 3) and without the Add screen (slice 4). The review card shows the original filename, the suggestion, the confidence, the review reason and the rationale. Filed documents link to Drive through `drive_url` (migration 006), recorded after filing.
+
 **Edits teach the system**: when the user changes the name or folder before approving, *their* version is what gets filed, so it becomes one of that folder's recent filenames — the naming signal the next document in that folder sees. 
 
 ### 6. Errors and observability
@@ -237,8 +239,8 @@ Carried over from `feat/phase-5-ai-organize` in implementation: the history migr
 
 The plan should ship this in independently useful slices:
 
-1. **Server pipeline** — `documents` table, inbox store, worker, intake endpoint, analyzer wired in, filing with auto-file, `awaiting_login`, settings. Usable through the API and a minimal list. Includes the **calibration check**: the Haiku eval re-run with the prompt stating 0.80 (done: 41% coverage, 94% precision). It missed the 95% bar, so slice 1 ships with auto-filing off and everything goes to review until real-use audit data supports switching it on.
-2. **Review UI** — the inbox screen, review card, folder picker, discard/restore, activity log, settings screen.
+1. **Server pipeline** (merged, #261) — `documents` table, inbox store, worker, intake endpoint, analyzer wired in, filing with auto-file, `awaiting_login`, settings. Usable through the API and a minimal list. Includes the **calibration check**: the Haiku eval re-run with the prompt stating 0.80 (done: 41% coverage, 94% precision). It missed the 95% bar, so slice 1 ships with auto-filing off and everything goes to review until real-use audit data supports switching it on.
+2. **Review UI** (plan: `docs/superpowers/plans/2026-10-10-review-ui.md`) — the inbox screen, review card, folder picker, discard/restore, activity log, settings screen.
 3. **Preparing** — `ocrmypdf`, `img2pdf`, thumbnails, the Docker image.
 4. **Entrypoints** — Add screen and offline upload queue; the scanner posting image-only PDFs.
 

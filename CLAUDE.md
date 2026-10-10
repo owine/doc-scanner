@@ -69,7 +69,7 @@ The server runs its TypeScript **source** under `tsx` in dev, prod, and Docker (
 
 ### PWA (`pwa/src/`)
 
-`scanner/` (camera capture + auto-crop), `ocr/`, `pdf/` (`@cantoo/pdf-lib`), `ui/`, `theme/`; `api.ts` talks to the server; local state via `idb`. Tesseract.js assets are copied in by a `predev`/`prebuild` script.
+`documents/` (the documents API client, `DocumentSync` polling `GET /api/documents?since=`, pure grouping and folder search), `ui/inbox/` (the home screen: review cards, folder picker, activity rows) and `ui/SettingsScreen.tsx` (filing settings, folder refresh, theme, sign-out); `scanner/` (camera capture + auto-crop), `ocr/`, `pdf/` (`@cantoo/pdf-lib`), the rest of `ui/`, `theme/`; `api.ts` talks to the server; local state via `idb`. Tesseract.js assets are copied in by a `predev`/`prebuild` script.
 
 ## Drive SDK version gate (read before bumping)
 
