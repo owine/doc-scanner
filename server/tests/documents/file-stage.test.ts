@@ -60,6 +60,17 @@ describe('fileStage', () => {
     expect(h.repo.get(doc.id)).toMatchObject({ state: 'filed', filedFolderPath: '/Bills/Water' });
   });
 
+  it('adds the new folder and its file to the cache even when the refresh brings an older tree', async () => {
+    h = makeHarness();
+    // A walk already in flight before the folder existed saves a tree without it.
+    h.refreshFolderCache.mockImplementation(async () => h.ctx.folderCache.save(TREE, h.ctx.now()));
+    h.drive.uploadFile.mockResolvedValue({ nodeUid: 'NODE1', driveUrl: '', name: 'Water Sep 2026.pdf' });
+    const doc = filingDoc(NEW);
+    await fileStage(doc, h.ctx);
+    const water = h.ctx.folderCache.load()!.tree.find((f) => f.linkId === 'NEWFOLDER');
+    expect(water).toMatchObject({ path: '/Bills/Water', files: [{ uid: 'NODE1', name: 'Water Sep 2026.pdf' }] });
+  });
+
   it('reuses a same-named folder instead of creating a duplicate', async () => {
     h = makeHarness();
     h.drive.findChildFolder.mockResolvedValue('EXISTINGWATER');
@@ -298,7 +309,7 @@ describe('fileStage', () => {
   it('files the document even when the folder-cache refresh and update fail', async () => {
     h = makeHarness();
     h.refreshFolderCache.mockRejectedValue(new Error('walk failed'));
-    vi.spyOn(h.ctx.folderCache, 'recordFiled').mockImplementation(() => {
+    vi.spyOn(h.ctx.folderCache, 'addFolder').mockImplementation(() => {
       throw new Error('cache broken');
     });
     const doc = filingDoc(NEW);

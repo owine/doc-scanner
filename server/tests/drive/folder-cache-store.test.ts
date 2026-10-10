@@ -34,6 +34,31 @@ describe('FolderCacheStore', () => {
     expect(s.load()!.tree[0].files.map((f) => f.name)).toEqual(['Northwind Energy Oct 2026.pdf']);
   });
 
+  it('adds a newly created folder with its filed file, keeping paths sorted', () => {
+    const t = createTestDb();
+    cleanup = t.cleanup;
+    const s = new FolderCacheStore(t.db, new AtRestCipher(Buffer.alloc(32, 4).toString('base64'), 'folder-cache'));
+    const walked = new Date('2026-10-01T00:00:00Z');
+    s.save([{ linkId: 'R', path: '/', files: [] }, { linkId: 'L', path: '/Bills', files: [] }, { linkId: 'T', path: '/Tax', files: [] }], walked);
+    const file = { uid: 'N1', name: 'Water Sep 2026.pdf', modified: new Date('2026-10-10T00:00:00Z') };
+    s.addFolder({ linkId: 'W', path: '/Bills/Water' }, file);
+    const cached = s.load()!;
+    expect(cached.tree.map((f) => f.path)).toEqual(['/', '/Bills', '/Bills/Water', '/Tax']);
+    expect(cached.tree[2]).toEqual({ linkId: 'W', path: '/Bills/Water', files: [file] });
+    expect(cached.walkedAt).toEqual(walked);
+    // Already there (a walk found it first): the file is recorded, the folder not duplicated.
+    s.addFolder({ linkId: 'W', path: '/Bills/Water' }, { ...file, uid: 'N2', name: 'Water Oct 2026.pdf' });
+    expect(s.load()!.tree.filter((f) => f.linkId === 'W')[0]!.files.map((f) => f.uid)).toEqual(['N2', 'N1']);
+  });
+
+  it('adds nothing when no tree is cached yet', () => {
+    const t = createTestDb();
+    cleanup = t.cleanup;
+    const s = new FolderCacheStore(t.db, new AtRestCipher(Buffer.alloc(32, 4).toString('base64'), 'folder-cache'));
+    s.addFolder({ linkId: 'W', path: '/Bills/Water' }, { uid: 'N1', name: 'x.pdf', modified: new Date() });
+    expect(s.load()).toBeNull();
+  });
+
   it('round-trips the tree, encrypted, with dates restored', () => {
     const t = createTestDb();
     cleanup = t.cleanup;

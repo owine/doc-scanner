@@ -145,15 +145,22 @@ export async function fileStage(doc: DocumentRow, ctx: StageContext): Promise<vo
     // Plaintext first: a blob left behind by a failure here is reclaimed by the purge sweep.
     afterFiled(doc.id, 'could not delete the inbox copy of a filed document', () => ctx.inbox.deleteAll(doc.id));
     if (decision.folder.kind === 'new') {
-      // A new folder isn't in the cached tree, so recordFiled can't reach it;
-      // a walk picks up the folder and this file together. Done after the
-      // upload, not before, so the walk doesn't hold up the filing (spec §4:
-      // the cache is refreshed after a folder is created).
+      // Spec §4: the cache is refreshed after a folder is created; done after
+      // the upload so the walk doesn't hold up the filing. Not relied on: the
+      // refresh may join a walk that started before the folder existed. So
+      // the folder and this file are added directly afterwards, which also
+      // undoes such a walk dropping them.
       try {
         await ctx.refreshFolderCache();
       } catch (err) {
         logger.warn({ documentId: doc.id, errName: errorName(err) }, 'folder cache refresh failed');
       }
+      afterFiled(doc.id, 'could not add the new folder to the folder cache', () =>
+        ctx.folderCache.addFolder(
+          { linkId: folderLinkId, path: folderPath },
+          { uid: filedRef.nodeUid, name: filedRef.name, modified: ctx.now() },
+        ),
+      );
     } else {
       // The filed name joins that folder's recent names right away (spec §5:
       // edits teach the system). Best-effort: the next tree walk catches up.

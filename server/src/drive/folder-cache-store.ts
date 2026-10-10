@@ -41,6 +41,25 @@ export class FolderCacheStore {
     this.save(cached.tree, cached.walkedAt);
   }
 
+  /**
+   * Adds a folder the filing stage just created, with the file filed into it,
+   * so the next analysis can choose it without waiting for a walk. A no-op
+   * with no cached tree; if the folder is already cached (a walk found it),
+   * only the file is recorded. Keeps the walk time and the path order.
+   */
+  addFolder(folder: { linkId: string; path: string }, file: TreeFile): void {
+    const cached = this.load();
+    if (!cached) return;
+    const existing = cached.tree.find((f) => f.linkId === folder.linkId);
+    if (existing) {
+      existing.files = [file, ...existing.files.filter((f) => f.uid !== file.uid)];
+    } else {
+      cached.tree.push({ linkId: folder.linkId, path: folder.path, files: [file] });
+      cached.tree.sort((a, b) => a.path.localeCompare(b.path));
+    }
+    this.save(cached.tree, cached.walkedAt);
+  }
+
   save(tree: TreeFolder[], walkedAt: Date): void {
     const sealed = this.cipher.seal(new TextEncoder().encode(JSON.stringify(trim(tree))));
     this.db
