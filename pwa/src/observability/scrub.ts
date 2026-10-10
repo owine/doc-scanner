@@ -77,12 +77,12 @@ const MAX_TEXT = 2000;
 const SCRUB_WINDOW = MAX_TEXT + 512;
 
 function scrubText(text: string): string {
-  let out = redactPatterns(text.length > SCRUB_WINDOW ? text.slice(0, SCRUB_WINDOW) : text);
-  if (out.length > MAX_TEXT) {
-    // Drop the token the cut splits, so no partial secret survives the cap.
-    out = `${out.slice(0, MAX_TEXT).replace(/\S*$/, '')}[truncated]`;
-  }
-  return out;
+  return capText(redactPatterns(text.length > SCRUB_WINDOW ? text.slice(0, SCRUB_WINDOW) : text));
+}
+
+function capText(text: string): string {
+  // Drop the token the cut splits, so no partial secret survives the cap.
+  return text.length > MAX_TEXT ? `${text.slice(0, MAX_TEXT).replace(/\S*$/, '')}[truncated]` : text;
 }
 
 function redactPatterns(text: string): string {
@@ -108,9 +108,32 @@ function scrubValue(value: unknown, depth = 0): unknown {
   return out;
 }
 
+// A UI breadcrumb's message is the clicked element and up to 4 ancestors as
+// @sentry/browser-utils htmlTreeAsString writes them: `tag#id.class` then
+// `[attr="value"]` for aria-label, type, name, title and alt. Our labels carry
+// folder paths and document names ("Remove /Bills/Private"), so every value
+// goes. Values are not escaped and may hold `"` or `]`, so a value ends only
+// at a `"]` followed by the next attribute, the next element (` > `) or the end.
+const ATTR_VALUE = /\[([\w:.-]+)="[\s\S]*?"\](?=\[[\w:.-]+="|\s>\s|$)/g;
+// One with no recognisable end: drop it and everything after it.
+const UNTERMINATED_ATTR = /\[[\w:.-]+="[\s\S]*$/;
+
+/**
+ * What is left is our own markup (tags, ids, classes), which the free-text
+ * patterns would mangle (`ul.doc-list` reads as a .doc file), so only the
+ * length cap applies. The input is capped first, as in scrubText.
+ */
+function scrubUiMessage(message: string): string {
+  const text = message.length > SCRUB_WINDOW ? message.slice(0, SCRUB_WINDOW) : message;
+  const out = text.replace(ATTR_VALUE, '[$1]').replace(UNTERMINATED_ATTR, '[redacted]');
+  // A quote left over means a value fooled the end rule (it held `"] > `):
+  // part of it may be outside a bracket now, so keep nothing.
+  return out.includes('"') ? '[redacted]' : capText(out);
+}
+
 function scrubBreadcrumb(crumb: Breadcrumb): Breadcrumb {
   const out: Breadcrumb = { ...crumb };
-  if (out.message) out.message = scrubText(out.message);
+  if (out.message) out.message = crumb.category?.startsWith('ui.') ? scrubUiMessage(out.message) : scrubText(out.message);
   if (crumb.data) {
     const data: Record<string, unknown> = {};
     if (typeof crumb.data.method === 'string') data.method = crumb.data.method;

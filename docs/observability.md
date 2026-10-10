@@ -59,7 +59,9 @@ Enforced by a `beforeSend` scrubber in each workspace (`server/src/observability
 - **Email addresses.** Redacted in free text as well as under keys, since Proton addresses can end up in error messages.
 - **User data.** `event.user` is dropped and `dataCollection.userInfo` is off, so no IP address is sent.
 - **Local variables.** `includeLocalVariables` and `dataCollection.stackFrameVariables` are off, and any `vars` on stack frames are dropped.
-- **Console and form-input breadcrumbs.** Dropped outright. Other breadcrumbs keep only method / URL (no query) / status.
+- **Console and form-input breadcrumbs.** Dropped outright (`console`, `ui.input`).
+- **Other breadcrumbs.** Each keeps its category, type, level, timestamp and message. Its `data` keeps only `method`, `url` / `from` / `to` (without the query string) and `status_code`; everything else in `data` is dropped, including the clicked component's name. The message goes through the same free-text redaction as exception messages, except for UI breadcrumbs (see below).
+- **Labels in click breadcrumbs.** A `ui.click` message is the clicked element and up to four ancestors, as the SDK writes them: `tag#id.class[attr="value"]`, with `aria-label`, `type`, `name`, `title` and `alt` values. Our labels carry folder paths and document names (`Remove /Bills/Private`, `Review Gas Bill`), so every attribute value is stripped and only the name stays (`button.btn[aria-label]`). Tags, ids and classes are kept; they are our own markup. A value with no recognisable end is dropped with everything after it, and a message that still holds a quote afterwards is replaced whole.
 
 Tracing is off (`tracesSampleRate: 0`), and there is no session replay.
 

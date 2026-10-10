@@ -84,6 +84,54 @@ describe('scrubEvent (PWA)', () => {
     expect(out?.breadcrumbs?.some((b) => b.category === 'ui.input')).toBe(false);
   });
 
+  describe('UI click breadcrumbs', () => {
+    // The shape @sentry/browser-utils htmlTreeAsString gives a click target:
+    // tag, #id and .classes, then [attr="value"] for aria-label, type, name,
+    // title and alt, unescaped, for the element and up to 4 ancestors.
+    const click = (message: string) => scrubEvent(baseEvent({ breadcrumbs: [{ category: 'ui.click', message }] }))?.breadcrumbs?.[0]?.message;
+
+    it('strips a folder path from a "New folder in" label', () => {
+      const out = click('li > button.btn.btn-secondary.btn-small[type="button"][aria-label="New folder in /Bills/Energy"]');
+      expect(out).not.toContain('Bills');
+      expect(out).toBe('li > button.btn.btn-secondary.btn-small[type][aria-label]');
+    });
+
+    it('strips a folder path from a "Remove" label', () => {
+      const out = click('ul.doc-list > li.doc-row > button.btn.btn-secondary.btn-small[aria-label="Remove /Bills/Private"]');
+      expect(out).not.toContain('Private');
+      expect(out).toBe('ul.doc-list > li.doc-row > button.btn.btn-secondary.btn-small[aria-label]');
+    });
+
+    it('strips a document name from an ancestor label', () => {
+      const out = click('article.card.review-card[aria-label="Review Gas Bill"] > div.actions > button.btn');
+      expect(out).not.toContain('Gas');
+      expect(out).toBe('article.card.review-card[aria-label] > div.actions > button.btn');
+    });
+
+    it('strips name, title and alt values too, and keeps ids', () => {
+      const out = click('div#doc7.card[title="Lease scan"] > img.thumb[alt="Page of Lease"] > input[name="Lease"]');
+      expect(out).not.toContain('Lease');
+      expect(out).toBe('div#doc7.card[title] > img.thumb[alt] > input[name]');
+    });
+
+    it('strips a value that itself contains quotes and brackets', () => {
+      const out = click('section > button.btn[aria-label="Review "Gas"] [Bill]"][type="button"]');
+      expect(out).not.toMatch(/Gas|Bill/);
+      expect(out).toBe('section > button.btn[aria-label][type]');
+    });
+
+    it('drops an attribute value it cannot find the end of', () => {
+      const out = click('section > button.btn[aria-label="Review Gas Bill');
+      expect(out).not.toMatch(/Gas|Bill/);
+      expect(out?.startsWith('section > button.btn')).toBe(true);
+    });
+
+    it('keeps nothing when a value looks like the end of an element', () => {
+      const out = click('section > button.btn[aria-label="Gas"] > Bill"]');
+      expect(out).toBe('[redacted]');
+    });
+  });
+
   it('keeps our tags', () => {
     expect(scrubEvent(baseEvent({ tags: { 'api.operation': 'upload' } }))?.tags).toEqual({ 'api.operation': 'upload' });
   });
@@ -112,6 +160,12 @@ describe('scrubEvent on pathological input', () => {
   it('stays fast at the worst case under the cap, where every pattern still runs', () => {
     const started = performance.now();
     scrubEvent({ type: undefined, message: '\u201c'.repeat(1999), extra: { note: 'a.p '.repeat(499) } });
+    expect(performance.now() - started).toBeLessThan(100);
+  });
+
+  it('scrubs a 100 KB click target full of attribute starts quickly', () => {
+    const started = performance.now();
+    scrubEvent({ type: undefined, breadcrumbs: [{ category: 'ui.click', message: '[a="x"] '.repeat(12_500) }] });
     expect(performance.now() - started).toBeLessThan(100);
   });
 
