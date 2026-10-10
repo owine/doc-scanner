@@ -9,7 +9,10 @@
     "start": "tsx src/index.ts",
     "test": "NODE_OPTIONS=--import=tsx vitest run",
     "test:watch": "NODE_OPTIONS=--import=tsx vitest",
-    "test:integration": "NODE_OPTIONS=--import=tsx vitest run --config vitest.integration.config.ts"
+    "test:integration": "NODE_OPTIONS=--import=tsx vitest run --config vitest.integration.config.ts",
+    "eval:analyzer:sample": "node --import tsx evals/analyzer/sample.ts",
+    "eval:analyzer": "node --env-file=../.env --import tsx evals/analyzer/run-eval.mjs",
+    "eval:analyzer:summary": "node --import tsx evals/analyzer/summarize.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.131.0",

@@ -2,7 +2,7 @@
 // user's Proton Drive: their human-chosen name and folder are the labels.
 //
 //   PROTON_EMAIL=... PROTON_PASSWORD=... [PROTON_TOTP=123456] \
-//     node --import tsx server/evals/analyzer/sample.ts [--n 40] [--seed 1] [--flow .claude/hillclimb/analyzer]
+//     pnpm --filter @doc-scanner/server run eval:analyzer:sample [--n 40] [--seed 1]
 //
 // Logs in once, snapshots the folder tree, samples documents stratified across
 // folders, and downloads them. Everything lands under the flow directory,
@@ -15,6 +15,7 @@ import { mkdirSync, writeFileSync, existsSync, mkdtempSync, rmSync } from 'node:
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
+import { DEFAULT_FLOW } from './cases.js';
 import { ProtonApi } from '../../src/auth/proton-api.js';
 import { ProtonAuth } from '../../src/auth/srp.js';
 import { openDb } from '../../src/db.js';
@@ -28,7 +29,7 @@ const { values: args } = parseArgs({
   options: {
     n: { type: 'string', default: '40' },
     seed: { type: 'string', default: '1' },
-    flow: { type: 'string', default: '.claude/hillclimb/analyzer' },
+    flow: { type: 'string', default: DEFAULT_FLOW },
   },
 });
 

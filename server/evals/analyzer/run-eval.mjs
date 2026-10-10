@@ -134,11 +134,11 @@ function mkdirNoFollow(dir) {
 const REF_EXTS = ['', '.html', '.txt', '.json'];
 
 // --- fill these in ----------------------------------------------------------
-// The analyzer eval. Run from the repo root under tsx so the TypeScript
+// The analyzer eval. Runs under tsx (via the package script) so the TypeScript
 // harness and the real analyzer load:
 //
-//   node --import tsx server/evals/analyzer/run-eval.mjs \
-//     --flow .claude/hillclimb/analyzer --variant baseline --model claude-haiku-5-5
+//   pnpm --filter @doc-scanner/server run eval:analyzer \
+//     --flow "$PWD/.claude/hillclimb/analyzer" --variant baseline --model claude-haiku-5-5
 //
 // Variants map to contenders in harness.ts (VARIANTS).
 

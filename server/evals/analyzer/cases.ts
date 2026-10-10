@@ -1,6 +1,9 @@
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import type { TreeFolder } from '../../src/drive/folder-tree.js';
+
+/** Repo-root .claude/ (gitignored): inputs are personal documents. */
+export const DEFAULT_FLOW = resolve(import.meta.dirname, '../../../.claude/hillclimb/analyzer');
 
 /** File types the analyzer reads natively; the sampler only picks these. */
 export const EXTENSION_BY_TYPE: Record<string, string> = {

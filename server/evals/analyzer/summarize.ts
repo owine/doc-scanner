@@ -8,6 +8,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
+import { DEFAULT_FLOW } from './cases.js';
 import { VARIANTS } from './harness.js';
 
 // $ per million tokens, first-party API. Cache writes bill at 1.25x input,
@@ -64,7 +65,7 @@ const median = (xs: number[]) => {
 /** 95% half-width for a proportion, normal approximation. */
 const ci = (p: number, n: number) => 1.96 * Math.sqrt((p * (1 - p)) / Math.max(1, n));
 
-const { values: args } = parseArgs({ options: { flow: { type: 'string', default: '.claude/hillclimb/analyzer' } } });
+const { values: args } = parseArgs({ options: { flow: { type: 'string', default: DEFAULT_FLOW } } });
 
 const THRESHOLDS = [0.7, 0.8, 0.85, 0.9, 0.95];
 const lines: string[] = [];
