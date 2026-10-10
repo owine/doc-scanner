@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { sessionMiddleware, type AuthContext } from './middleware.js';
 import { logger } from '../logger.js';
+import { errorName } from '../observability/error-name.js';
 import type { DB } from '../db.js';
 import type { SessionStore } from '../auth/session-store.js';
 
@@ -34,8 +35,9 @@ export function driveRoutes(deps: { db: DB; store: SessionStore }) {
       logger.info({ email: auth.email, nodeUid }, 'drive test upload succeeded');
       return c.json({ ok: true, nodeUid, driveUrl, filename: name });
     } catch (e) {
-      logger.warn({ email: auth.email, err: (e as Error).message }, 'drive test upload failed');
-      return c.json({ error: 'upload_failed', detail: (e as Error).message }, 500);
+      // The type only, in the log and the response: a message can quote names.
+      logger.warn({ email: auth.email, errName: errorName(e) }, 'drive test upload failed');
+      return c.json({ error: 'upload_failed' }, 500);
     }
   });
 
