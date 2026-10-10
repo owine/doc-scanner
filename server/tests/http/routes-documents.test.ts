@@ -302,6 +302,16 @@ describe('approve', () => {
     expect(pipeline.repo.get(doc.id)?.state).toBe('needs_review');
   });
 
+  it('rejects a new folder name that sanitises to nothing', async () => {
+    const { app, cookie, pipeline } = await setup();
+    pipeline.folderCache.save(TREE, new Date());
+    const doc = inReview(pipeline);
+    const res = await approve(app, cookie, doc.id, JSON.stringify({ folder: { kind: 'new', parentLinkId: 'BILLS', name: '...' } }));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'invalid_folder_name' });
+    expect(pipeline.repo.get(doc.id)?.state).toBe('needs_review');
+  });
+
   it('checks a suggested new folder against the current tree too', async () => {
     const { app, cookie, pipeline } = await setup();
     pipeline.folderCache.save(TREE.filter((f) => f.linkId !== 'BILLS'), new Date());

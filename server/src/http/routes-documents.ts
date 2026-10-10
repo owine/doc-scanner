@@ -191,6 +191,7 @@ export function documentRoutes(deps: { store: SessionStore; pipeline: Pipeline }
     // current tree, since a suggested folder may have moved or gone since.
     const want = body.data.folder ?? doc.analysis?.folder;
     if (!want) return c.json({ error: 'folder_required' }, 400);
+    if (want.kind === 'new' && !sanitiseName(want.name, '')) return c.json({ error: 'invalid_folder_name' }, 400);
     const folder = currentFolder(want, pathOf);
     if (!folder) return c.json({ error: 'unknown_folder' }, 400);
 

@@ -17,6 +17,8 @@ const APPROVE_ERRORS: Record<string, string> = {
   folders_not_loaded: 'The folder list has not loaded from Drive yet. Try again in a moment.',
   name_required: 'Give the document a name.',
   folder_required: 'Pick a folder.',
+  invalid_folder_name: 'That folder name has no usable characters. Pick another name.',
+  not_found: 'This document no longer exists.',
   not_in_review: 'This document has already moved on.',
   conflict: 'This document has already moved on.',
 };

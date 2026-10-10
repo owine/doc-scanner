@@ -69,6 +69,20 @@ describe('ReviewCard', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(/no longer exists/i);
   });
 
+  it('explains an unusable folder name', async () => {
+    renderCard(makeDoc(), { onApprove: vi.fn().mockRejectedValue(new ApiError('x', 400, 'invalid_folder_name')) });
+    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(/no usable characters/i);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Approve' })).toBeEnabled());
+  });
+
+  it('explains a document that no longer exists', async () => {
+    renderCard(makeDoc(), { onApprove: vi.fn().mockRejectedValue(new ApiError('x', 404, 'not_found')) });
+    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(/no longer exists/i);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Approve' })).toBeEnabled());
+  });
+
   it('notes an analysis from file details only', () => {
     renderCard(makeDoc({ analysis: { ...makeDoc().analysis!, contentSeen: false } }));
     expect(screen.getByText(/file's details only/i)).toBeInTheDocument();
