@@ -1,4 +1,5 @@
 import type { ComponentChildren } from 'preact';
+import { ApiError } from '../../api.js';
 import { documentsApi, type DocumentsApi } from '../../documents/api.js';
 import { groupDocuments } from '../../documents/group.js';
 import { useDocuments, type DocumentSync } from '../../documents/sync.js';
@@ -43,7 +44,12 @@ export function InboxScreen({
   const approve = async (id: string, body: ApproveBody) => sync.upsert(await documents.approve(id, body));
   // Read the document back: a poll already in flight may predate the discard.
   const discard = async (id: string) => {
-    await documents.discard(id);
+    try {
+      await documents.discard(id);
+    } catch (err) {
+      await readBackIfRefused(id, err);
+      return;
+    }
     // The discard has happened; failing to read it back must not report it as failed.
     try {
       sync.upsert(await documents.get(id));
@@ -55,8 +61,26 @@ export function InboxScreen({
   const confirmedDiscard = async (d: DocumentView) => {
     if (confirmDiscard(d)) await discard(d.id);
   };
-  const restore = async (id: string) => sync.upsert(await documents.restore(id));
-  const retry = async (id: string) => sync.upsert(await documents.retry(id));
+  // A 409 means the document already moved on (another device, or the worker):
+  // show where it is now instead of reporting the action as failed.
+  const readBackIfRefused = async (id: string, err: unknown) => {
+    if (!(err instanceof ApiError && err.status === 409)) throw err;
+    sync.upsert(await documents.get(id));
+  };
+  const restore = async (id: string) => {
+    try {
+      sync.upsert(await documents.restore(id));
+    } catch (err) {
+      await readBackIfRefused(id, err);
+    }
+  };
+  const retry = async (id: string) => {
+    try {
+      sync.upsert(await documents.retry(id));
+    } catch (err) {
+      await readBackIfRefused(id, err);
+    }
+  };
 
   return (
     <main class="inbox">

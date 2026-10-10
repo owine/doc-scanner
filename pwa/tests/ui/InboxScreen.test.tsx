@@ -4,6 +4,7 @@ import { InboxScreen } from '../../src/ui/inbox/InboxScreen.js';
 import { DocumentSync } from '../../src/documents/sync.js';
 import type { DocumentsApi } from '../../src/documents/api.js';
 import type { DocumentView } from '../../src/documents/types.js';
+import { ApiError } from '../../src/api.js';
 import { FOLDERS, makeDoc } from '../documents/fixtures.js';
 
 const NOW = new Date('2026-10-10T12:00:00.000Z');
@@ -111,6 +112,29 @@ describe('InboxScreen', () => {
     fireEvent.click(screen.getByRole('button', { name: /sign in again/i }));
     expect(props.onSignInAgain).toHaveBeenCalled();
     await waitFor(() => expect(screen.getByText('Waiting for sign-in')).toBeInTheDocument());
+  });
+
+  it('reads a document back when a discard was refused because it already moved on', async () => {
+    const doc = makeDoc({ state: 'awaiting_login' });
+    const { api } = setup([doc], {
+      discard: vi.fn().mockRejectedValue(new ApiError('not allowed', 409, 'not_allowed')),
+    });
+    fireEvent.click(within(screen.getByRole('region', { name: 'In progress' })).getByRole('button', { name: 'Discard' }));
+    await waitFor(() => expect(api.get).toHaveBeenCalledWith(doc.id));
+    expect(await screen.findByRole('region', { name: 'Discarded' })).toBeInTheDocument();
+    expect(screen.queryByText(/failed, try again/i)).toBeNull();
+  });
+
+  it('reads a document back when a retry was refused because it already moved on', async () => {
+    const doc = makeDoc({ state: 'failed', error: 'Drive was unavailable' });
+    const { api } = setup([doc], {
+      retry: vi.fn().mockRejectedValue(new ApiError('not allowed', 409, 'not_allowed')),
+      get: vi.fn(async () => ({ ...doc, state: 'received' as const, seq: 999 })),
+    });
+    fireEvent.click(within(screen.getByRole('region', { name: 'Failed' })).getByRole('button', { name: 'Retry' }));
+    await waitFor(() => expect(api.get).toHaveBeenCalledWith(doc.id));
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Failed' })).toBeNull());
+    expect(screen.getByText('Queued')).toBeInTheDocument();
   });
 
   it('opens the scanner, settings and saved scans', async () => {
