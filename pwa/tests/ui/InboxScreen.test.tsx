@@ -137,6 +137,27 @@ describe('InboxScreen', () => {
     expect(screen.getByText('Queued')).toBeInTheDocument();
   });
 
+  it('drops a discarded row once retention passes, without any document change', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    try {
+      let clock = NOW.getTime();
+      const sync = new DocumentSync({ list: vi.fn().mockResolvedValue({ documents: [], cursor: 0 }) });
+      sync.loaded = true;
+      sync.upsert(makeDoc({ state: 'discarded', discardedAt: '2026-10-04T12:00:00.000Z' }));
+      const api = { folders: vi.fn().mockResolvedValue({ walkedAt: NOW.toISOString(), folders: FOLDERS }), refreshFolders: vi.fn() } as unknown as DocumentsApi;
+      render(<InboxScreen sync={sync} documents={api} now={() => new Date(clock)} onScan={vi.fn()} onSavedScans={vi.fn()} onSettings={vi.fn()} onSignInAgain={vi.fn()} />);
+      expect(screen.getByRole('region', { name: 'Discarded' })).toBeInTheDocument();
+      // Let the mount's own re-renders and the folder load settle first.
+      await waitFor(() => expect(api.folders).toHaveBeenCalled());
+      await new Promise((r) => setTimeout(r, 20));
+      clock += 2 * 86_400_000 + 60_000;
+      vi.advanceTimersByTime(60_000);
+      await waitFor(() => expect(screen.queryByRole('region', { name: 'Discarded' })).toBeNull());
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('opens the scanner, settings and saved scans', async () => {
     const { props } = setup([]);
     fireEvent.click(screen.getByRole('button', { name: 'Scan' }));

@@ -1,4 +1,5 @@
 import type { ComponentChildren } from 'preact';
+import { useEffect, useState } from 'preact/hooks';
 import { ApiError } from '../../api.js';
 import { documentsApi, type DocumentsApi } from '../../documents/api.js';
 import { groupDocuments } from '../../documents/group.js';
@@ -38,6 +39,13 @@ export function InboxScreen({
   onSignInAgain,
 }: InboxScreenProps) {
   const { docs, loaded, error } = useDocuments(sync);
+  // A coarse clock. The server purges discarded documents without bumping their
+  // seq, so the change feed never removes them; the day counts need it too.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), 60_000);
+    return () => clearInterval(id);
+  }, []);
   const folders = useFolders(documents);
   const g = groupDocuments(docs, now());
 
