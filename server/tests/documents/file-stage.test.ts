@@ -115,6 +115,61 @@ describe('fileStage', () => {
     expect(h.repo.get(doc.id)).toMatchObject({ state: 'filed', discardRequested: false });
   });
 
+  it('honours a discard requested while the new folder was being created', async () => {
+    h = makeHarness();
+    const doc = filingDoc(NEW);
+    h.drive.createFolder.mockImplementation(async () => {
+      expect(h.repo.requestDiscard(doc.id)).toBe('requested');
+      return 'NEWFOLDER';
+    });
+    await fileStage(doc, h.ctx);
+    expect(h.drive.uploadFile).not.toHaveBeenCalled();
+    // The folder stays in Drive; a later filing into it finds it by name.
+    expect(h.repo.get(doc.id)).toMatchObject({
+      state: 'discarded',
+      filingTarget: null,
+      decision: { folder: { kind: 'new', createdLinkId: 'NEWFOLDER' } },
+    });
+  });
+
+  it('honours a discard requested while looking for an existing folder of that name', async () => {
+    h = makeHarness();
+    const doc = filingDoc(NEW);
+    h.drive.findChildFolder.mockImplementation(async () => {
+      h.repo.requestDiscard(doc.id);
+      return 'EXISTINGWATER';
+    });
+    await fileStage(doc, h.ctx);
+    expect(h.drive.uploadFile).not.toHaveBeenCalled();
+    expect(h.repo.get(doc.id)?.state).toBe('discarded');
+  });
+
+  it('refreshes the folder cache for a new folder only after the upload', async () => {
+    h = makeHarness();
+    const order: string[] = [];
+    h.drive.uploadFile.mockImplementation(async () => {
+      order.push('upload');
+      return { nodeUid: 'NODE1', driveUrl: '', name: 'Water Sep 2026.pdf' };
+    });
+    h.refreshFolderCache.mockImplementation(async () => {
+      order.push('refresh');
+    });
+    const doc = filingDoc(NEW);
+    await fileStage(doc, h.ctx);
+    expect(order).toEqual(['upload', 'refresh']);
+    expect(h.repo.get(doc.id)?.state).toBe('filed');
+  });
+
+  it('once a target for this folder is set, finishes the filing despite a pending discard', async () => {
+    h = makeHarness();
+    const doc = filingDoc(EXISTING, { filingTarget: { folderLinkId: 'BILLS', name: 'Northwind Energy Sep 2026.pdf' } });
+    h.repo.requestDiscard(doc.id);
+    await fileStage(h.repo.get(doc.id)!, h.ctx);
+    expect(h.drive.findFileBySha1).toHaveBeenCalled();
+    expect(h.drive.uploadFile).toHaveBeenCalled();
+    expect(h.repo.get(doc.id)).toMatchObject({ state: 'filed', discardRequested: false });
+  });
+
   it('ignores a filing target left by an earlier decision for another folder', async () => {
     h = makeHarness();
     const doc = filingDoc(

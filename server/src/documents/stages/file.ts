@@ -25,8 +25,9 @@ type Drive = NonNullable<ReturnType<StageContext['liveSession']>>['driveClient']
  * records the result. Crash-safe: a created folder's uid and the upload
  * target are saved before the steps that depend on them, and a re-run first
  * looks for a file it already uploaded (same SHA-1) before uploading again.
- * Once filing has started it runs to completion even if a discard arrives:
- * an upload can't be taken back.
+ * A discard that arrives before the upload target is written still wins
+ * (a folder created by then simply stays); from then on the filing runs to
+ * completion, because the upload may have happened and can't be taken back.
  */
 export async function fileStage(doc: DocumentRow, ctx: StageContext): Promise<void> {
   const live = ctx.liveSession();
@@ -64,7 +65,23 @@ export async function fileStage(doc: DocumentRow, ctx: StageContext): Promise<vo
       if (found) uploaded = { nodeUid: found.uid, name: found.name };
     }
     if (!uploaded) {
-      ctx.repo.transition(doc.id, 'filing', 'filing', { filingTarget: { folderLinkId, name: fileName } }, KEEP_GOING);
+      // With no target yet, nothing has been uploaded, so a discard requested
+      // while the folder was resolved must still win: a plain compare-and-set.
+      // A target already on the row blocks discards (the repo treats the
+      // upload as possibly done), so writing over it keeps going regardless.
+      const targeted = ctx.repo.transition(
+        doc.id,
+        'filing',
+        'filing',
+        { filingTarget: { folderLinkId, name: fileName } },
+        doc.filingTarget ? KEEP_GOING : {},
+      );
+      if (!targeted) {
+        if (!ctx.repo.applyRequestedDiscard(doc.id)) {
+          logger.warn({ documentId: doc.id }, 'document left filing before its upload started');
+        }
+        return;
+      }
       const res = await drive.uploadFile(fileName, bytes, mime, { parentFolderUid: folderLinkId });
       uploaded = { nodeUid: res.nodeUid, name: res.name };
     }
@@ -107,11 +124,23 @@ export async function fileStage(doc: DocumentRow, ctx: StageContext): Promise<vo
     });
     // Plaintext first: a blob left behind by a failure here is reclaimed by the purge sweep.
     afterFiled(doc.id, 'could not delete the inbox copy of a filed document', () => ctx.inbox.deleteAll(doc.id));
-    // The filed name joins that folder's recent names right away (spec §5:
-    // edits teach the system). Best-effort: the next tree walk catches up.
-    afterFiled(doc.id, 'could not add the filed name to the folder cache', () =>
-      ctx.folderCache.recordFiled(folderLinkId, { uid: filedRef.nodeUid, name: filedRef.name, modified: ctx.now() }),
-    );
+    if (doc.decision.folder.kind === 'new') {
+      // A new folder isn't in the cached tree, so recordFiled can't reach it;
+      // a walk picks up the folder and this file together. Done after the
+      // upload, not before, so the walk doesn't hold up the filing (spec §4:
+      // the cache is refreshed after a folder is created).
+      try {
+        await ctx.refreshFolderCache();
+      } catch (err) {
+        logger.warn({ documentId: doc.id, errName: errorName(err) }, 'folder cache refresh failed');
+      }
+    } else {
+      // The filed name joins that folder's recent names right away (spec §5:
+      // edits teach the system). Best-effort: the next tree walk catches up.
+      afterFiled(doc.id, 'could not add the filed name to the folder cache', () =>
+        ctx.folderCache.recordFiled(folderLinkId, { uid: filedRef.nodeUid, name: filedRef.name, modified: ctx.now() }),
+      );
+    }
     logger.info({ documentId: doc.id, autoFiled: doc.autoFiled, userEdited: doc.userEdited }, 'document filed');
   } catch (err) {
     if (err instanceof FolderNameTakenError) {
@@ -148,13 +177,9 @@ async function resolveFolder(
   // when something the lookup can't see (a file, an unreadable item) owns the
   // name — fileStage turns that into a review with a clear reason.
   const createdLinkId = (await drive.findChildFolder(f.parentLinkId, f.name)) ?? (await drive.createFolder(f.parentLinkId, f.name));
-  // Saved at once: a crash before upload must not create the folder again.
+  // Saved at once, even past a pending discard: the folder exists now, and a
+  // re-run after a crash must not create it again.
   ctx.repo.transition(id, 'filing', 'filing', { decision: { ...decision, folder: { ...f, createdLinkId } } }, KEEP_GOING);
-  try {
-    await ctx.refreshFolderCache();
-  } catch (err) {
-    logger.warn({ documentId: id, errName: errorName(err) }, 'folder cache refresh failed');
-  }
   return { folderLinkId: createdLinkId, folderPath };
 }
 
