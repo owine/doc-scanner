@@ -1218,6 +1218,8 @@ git commit -m "feat(documents): encrypted inbox store for waiting documents"
 
 ## Task 8: Filing history, extensions, and the encrypted folder cache
 
+> **Superseded in part (ec30fb1):** by the user's decision, v1 records no filing history — `history.ts` and its test were removed after implementation, and migration 004's table stays empty until recall is built. The extension and folder-cache parts stand, hardened in review (safe fallback extensions, MIME normalisation, unreadable cache treated as absent, uid dedupe).
+
 Three small storage helpers the worker needs.
 
 **Files:**
