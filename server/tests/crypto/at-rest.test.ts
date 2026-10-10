@@ -18,7 +18,7 @@ describe('AtRestCipher', () => {
 
   it('derives separate keys per purpose', () => {
     const sealed = new AtRestCipher(MASTER, 'inbox').seal(new Uint8Array([1]));
-    expect(() => new AtRestCipher(MASTER, 'folder-cache').open(sealed)).toThrow();
+    expect(() => new AtRestCipher(MASTER, 'folder-cache').open(sealed)).toThrow(/unable to authenticate/i);
   });
 
   it('rejects tampered ciphertext', () => {
@@ -30,5 +30,33 @@ describe('AtRestCipher', () => {
 
   it('requires a 32-byte master key', () => {
     expect(() => new AtRestCipher(Buffer.alloc(16).toString('base64'), 'inbox')).toThrow(/32 bytes/);
+  });
+
+  it('opens a blob with a new instance of the same purpose', () => {
+    const sealed = new AtRestCipher(MASTER, 'inbox').seal(new Uint8Array([9, 8, 7]));
+    expect([...new AtRestCipher(MASTER, 'inbox').open(sealed)]).toEqual([9, 8, 7]);
+  });
+
+  it('opens a pinned known-answer blob (key derivation and layout are stable)', () => {
+    const pinned = 'X0x6Vj41PzfNgg0Ugi9gKWAcqjrHLsFeRQxouDAKOdtJmFAZQajyJaAx0foKTOPRIviqaFZmC9OO';
+    const c = new AtRestCipher(MASTER, 'inbox');
+    expect(c.open(Buffer.from(pinned, 'base64')).toString('utf8')).toBe('Northwind Energy invoice 0042');
+  });
+
+  it('rejects a too-short blob', () => {
+    const c = new AtRestCipher(MASTER, 'inbox');
+    expect(() => c.open(new Uint8Array(20))).toThrow(/too short/);
+  });
+
+  it('rejects a flipped byte inside the tag', () => {
+    const c = new AtRestCipher(MASTER, 'inbox');
+    const sealed = c.seal(new Uint8Array([1, 2, 3]));
+    sealed[20] ^= 0xff;
+    expect(() => c.open(sealed)).toThrow(/unable to authenticate/i);
+  });
+
+  it('round-trips empty plaintext', () => {
+    const c = new AtRestCipher(MASTER, 'inbox');
+    expect(c.open(c.seal(new Uint8Array(0))).length).toBe(0);
   });
 });
