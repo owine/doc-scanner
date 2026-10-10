@@ -2790,7 +2790,13 @@ export class DocumentWorker {
     if (attempts >= MAX_ATTEMPTS) {
       // discardRequested cleared: a failed document is resting, discardable on request.
       if (this.d.repo.transition(doc.id, state, 'failed', { attempts, error, discardRequested: false }, opts)) {
-        this.d.report(err, stage, [doc.originalName ?? '', doc.decision?.name ?? '', doc.analysis?.name ?? '']);
+        const f = doc.decision?.folder;
+        this.d.report(err, stage, [
+          doc.originalName ?? '',
+          doc.decision?.name ?? '',
+          doc.analysis?.name ?? '',
+          f?.kind === 'new' ? f.name : '',
+        ]);
       } else {
         this.d.repo.applyRequestedDiscard(doc.id);
       }
@@ -2828,7 +2834,7 @@ export class DocumentWorker {
     try {
       await this.refreshFolderCache();
     } catch (err) {
-      logger.warn({ err: (err as Error).message }, 'folder cache refresh after login failed');
+      logger.warn({ errName: (err as Error).name }, 'folder cache refresh after login failed');
     }
     this.d.repo.makeDueNow('received');
     await this.wake();
@@ -2850,7 +2856,10 @@ export class DocumentWorker {
 
   start(): void {
     const every = (ms: number, fn: () => unknown) => {
-      const t = setInterval(() => void Promise.resolve(fn()).catch((err) => logger.warn({ err }, 'worker timer failed')), ms);
+      const t = setInterval(
+        () => void Promise.resolve(fn()).catch((err: unknown) => logger.warn({ errName: (err as Error).name }, 'worker timer failed')),
+        ms,
+      );
       t.unref();
       this.timers.push(t);
     };
@@ -3004,6 +3013,8 @@ export function toView(d: DocumentRow) {
     filed: d.state === 'filed' ? { name: d.filedName, folderPath: d.filedFolderPath, driveNodeUid: d.driveNodeUid } : null,
     autoFiled: d.autoFiled,
     userEdited: d.userEdited,
+    // An upload was started: discarding now may leave a copy in Drive (the PWA warns).
+    possiblyInDrive: d.state !== 'filed' && d.filingTarget !== null,
     discardRequested: d.discardRequested,
     discardedAt: d.discardedAt,
   };
