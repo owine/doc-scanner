@@ -7,6 +7,7 @@ import {
   registerLiveSession,
   type LiveSession,
 } from '../../src/auth/live-session.js';
+import { logger } from '../../src/logger.js';
 
 const fake = (sid: string, dispose: () => void = () => {}) =>
   ({ sid, mailboxSecret: { dispose } }) as unknown as LiveSession;
@@ -112,6 +113,21 @@ describe('live-session hooks', () => {
       expect(unhandled).not.toHaveBeenCalled();
     } finally {
       process.off('unhandledRejection', unhandled);
+    }
+  });
+
+  it('logs a listener failure by its type only', async () => {
+    const warn = vi.spyOn(logger, 'warn');
+    try {
+      listen(() => {
+        throw new RangeError('/Private/Northwind Energy');
+      });
+      registerLiveSession(fake('a'));
+      await tick();
+      expect(warn).toHaveBeenCalledWith({ errName: 'RangeError' }, 'live-session listener failed');
+      expect(JSON.stringify(warn.mock.calls)).not.toContain('Northwind');
+    } finally {
+      warn.mockRestore();
     }
   });
 });

@@ -3,6 +3,7 @@ import type { MailboxSecret } from './secrets/mailbox-password.js';
 import type { DecryptedUserKey } from './keys.js';
 import type { DriveClient } from '../drive/client.js';
 import { logger } from '../logger.js';
+import { errorName } from '../observability/error-name.js';
 
 export interface LiveSession {
   sid: string;
@@ -44,7 +45,8 @@ export function registerLiveSession(s: LiveSession): void {
   for (const fn of listeners) {
     void Promise.resolve()
       .then(() => fn(s))
-      .catch((err) => logger.warn({ err }, 'live-session listener failed'));
+      // The type only: a listener's error could quote document or folder names.
+      .catch((err: unknown) => logger.warn({ errName: errorName(err) }, 'live-session listener failed'));
   }
 }
 
