@@ -13,8 +13,35 @@ export interface LiveSession {
 
 const sessions = new Map<string, LiveSession>();
 
+const listeners = new Set<(s: LiveSession) => void>();
+
+/** Called after every login; returns an unsubscribe function. */
+export function onLiveSessionRegistered(fn: (s: LiveSession) => void): () => void {
+  listeners.add(fn);
+  return () => listeners.delete(fn);
+}
+
+/**
+ * The current live session, for work that runs outside a request (the
+ * document worker). Single-user: the most recent login wins.
+ */
+export function getAnyLiveSession(): LiveSession | undefined {
+  let last: LiveSession | undefined;
+  for (const s of sessions.values()) last = s;
+  return last;
+}
+
 export function registerLiveSession(s: LiveSession): void {
+  // Re-insert so iteration order tracks recency.
+  sessions.delete(s.sid);
   sessions.set(s.sid, s);
+  for (const fn of listeners) {
+    try {
+      fn(s);
+    } catch {
+      // A listener's failure is its own problem; login must still succeed.
+    }
+  }
 }
 
 export function getLiveSession(sid: string): LiveSession | undefined {
