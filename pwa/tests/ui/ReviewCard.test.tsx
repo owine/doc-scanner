@@ -29,6 +29,7 @@ describe('ReviewCard', () => {
     const { onApprove } = renderCard();
     fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
     await waitFor(() => expect(onApprove).toHaveBeenCalledWith({}));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Approve' })).toBeEnabled());
   });
 
   it('sends an edited name and a changed folder', async () => {
@@ -44,6 +45,7 @@ describe('ReviewCard', () => {
         folder: { kind: 'existing', linkId: 'L-water' },
       }),
     );
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Approve' })).toBeEnabled());
   });
 
   it('marks a proposed new folder and sends it unchanged as-is', async () => {
@@ -55,6 +57,7 @@ describe('ReviewCard', () => {
     expect(screen.getByText('/Bills/Gas')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
     await waitFor(() => expect(onApprove).toHaveBeenCalledWith({}));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Approve' })).toBeEnabled());
   });
 
   it('needs a folder and a name before it can approve', () => {
@@ -98,6 +101,7 @@ describe('ReviewCard', () => {
     const { onDiscard } = renderCard();
     fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
     await waitFor(() => expect(onDiscard).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Discard' })).toBeEnabled());
   });
 
   it('asks before discarding a document that may be in Drive', async () => {
@@ -106,5 +110,37 @@ describe('ReviewCard', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
     expect(window.confirm).toHaveBeenCalled();
     expect(onDiscard).not.toHaveBeenCalled();
+  });
+
+  it('sends {} when the suggested folder is picked again', async () => {
+    const { onApprove } = renderCard();
+    fireEvent.click(screen.getByRole('button', { name: 'Change' }));
+    fireEvent.click(screen.getByRole('button', { name: '/Bills/Energy' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+    await waitFor(() => expect(onApprove).toHaveBeenCalledWith({}));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Approve' })).toBeEnabled());
+  });
+
+  it('sends {} when the name differs only by surrounding whitespace', async () => {
+    const { onApprove } = renderCard();
+    fireEvent.input(screen.getByRole('textbox', { name: 'Name' }), { target: { value: '  Northwind Energy Bill 2026-09  ' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+    await waitFor(() => expect(onApprove).toHaveBeenCalledWith({}));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Approve' })).toBeEnabled());
+  });
+
+  it('discards after the user confirms', async () => {
+    window.confirm = vi.fn().mockReturnValue(true);
+    const { onDiscard } = renderCard(makeDoc({ possiblyInDrive: true }));
+    fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
+    await waitFor(() => expect(onDiscard).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Discard' })).toBeEnabled());
+  });
+
+  it('returns focus to Change after Cancel', async () => {
+    renderCard();
+    fireEvent.click(screen.getByRole('button', { name: 'Change' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Change' })).toHaveFocus());
   });
 });
