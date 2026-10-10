@@ -18,6 +18,10 @@ export const VARIANTS: Record<string, { model: string; effort: Effort; label: st
   v1: { model: 'claude-haiku-5-5', effort: 'medium', label: 'Haiku 5.5, medium effort' },
   v2: { model: 'claude-sonnet-5-5', effort: 'low', label: 'Sonnet 5.5, low effort' },
   v3: { model: 'claude-opus-5-5', effort: 'low', label: 'Opus 5.5, low effort' },
+  // Confirmation round for the two finalists, after the photo-filing prompt
+  // fix (508fa80) and encrypted-PDF reading; run with --reps 2.
+  v4: { model: 'claude-haiku-5-5', effort: 'medium', label: 'Haiku 5.5, medium effort (fixed prompt)' },
+  v5: { model: 'claude-opus-5-5', effort: 'low', label: 'Opus 5.5, low effort (fixed prompt)' },
 };
 
 export const AUTO_FILE_THRESHOLD = 0.85;
