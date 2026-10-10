@@ -76,9 +76,23 @@ function upload(app: Awaited<ReturnType<typeof setup>>['app'], cookie: string, t
 }
 
 describe('document routes', () => {
-  it('requires a login', async () => {
+  it('requires a login on every router', async () => {
     const { app } = await setup();
-    expect((await app.request('/api/documents')).status).toBe(401);
+    const routes: [string, string][] = [
+      ['GET', '/api/documents'],
+      ['POST', '/api/documents'],
+      ['GET', '/api/documents/some-id'],
+      ['POST', '/api/documents/some-id/approve'],
+      ['POST', '/api/documents/some-id/discard'],
+      ['GET', '/api/folders'],
+      ['POST', '/api/folders/refresh'],
+      ['GET', '/api/settings'],
+      ['PUT', '/api/settings'],
+    ];
+    for (const [method, path] of routes) {
+      const res = await app.request(path, { method, headers: { 'content-type': 'application/json' }, ...(method === 'GET' ? {} : { body: '{}' }) });
+      expect([method, path, res.status]).toEqual([method, path, 401]);
+    }
     expect((await app.request('/api/health')).status).toBe(200); // guard is scoped
   });
 
@@ -176,8 +190,8 @@ describe('document routes', () => {
     expect(put.status).toBe(200);
     const folders = (await (await app.request('/api/folders', { headers: { cookie } })).json()) as { folders: { path: string }[] };
     expect(folders.folders.map((f) => f.path)).toEqual(['/', '/Bills']);
-    // Unauthenticated refresh is refused by the guard. (A logged-in refresh
-    // would walk the real Drive, so it is exercised in Task 18, not here.)
+    // Unauthenticated refresh is refused by the guard; a logged-in one is
+    // tested under 'folder refresh' with a fake walk.
     expect((await app.request('/api/folders/refresh', { method: 'POST' })).status).toBe(401);
     const bad = await app.request('/api/settings', {
       method: 'PUT',
@@ -462,5 +476,60 @@ describe('pipeline', () => {
     });
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(onLogin).not.toHaveBeenCalled();
+  });
+});
+
+describe('document route edges', () => {
+  it('rejects a cursor that is not a whole, non-negative number', async () => {
+    const { app, cookie } = await setup();
+    for (const since of ['-1', 'abc', '1.5']) {
+      const res = await app.request(`/api/documents?since=${since}`, { headers: { cookie } });
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ error: 'invalid_cursor' });
+    }
+  });
+
+  it('defers the discard of a working document to the worker, which applies it at once', async () => {
+    const { app, cookie, pipeline } = await setup();
+    const doc = pipeline.repo.insert({ source: 'picker', originalName: 'a.pdf', mime: 'application/pdf', size: 1, sha256: 'd', sourceContext: null });
+    pipeline.repo.transition(doc.id, 'received', 'analyzing');
+    const res = await app.request(`/api/documents/${doc.id}/discard`, { method: 'POST', headers: { cookie } });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ result: 'requested' });
+    expect(pipeline.repo.get(doc.id)?.state).toBe('discarded');
+  });
+
+  it('refuses to discard a filed document', async () => {
+    const { app, cookie, pipeline } = await setup();
+    const doc = pipeline.repo.insert({ source: 'picker', originalName: 'a.pdf', mime: 'application/pdf', size: 1, sha256: 'f', sourceContext: null });
+    pipeline.repo.transition(doc.id, 'received', 'filed', { filedName: 'Northwind Energy Sep 2026.pdf', filedFolderPath: '/Bills', driveNodeUid: 'N1' });
+    const res = await app.request(`/api/documents/${doc.id}/discard`, { method: 'POST', headers: { cookie } });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: 'not_allowed' });
+    expect(pipeline.repo.get(doc.id)?.state).toBe('filed');
+  });
+
+  it('rejects settings that are not JSON', async () => {
+    const { app, cookie, pipeline } = await setup();
+    const res = await app.request('/api/settings', {
+      method: 'PUT',
+      headers: { cookie, 'content-type': 'application/json' },
+      body: '{"autoFileEnabled": tr',
+    });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'invalid_input' });
+    expect(pipeline.settings.get().autoFileEnabled).toBe(false);
+  });
+
+  it('refuses an upload over the size limit', async () => {
+    const { app, cookie, pipeline } = await setup();
+    const fd = new FormData();
+    // The route's limit is 50 MiB for the whole body.
+    fd.append('file', new File([new Uint8Array(50 * 1024 * 1024 + 1)], 'big.pdf', { type: 'application/pdf' }));
+    fd.append('source', 'picker');
+    const res = await app.request('/api/documents', { method: 'POST', body: fd, headers: { cookie } });
+    expect(res.status).toBe(413);
+    expect(await res.json()).toEqual({ error: 'payload_too_large' });
+    expect(pipeline.repo.listChangedSince(0)).toHaveLength(0);
   });
 });
