@@ -49,23 +49,32 @@ export async function fileStage(doc: DocumentRow, ctx: StageContext): Promise<vo
   const drive = live.driveClient;
 
   try {
+    let decision = doc.decision;
     // Before a target is set nothing has been uploaded, so it isn't too late.
     if (doc.autoFiled && !doc.filingTarget) {
-      const problem = await autoFiledFolderProblem(doc.decision, ctx);
-      if (problem) {
-        if (!ctx.repo.transition(doc.id, 'filing', 'needs_review', { reviewReason: problem, attempts: 0, error: null })) {
+      const checked = await recheckAutoFiledFolder(decision, ctx);
+      if ('problem' in checked) {
+        if (!ctx.repo.transition(doc.id, 'filing', 'needs_review', { reviewReason: checked.problem, attempts: 0, error: null })) {
           ctx.repo.applyRequestedDiscard(doc.id);
         }
         return;
       }
+      if (checked.decision !== decision) {
+        // Saved, so a re-run after a crash records the same path.
+        if (!ctx.repo.transition(doc.id, 'filing', 'filing', { decision: checked.decision })) {
+          ctx.repo.applyRequestedDiscard(doc.id);
+          return;
+        }
+        decision = checked.decision;
+      }
     }
-    const { folderLinkId, folderPath } = await resolveFolder(doc.id, doc.decision, ctx, drive);
+    const { folderLinkId, folderPath } = await resolveFolder(doc.id, decision, ctx, drive);
 
     const kind = ctx.inbox.has(doc.id, 'prepared') ? 'prepared' : 'original';
     const bytes = ctx.inbox.get(doc.id, kind);
     // The type of the blob actually sent: a recorded prepared type without its blob doesn't apply.
     const mime = kind === 'prepared' ? (doc.preparedMime ?? doc.mime) : doc.mime;
-    const fileName = doc.decision.name + extensionFor(mime, doc.originalName);
+    const fileName = decision.name + extensionFor(mime, doc.originalName);
     const sha1 = createHash('sha1').update(bytes).digest('hex');
 
     let uploaded: { nodeUid: string; name: string } | null = null;
@@ -135,7 +144,7 @@ export async function fileStage(doc: DocumentRow, ctx: StageContext): Promise<vo
     });
     // Plaintext first: a blob left behind by a failure here is reclaimed by the purge sweep.
     afterFiled(doc.id, 'could not delete the inbox copy of a filed document', () => ctx.inbox.deleteAll(doc.id));
-    if (doc.decision.folder.kind === 'new') {
+    if (decision.folder.kind === 'new') {
       // A new folder isn't in the cached tree, so recordFiled can't reach it;
       // a walk picks up the folder and this file together. Done after the
       // upload, not before, so the walk doesn't hold up the filing (spec §4:
@@ -173,18 +182,19 @@ export async function fileStage(doc: DocumentRow, ctx: StageContext): Promise<vo
 }
 
 /**
- * Why an auto-filed decision's folder is no longer a safe target, or null if
- * it still is. Such a decision can wait days in awaiting_login, during which
- * the folder may be deleted or moved under a never-file-here path. Checked
- * against the current cached tree and settings, by link ID (a folder that was
- * only renamed or moved elsewhere is still fine). User-approved decisions are
- * not re-checked: approval validated them against the tree, and the user, not
- * the model, picked the folder.
+ * Re-checks an auto-filed decision's folder against the current cached tree
+ * and settings. Such a decision can wait days in awaiting_login, during which
+ * the folder may be deleted or moved under a never-file-here path: that is a
+ * problem, sent to review. A folder that was only renamed or moved elsewhere
+ * is found by link ID and still fine; the decision comes back with its
+ * current path (the same object when nothing changed). User-approved
+ * decisions are not re-checked: approval validated them against the tree,
+ * and the user, not the model, picked the folder.
  */
-async function autoFiledFolderProblem(decision: Decision, ctx: StageContext): Promise<string | null> {
+async function recheckAutoFiledFolder(decision: Decision, ctx: StageContext): Promise<{ problem: string } | { decision: Decision }> {
   const f = decision.folder;
   // Already created on an earlier run, so the walked tree may not have it yet.
-  if (f.kind === 'new' && f.createdLinkId) return null;
+  if (f.kind === 'new' && f.createdLinkId) return { decision };
   const linkId = f.kind === 'existing' ? f.linkId : f.parentLinkId;
   let cache = ctx.folderCache.load();
   if (!cache) {
@@ -192,9 +202,12 @@ async function autoFiledFolderProblem(decision: Decision, ctx: StageContext): Pr
     cache = ctx.folderCache.load();
   }
   const folder = cache?.tree.find((t) => t.linkId === linkId);
-  if (!folder) return 'suggested folder no longer available';
-  if (isUnderAny(folder.path, ctx.settings.get().excludePaths)) return 'folder is on the never-file-here list';
-  return null;
+  if (!folder) return { problem: 'suggested folder no longer available' };
+  if (isUnderAny(folder.path, ctx.settings.get().excludePaths)) return { problem: 'folder is on the never-file-here list' };
+  if (f.kind === 'existing') {
+    return f.path === folder.path ? { decision } : { decision: { ...decision, folder: { ...f, path: folder.path } } };
+  }
+  return f.parentPath === folder.path ? { decision } : { decision: { ...decision, folder: { ...f, parentPath: folder.path } } };
 }
 
 async function resolveFolder(

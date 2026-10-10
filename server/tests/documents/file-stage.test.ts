@@ -193,6 +193,22 @@ describe('fileStage', () => {
       expect(h.repo.get(doc.id)).toMatchObject({ state: 'needs_review', reviewReason: 'folder is on the never-file-here list' });
     });
 
+    it('files into a renamed folder and records its current path', async () => {
+      h = makeHarness();
+      h.ctx.folderCache.save(
+        TREE.map((f) => (f.linkId === 'BILLS' ? { ...f, path: '/Utilities' } : f)),
+        h.ctx.now(),
+      );
+      const doc = filingDoc(EXISTING);
+      await fileStage(doc, h.ctx);
+      expect(h.drive.uploadFile.mock.calls[0][3]).toEqual({ parentFolderUid: 'BILLS' });
+      expect(h.repo.get(doc.id)).toMatchObject({
+        state: 'filed',
+        filedFolderPath: '/Utilities',
+        decision: { folder: { kind: 'existing', linkId: 'BILLS', path: '/Utilities' } },
+      });
+    });
+
     it('walks the tree first when no folder cache is loaded', async () => {
       h = makeHarness({ withTree: false });
       h.refreshFolderCache.mockImplementation(async () => h.ctx.folderCache.save(TREE, h.ctx.now()));
