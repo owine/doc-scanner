@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { PDFDocument } from '@cantoo/pdf-lib';
 import sharp from 'sharp';
-import { buildDocumentContent } from '../../src/analyze/content.js';
+import { buildDocumentContent, MAX_FILE_BYTES } from '../../src/analyze/content.js';
 import { preparePdf, MAX_ANALYZED_PAGES } from '../../src/analyze/pdf.js';
 import { normaliseImage } from '../../src/analyze/image.js';
 
@@ -81,6 +81,17 @@ describe('buildDocumentContent', () => {
     const out = await buildDocumentContent(await pdfWithPages(22), 'application/pdf');
     expect(out.blocks[0]).toMatchObject({ type: 'document', source: { media_type: 'application/pdf' } });
     expect(out.note).toBe('showing the first 20 of 22 pages');
+  });
+
+  it('sends no file content for a PDF over the size budget', async () => {
+    const doc = await PDFDocument.create();
+    doc.addPage([200, 200]);
+    // An unreferenced, uncompressed stream: a few pages that are huge on disk.
+    doc.context.register(doc.context.stream(new Uint8Array(MAX_FILE_BYTES + 1)));
+    const out = await buildDocumentContent(await doc.save(), 'application/pdf');
+    expect(out.blocks).toEqual([]);
+    expect(out.note).toContain('too large');
+    expect(out.mayBeUnopenable).toBeFalsy();
   });
 
   it('falls back to metadata for an undecodable image', async () => {

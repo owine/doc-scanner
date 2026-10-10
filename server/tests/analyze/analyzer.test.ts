@@ -123,10 +123,50 @@ describe('createAnalyzer', () => {
     expect(retry.at(-1).text).toContain('password-protected');
   });
 
-  it('does not swallow a bad request for an ordinary document', async () => {
-    const create = vi.fn().mockRejectedValue(new Anthropic.BadRequestError(400, undefined, 'bad', new Headers()));
+  const apiError = (status: number) => Anthropic.APIError.generate(status, undefined, `status ${status}`, new Headers());
+
+  it.each([400, 413, 422])('retries once from metadata alone when the API rejects the content (%i)', async (status) => {
+    const ok = fakeClient(textReply(goodAnswer));
+    const create = vi.fn().mockRejectedValueOnce(apiError(status)).mockImplementation(ok.create);
     const client = { messages: { create } } as unknown as Pick<Anthropic, 'messages'>;
-    await expect(createAnalyzer({ client, model: 'm', effort: 'low', autoFileThreshold: 0.8 }).analyze(input, folders)).rejects.toThrow('bad');
+    const out = await createAnalyzer({ client, model: 'm', effort: 'low', autoFileThreshold: 0.8 }).analyze(input, folders);
+    expect(out.status).toBe('ok');
+    expect(create).toHaveBeenCalledTimes(2);
+    const retry = create.mock.calls[1][0].messages[0].content as { type: string; text?: string }[];
+    expect(retry.some((b) => b.text?.includes('<document>'))).toBe(false);
+    expect(retry.at(-1)!.text).toContain('could not be sent');
+  });
+
+  it('does not fall back twice: a rejected metadata-only retry is thrown', async () => {
+    const create = vi.fn().mockRejectedValue(apiError(400));
+    const client = { messages: { create } } as unknown as Pick<Anthropic, 'messages'>;
+    await expect(createAnalyzer({ client, model: 'm', effort: 'low', autoFileThreshold: 0.8 }).analyze(input, folders)).rejects.toBeInstanceOf(
+      Anthropic.BadRequestError,
+    );
+    expect(create).toHaveBeenCalledTimes(2);
+  });
+
+  it('throws a bad request that carried no file content', async () => {
+    const create = vi.fn().mockRejectedValue(apiError(400));
+    const client = { messages: { create } } as unknown as Pick<Anthropic, 'messages'>;
+    const zip: AnalyzeInput = { ...input, bytes: new Uint8Array(4), mimeType: 'application/zip' };
+    await expect(createAnalyzer({ client, model: 'm', effort: 'low', autoFileThreshold: 0.8 }).analyze(zip, folders)).rejects.toBeInstanceOf(
+      Anthropic.BadRequestError,
+    );
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['401', () => apiError(401)],
+    ['403', () => apiError(403)],
+    ['429', () => apiError(429)],
+    ['500', () => apiError(500)],
+    ['connection', () => new Anthropic.APIConnectionError({ message: 'reset' })],
+  ])('throws a %s error without falling back, for the worker to retry or fail', async (_label, make) => {
+    const err = make();
+    const create = vi.fn().mockRejectedValue(err);
+    const client = { messages: { create } } as unknown as Pick<Anthropic, 'messages'>;
+    await expect(createAnalyzer({ client, model: 'm', effort: 'low', autoFileThreshold: 0.8 }).analyze(input, folders)).rejects.toBe(err);
     expect(create).toHaveBeenCalledTimes(1);
   });
 
