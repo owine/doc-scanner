@@ -1869,6 +1869,8 @@ git commit -m "feat(observability): report failed documents without their names"
 
 ## Task 12: Pipeline stages — analyze, prepare, decide
 
+> **Hardened in review (5769161):** every forward transition resets `attempts`/`error`; with a live session and no cached tree the analyze stage refreshes once before deferring, and defers by moving the row to `received`; review reasons are ordered most-specific-first (no analysis → no folder → new folder → never-file-here → confidence → auto-filing off) and the confidence shows 3 decimals; decide logs its outcome. The code below is the original plan text; the repo is the reference.
+
 Each stage receives a document the worker picked and moves it on with a compare-and-set. If the move fails because a discard is pending, the stage hands over to `applyRequestedDiscard`. A stage **throws** only for retryable errors; the worker (Task 14) owns retries.
 
 **Files:**
@@ -2646,6 +2648,13 @@ describe('DocumentWorker', () => {
     expect(h.inbox.listIds().sort()).toEqual([pending.id].sort());
   });
 
+  it('shares one folder walk between concurrent refreshes', async () => {
+    h = makeHarness();
+    const w = new DocumentWorker(h.ctx);
+    await Promise.all([w.refreshFolderCache(), w.refreshFolderCache(), w.refreshFolderCache()]);
+    expect(h.drive.walkFolderTree).toHaveBeenCalledTimes(1);
+  });
+
   it('purges documents discarded more than seven days ago, blobs included', async () => {
     h = makeHarness();
     const doc = h.add();
@@ -2793,13 +2802,24 @@ export class DocumentWorker {
     }
   }
 
-  /** Re-walks Drive and caches the tree. A no-op without a live session. */
-  async refreshFolderCache(): Promise<void> {
-    const live = this.d.liveSession();
-    if (!live) return;
-    const tree = await live.driveClient.walkFolderTree();
-    this.d.folderCache.save(tree, this.d.now());
-    logger.info({ folders: tree.length }, 'folder cache refreshed');
+  private refreshing: Promise<void> | null = null;
+
+  /**
+   * Re-walks Drive and caches the tree. A no-op without a live session.
+   * Concurrent callers (login, the timer, several deferred analyses) share
+   * one walk in flight.
+   */
+  refreshFolderCache(): Promise<void> {
+    this.refreshing ??= (async () => {
+      const live = this.d.liveSession();
+      if (!live) return;
+      const tree = await live.driveClient.walkFolderTree();
+      this.d.folderCache.save(tree, this.d.now());
+      logger.info({ folders: tree.length }, 'folder cache refreshed');
+    })().finally(() => {
+      this.refreshing = null;
+    });
+    return this.refreshing;
   }
 
   /** After a login: fresh tree, then everything that was waiting. */
