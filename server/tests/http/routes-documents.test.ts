@@ -12,6 +12,7 @@ import { MailboxSecret } from '../../src/auth/secrets/mailbox-password.js';
 import type { DecryptedUserKey } from '../../src/auth/keys.js';
 import { createPipeline, type Pipeline } from '../../src/documents/pipeline.js';
 import { ANALYSIS, TREE, okOutcome } from '../documents/harness.js';
+import { logger } from '../../src/logger.js';
 
 const KEY = Buffer.alloc(32, 1).toString('base64');
 let keys: DecryptedUserKey;
@@ -286,5 +287,42 @@ describe('approve', () => {
     pipeline.folderCache.save(TREE.map((f) => (f.linkId === 'BILLS' ? { ...f, path: '/Household/Bills' } : f)), new Date());
     expect((await approve(app, cookie, doc.id)).status).toBe(200);
     expect(pipeline.repo.get(doc.id)?.decision?.folder).toEqual({ kind: 'new', parentLinkId: 'BILLS', parentPath: '/Household/Bills', name: 'Water' });
+  });
+});
+
+/** A live session whose only Drive call is the folder walk. */
+function walking(walkFolderTree: () => Promise<typeof TREE>): () => LiveSession {
+  return () => ({ driveClient: { walkFolderTree } }) as unknown as LiveSession;
+}
+
+describe('errors', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('answers a failed folder refresh with 502 and logs only the error type', async () => {
+    const secret = '/Private/Northwind Energy';
+    const { app, cookie, pipeline } = await setup({ liveSession: walking(async () => Promise.reject(new TypeError(secret))) });
+    const log = vi.spyOn(logger, 'error');
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const res = await app.request('/api/folders/refresh', { method: 'POST', headers: { cookie } });
+    expect(res.status).toBe(502);
+    expect(await res.json()).toEqual({ error: 'refresh_failed' });
+    expect(pipeline.folderCache.load()).toBeNull();
+    expect(log).toHaveBeenCalledWith({ errName: 'TypeError' }, expect.any(String));
+    expect(JSON.stringify([log.mock.calls, consoleError.mock.calls])).not.toContain('Northwind');
+  });
+
+  it('answers an unhandled route error with a bare 500 and logs only its type', async () => {
+    const { app, cookie, pipeline } = await setup();
+    vi.spyOn(pipeline.settings, 'get').mockImplementation(() => {
+      throw new RangeError('/Private/Northwind Energy');
+    });
+    const log = vi.spyOn(logger, 'error');
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const res = await app.request('/api/settings', { headers: { cookie } });
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ error: 'internal' });
+    expect(log).toHaveBeenCalledWith({ errName: 'RangeError', method: 'GET', route: '/api/settings' }, expect.any(String));
+    expect(consoleError).not.toHaveBeenCalled();
+    expect(JSON.stringify(log.mock.calls)).not.toContain('Northwind');
   });
 });

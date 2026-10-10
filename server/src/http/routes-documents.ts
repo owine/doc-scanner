@@ -8,6 +8,9 @@ import type { Pipeline } from '../documents/pipeline.js';
 import type { Decision, DocumentRow, DocumentState } from '../documents/types.js';
 import { toView } from '../documents/view.js';
 import { isUnderAny } from '../drive/folder-tree.js';
+import { logger } from '../logger.js';
+import { errorName } from '../observability/error-name.js';
+import { captureDriveFailure } from '../observability/report.js';
 import { sessionMiddleware, type AuthContext } from './middleware.js';
 
 type Env = { Variables: { auth?: AuthContext } };
@@ -203,7 +206,15 @@ export function folderRoutes(deps: { store: SessionStore; pipeline: Pipeline }) 
   // On-demand re-walk (spec §4), e.g. after reorganising folders in Drive.
   r.post('/refresh', async (c) => {
     if (!c.get('auth')?.liveSession) return c.json({ error: 'not_logged_in' }, 409);
-    await deps.pipeline.worker.refreshFolderCache();
+    try {
+      await deps.pipeline.worker.refreshFolderCache();
+    } catch (err) {
+      // The type only: a walk error's message can quote folder paths. Still
+      // reported, as it was when it escaped to the Sentry middleware.
+      logger.error({ errName: errorName(err) }, 'folder refresh failed');
+      captureDriveFailure(err, 'folder-lookup');
+      return c.json({ error: 'refresh_failed' }, 502);
+    }
     return c.json({ ok: true });
   });
   r.get('/', (c) => {

@@ -11,6 +11,8 @@ import { authRoutes } from './routes-auth.js';
 import { driveRoutes } from './routes-drive.js';
 import { documentRoutes, folderRoutes, settingsRoutes } from './routes-documents.js';
 import type { Pipeline } from '../documents/pipeline.js';
+import { logger } from '../logger.js';
+import { errorName } from '../observability/error-name.js';
 
 export interface AppDeps {
   db: DB;
@@ -39,6 +41,15 @@ export function createApp(deps: AppDeps): Hono {
   if (Sentry.isInitialized()) {
     app.use(sentry(app, { shouldHandleError: (e) => !(e instanceof HTTPException) || e.status >= 500 }));
   }
+  // Replaces Hono's default handler, which console.errors the whole error: a
+  // message can quote document or folder names. Reporting is unaffected: Hono
+  // sets c.error before calling this, and the Sentry middleware captures it
+  // from there (its beforeSend scrubbing applies as before).
+  app.onError((err, c) => {
+    if (err instanceof HTTPException) return err.getResponse();
+    logger.error({ errName: errorName(err), method: c.req.method, route: c.req.routePath }, 'unhandled route error');
+    return c.json({ error: 'internal' }, 500);
+  });
   app.get('/api/health', (c) => c.json({ ok: true }));
   app.route('/api/auth', authRoutes({ store, protonAuth, db: deps.db, encryptionKey: deps.encryptionKey, appVersion: deps.appVersion, secureCookie: deps.secureCookie }));
   app.route('/api/drive', driveRoutes({ db: deps.db, store }));
