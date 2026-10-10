@@ -56,10 +56,59 @@ describe('SettingsScreen', () => {
   });
 
   it('explains a rejected value', async () => {
-    setup({ saveSettings: vi.fn().mockRejectedValue(new ApiError('invalid_input', 400, 'invalid_input')) });
-    fireEvent.input(await screen.findByRole('spinbutton', { name: /threshold/i }), { target: { value: '0.3' } });
+    const { api } = setup({ saveSettings: vi.fn().mockRejectedValue(new ApiError('invalid_input', 400, 'invalid_input')) });
+    // Three decimals pass the client check; the server is the one to refuse them.
+    fireEvent.input(await screen.findByRole('spinbutton', { name: /threshold/i }), { target: { value: '0.855' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    expect(await screen.findByText(/between 0.5 and 1/i)).toBeInTheDocument();
+    expect(await screen.findByText(/A value was rejected/i)).toBeInTheDocument();
+    expect(api.saveSettings).toHaveBeenCalledWith({ autoFileThreshold: 0.855 });
+  });
+
+  it('blocks a threshold below 0.5 before sending it', async () => {
+    const { api } = setup();
+    fireEvent.input(await screen.findByRole('spinbutton', { name: /threshold/i }), { target: { value: '0.3' } });
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+    expect(screen.getByText('Enter a number between 0.5 and 1.')).toBeInTheDocument();
+    expect(api.saveSettings).not.toHaveBeenCalled();
+  });
+
+  it('blocks a blank threshold', async () => {
+    setup();
+    fireEvent.input(await screen.findByRole('spinbutton', { name: /threshold/i }), { target: { value: '' } });
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+  });
+
+  it('disables Save again after a successful save', async () => {
+    setup();
+    fireEvent.click(await screen.findByRole('checkbox', { name: /file automatically/i }));
+    const save = screen.getByRole('button', { name: 'Save' });
+    expect(save).toBeEnabled();
+    fireEvent.click(save);
+    await screen.findByText('Saved.');
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+  });
+
+  it('says when the settings could not be loaded', async () => {
+    setup({ settings: vi.fn().mockRejectedValue(new Error('down')) });
+    expect(await screen.findByText('Could not load settings.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument();
+  });
+
+  it('shows why the folder list could not be refreshed', async () => {
+    setup({ refreshFolders: vi.fn().mockRejectedValue(new ApiError('not_logged_in', 401, 'not_logged_in')) });
+    fireEvent.click(await screen.findByRole('button', { name: /refresh folder list/i }));
+    expect(await screen.findByText('Sign in again to read your Drive folders.')).toBeInTheDocument();
+  });
+
+  it('switches the theme', async () => {
+    setup();
+    const dark = await screen.findByRole('radio', { name: /dark/i });
+    expect(dark).toHaveAttribute('aria-checked', 'false');
+    fireEvent.click(dark);
+    await waitFor(() => expect(screen.getByRole('radio', { name: /dark/i })).toHaveAttribute('aria-checked', 'true'));
+    expect(screen.getByRole('radio', { name: /system/i })).toHaveAttribute('aria-checked', 'false');
+    fireEvent.click(screen.getByRole('radio', { name: /system/i }));
+    await waitFor(() => expect(screen.getByRole('radio', { name: /system/i })).toHaveAttribute('aria-checked', 'true'));
   });
 
   it('adds and removes never-file-here folders', async () => {
@@ -152,7 +201,8 @@ describe('SettingsScreen', () => {
 
   it('goes back', async () => {
     const { onBack } = setup();
-    fireEvent.click(await screen.findByRole('button', { name: /back/i }));
+    await screen.findByRole('checkbox', { name: /file automatically/i });
+    fireEvent.click(screen.getByRole('button', { name: /back/i }));
     expect(onBack).toHaveBeenCalled();
   });
 });
