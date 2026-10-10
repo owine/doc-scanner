@@ -50,7 +50,6 @@ export function InboxScreen({
   const folders = useFolders(documents);
   const g = groupDocuments(docs, now());
 
-  const approve = async (id: string, body: ApproveBody) => sync.upsert(await documents.approve(id, body));
   // Read the document back: a poll already in flight may predate the action.
   // Failing to read it back must not report the action as failed.
   const readBack = async (id: string) => {
@@ -75,6 +74,16 @@ export function InboxScreen({
     }
     if (!(err instanceof ApiError && err.status === 409)) throw err;
     await readBack(id);
+  };
+  // A refused approval is still reported, so a card that stays (the read-back
+  // failed, or was older than the refusal) says the document moved on.
+  const approve = async (id: string, body: ApproveBody) => {
+    try {
+      sync.upsert(await documents.approve(id, body));
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) await readBack(id);
+      throw err;
+    }
   };
   const act = async (id: string, run: () => Promise<DocumentView | null>) => {
     try {

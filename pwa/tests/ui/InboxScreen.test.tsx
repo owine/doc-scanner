@@ -125,6 +125,30 @@ describe('InboxScreen', () => {
     expect(screen.queryByText(/failed, try again/i)).toBeNull();
   });
 
+  it('reads a document back when an approval was refused because it already moved on', async () => {
+    const doc = makeDoc();
+    const { api } = setup([doc], {
+      approve: vi.fn().mockRejectedValue(new ApiError('not_in_review', 409, 'not_in_review')),
+      get: vi.fn(async () => ({ ...doc, state: 'filed' as const, seq: 999, filed: { name: 'Northwind Energy Bill 2026-09', folderPath: '/Bills/Energy', driveNodeUid: 'v~5', driveUrl: null } })),
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+    await waitFor(() => expect(api.get).toHaveBeenCalledWith(doc.id));
+    expect(await screen.findByRole('region', { name: 'Recently filed' })).toBeInTheDocument();
+    expect(screen.getByText(/nothing to review/i)).toBeInTheDocument();
+  });
+
+  it('still says a refused approval moved on while the card stays', async () => {
+    const doc = makeDoc();
+    const { api } = setup([doc], {
+      approve: vi.fn().mockRejectedValue(new ApiError('conflict', 409, 'conflict')),
+      get: vi.fn(async () => ({ ...doc, seq: 999 })),
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('This document has already moved on.');
+    expect(api.get).toHaveBeenCalledWith(doc.id);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Approve' })).toBeEnabled());
+  });
+
   it('reads a document back when a retry was refused because it already moved on', async () => {
     const doc = makeDoc({ state: 'failed', error: 'Drive was unavailable' });
     const { api } = setup([doc], {
