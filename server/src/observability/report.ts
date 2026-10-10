@@ -50,8 +50,9 @@ export type DocumentStage = 'analyze' | 'prepare' | 'file';
 
 /**
  * Reports a document that reached `failed`, tagged with the stage that
- * broke. Document names and content never leave the server: `sensitive`
- * (original name, chosen name) is redacted wherever it appears.
+ * broke. Names passed in `sensitive` (and their extension-less stems) are
+ * redacted wherever they appear in the event's free text. Callers must not
+ * throw errors that embed document content.
  */
 export function captureDocumentFailure(error: unknown, stage: DocumentStage, sensitive: readonly string[] = []): void {
   Sentry.withScope((scope) => {

@@ -7,7 +7,9 @@ const { events } = initRecordingSentry();
 // Built at runtime so the value never appears in this file's source: the
 // ContextLines integration attaches source lines around stack frames, and a
 // literal here would leak into the event through them.
-const docName = `${['Northwind', 'Energy'].join(' ')} ${Date.now()}.pdf`;
+const nameCore = ['Northwind', 'Energy'].join(' ');
+const docName = `${nameCore} ${Date.now()}.pdf`;
+const stem = docName.replace(/\.pdf$/, '');
 
 describe('document failure reporting', () => {
   beforeEach(() => {
@@ -19,6 +21,14 @@ describe('document failure reporting', () => {
     await flushEvents();
     expect(events).toHaveLength(1);
     expect((events[0]!.tags as Record<string, unknown>)['document.stage']).toBe('analyze');
-    expect(JSON.stringify(events[0])).not.toContain(docName);
+    expect(JSON.stringify(events[0])).not.toContain(nameCore);
+    expect(events[0]!.exception!.values![0]!.value).toBe('analysis failed for [filename]');
+  });
+
+  it('redacts the extension-less stem too', async () => {
+    captureDocumentFailure(new Error(`no match for ${stem} (2)`), 'file', [docName]);
+    await flushEvents();
+    expect(events).toHaveLength(1);
+    expect(JSON.stringify(events[0])).not.toContain(nameCore);
   });
 });
