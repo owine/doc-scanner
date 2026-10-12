@@ -180,8 +180,9 @@ export function documentRoutes(deps: { store: SessionStore; pipeline: Pipeline }
       if (err instanceof InboxBlobMissingError) return c.json({ error: 'not_found' }, 404);
       throw err;
     }
+    // no-store: it is a picture of the document, and a re-prepared document keeps this URL.
     return new Response(jpeg, {
-      headers: { 'content-type': 'image/jpeg', 'cache-control': 'private, max-age=300', 'x-content-type-options': 'nosniff' },
+      headers: { 'content-type': 'image/jpeg', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' },
     });
   });
 

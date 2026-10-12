@@ -722,7 +722,7 @@ describe('thumbnail', () => {
     const res = await app.request(`/api/documents/${doc.id}/thumbnail`, { headers: { cookie } });
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toBe('image/jpeg');
-    expect(res.headers.get('cache-control')).toBe('private, max-age=300');
+    expect(res.headers.get('cache-control')).toBe('no-store');
     expect(res.headers.get('x-content-type-options')).toBe('nosniff');
     expect([...new Uint8Array(await res.arrayBuffer())]).toEqual([0xff, 0xd8, 1, 2]);
   });
