@@ -27,6 +27,9 @@ export class UploadError extends Error {
   /** Worth retrying: the network or the server failed, not the file. */
   get transient(): boolean {
     if (this.code === 'unreadable') return false;
+    // A success or redirect that isn't the server's answer (a captive portal's
+    // page, say): the file never reached the server.
+    if (this.code === 'bad_response') return true;
     // 409: the server was restarting an earlier failed copy at the same moment;
     // sending again gets the duplicate answer.
     return this.status === 0 || this.status === 408 || this.status === 409 || this.status === 429 || this.status >= 500;
@@ -69,6 +72,8 @@ export function sendDocument(
       }
       if ((req.status === 200 || req.status === 202) && typeof body.id === 'string') {
         resolve({ id: body.id, duplicate: body.duplicate === true });
+      } else if (req.status >= 200 && req.status < 400) {
+        reject(new UploadError(req.status, 'bad_response'));
       } else {
         reject(new UploadError(req.status, typeof body.error === 'string' ? body.error : undefined));
       }

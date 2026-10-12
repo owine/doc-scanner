@@ -63,6 +63,18 @@ describe('sendDocument', () => {
     await expect(d).rejects.toMatchObject({ status: 0, code: 'timeout', transient: true });
   });
 
+  it('treats a success or redirect without a document id, such as a captive portal page, as transient', async () => {
+    const a = sendDocument(input, () => {}, xhr);
+    req().respond(200, '<html>Sign in to the hotel Wi-Fi</html>');
+    await expect(a).rejects.toMatchObject({ status: 200, code: 'bad_response', transient: true, name: 'UploadError' });
+    const b = sendDocument(input, () => {}, xhr);
+    req().respond(302, '');
+    await expect(b).rejects.toMatchObject({ status: 302, code: 'bad_response', transient: true });
+    const c = sendDocument(input, () => {}, xhr);
+    req().respond(202, '{"ok":true}');
+    await expect(c).rejects.toMatchObject({ status: 202, code: 'bad_response', transient: true });
+  });
+
   it('refuses, for good, a file it cannot read', async () => {
     // Node's Blob (the global here) is not one happy-dom's FormData takes. It
     // stands in for a file the browser can no longer read.
