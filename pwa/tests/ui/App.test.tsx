@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/preact';
+import { UploadStore } from '../../src/uploads/upload-store.js';
+import { FakeXhr } from '../uploads/fake-xhr.js';
 
 // The OCR worker can't start in happy-dom; the inbox doesn't need it.
 vi.mock('../../src/ocr/worker-client.js', () => ({
@@ -45,6 +47,7 @@ describe('App', () => {
     render(<App />);
     expect(await screen.findByRole('heading', { name: 'Inbox' })).toBeInTheDocument();
     expect(await screen.findByText(/nothing to review/i)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /saved scans/i })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
     expect(await screen.findByRole('heading', { name: 'Settings' })).toBeInTheDocument();
     await screen.findByRole('checkbox', { name: /file automatically/i });
@@ -102,5 +105,50 @@ describe('App', () => {
         expect(fetch).toHaveBeenCalledWith('/api/auth/logout', expect.objectContaining({ method: 'POST' }));
       });
     }
+  });
+
+  describe('uploads', () => {
+    class FakeFormData {
+      private readonly fields = new Map<string, unknown>();
+      append(key: string, value: unknown) { this.fields.set(key, value); }
+      get(key: string) { return this.fields.get(key) ?? null; }
+    }
+
+    /** Signs in with one file left in the queue from an earlier session, and returns its upload request. */
+    async function signedInWithQueuedFile() {
+      FakeXhr.last = null;
+      vi.stubGlobal('XMLHttpRequest', FakeXhr);
+      vi.stubGlobal('FormData', FakeFormData);
+      await new UploadStore().put({
+        id: 'old', name: 'northwind-bill.pdf', size: 1, blob: new Blob(['x']), source: 'picker', scanId: null,
+        createdAt: 1, attempts: 0, state: 'queued', error: null, nextAttemptAt: 0,
+      });
+      vi.stubGlobal(
+        'fetch',
+        route({
+          '/api/auth/status': { email: 'user@example.test' },
+          '/api/documents': { documents: [], cursor: 0 },
+          '/api/folders': new Response('{"error":"folders_not_loaded"}', { status: 503 }),
+        }),
+      );
+      render(<App />);
+      expect(await screen.findByRole('region', { name: 'Uploading' })).toBeInTheDocument();
+      await waitFor(() => expect(FakeXhr.last?.body).not.toBeNull());
+      return FakeXhr.last!;
+    }
+
+    it('sends files left in the queue once signed in', async () => {
+      const req = await signedInWithQueuedFile();
+      expect(req.method).toBe('POST');
+      expect(req.url).toBe('/api/documents');
+      req.respond(202, '{"id":"d1"}');
+      await waitFor(() => expect(screen.queryByRole('region', { name: 'Uploading' })).toBeNull());
+    });
+
+    it('lands on the login screen when an upload finds the session gone', async () => {
+      const req = await signedInWithQueuedFile();
+      req.respond(401, '{"error":"not_authenticated"}');
+      expect(await screen.findByRole('button', { name: /sign in/i })).toBeInTheDocument();
+    });
   });
 });

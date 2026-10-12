@@ -6,30 +6,23 @@ import { LoginScreen } from './LoginScreen.js';
 import { InboxScreen } from './inbox/InboxScreen.js';
 import { SettingsScreen } from './SettingsScreen.js';
 import { ScannerScreen } from './ScannerScreen.js';
-import { SavedScansScreen } from './SavedScansScreen.js';
-import { ScanViewerScreen } from './ScanViewerScreen.js';
 import { ResumePrompt } from './ResumePrompt.js';
 import { ScansStore } from '../scanner/scans-store.js';
 import type { Scan } from '../scanner/types.js';
-import { OcrQueue } from '../ocr/queue.js';
-import { WorkerClient } from '../ocr/worker-client.js';
-import { buildSearchablePdf } from '../pdf/build.js';
+import { sendScanToInbox } from '../uploads/scans.js';
 import { UploadQueue } from '../uploads/queue.js';
 import { captureRequestFailure } from '../observability/sentry.js';
 
 type Route =
   | { kind: 'inbox' }
   | { kind: 'settings' }
-  | { kind: 'scanner'; resumeScanId?: string }
-  | { kind: 'saved' }
-  | { kind: 'viewer'; scanId: string };
+  | { kind: 'scanner'; resumeScanId?: string };
 
 export function App() {
   const [email, setEmail] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [route, setRoute] = useState<Route>({ kind: 'inbox' });
   const [store] = useState(() => new ScansStore());
-  const [queue] = useState(() => new OcrQueue(store, new WorkerClient(), buildSearchablePdf));
   const [resume, setResume] = useState<Scan | null>(null);
   const [sync] = useState(
     () => new DocumentSync({ list: documentsApi.list, onUnauthorized: () => { setEmail(null); setRoute({ kind: 'inbox' }); } }),
@@ -63,9 +56,7 @@ export function App() {
     api.status().then((s) => setEmail(s.email))
       .catch((e) => { if (!(e instanceof ApiError && e.status === 401)) console.error(e); })
       .finally(() => setLoaded(true));
-    storeOpen
-      .then(() => queue.start())
-      .catch((e) => console.error('open store', e));
+    storeOpen.catch((e) => console.error('open store', e));
   }, []);
 
   useEffect(() => {
@@ -130,25 +121,13 @@ export function App() {
     case 'scanner':
       return <ScannerScreen
         store={store}
-        queue={queue}
         {...(route.resumeScanId !== undefined ? { resumeScanId: route.resumeScanId } : {})}
         onBack={() => setRoute({ kind: 'inbox' })}
-        onDone={() => setRoute({ kind: 'saved' })}
-      />;
-    case 'saved':
-      return <SavedScansScreen
-        store={store}
-        queue={queue}
-        onBack={() => setRoute({ kind: 'inbox' })}
-        onNewScan={() => setRoute({ kind: 'scanner' })}
-        onView={(scanId) => setRoute({ kind: 'viewer', scanId })}
-      />;
-    case 'viewer':
-      return <ScanViewerScreen
-        store={store}
-        queue={queue}
-        scanId={route.scanId}
-        onBack={() => setRoute({ kind: 'saved' })}
+        onDone={(scanId) => {
+          setRoute({ kind: 'inbox' });
+          // A scan whose PDF can't be built stays on the device and shows under "Scans on this device".
+          sendScanToInbox(store, uploads, scanId).catch((e: unknown) => console.error('could not queue scan', (e as Error)?.name));
+        }}
       />;
   }
 }
