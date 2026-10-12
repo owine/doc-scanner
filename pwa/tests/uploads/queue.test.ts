@@ -157,6 +157,31 @@ describe('UploadQueue', () => {
     await vi.waitFor(() => expect(q.list()).toEqual([]));
   });
 
+  it('never sends, or stores again, an item removed while it becomes due', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    const store = new MemoryStore();
+    const forget = deferred<void>();
+    const removeStored = store.remove.bind(store);
+    store.remove = (id) => forget.promise.then(() => removeStored(id));
+    const second = deferred<SendResult>();
+    second.promise.catch(() => {}); // unused once the fix holds
+    const send = vi.fn().mockRejectedValueOnce(new UploadError(503, undefined)).mockReturnValueOnce(second.promise);
+    const q = make({ store, send });
+    q.start();
+    await q.add([file('a.pdf')]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(q.list()[0]).toMatchObject({ state: 'queued', attempts: 1 });
+    const removed = q.remove(q.list()[0]!.id);
+    await vi.advanceTimersByTimeAsync(5_000); // due again while storage is still removing it
+    forget.resolve();
+    await expect(removed).resolves.toBe(true);
+    second.reject(new UploadError(503, undefined));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(q.list()).toEqual([]);
+    expect(store.items.size).toBe(0);
+  });
+
   it('waits for a connection while offline', async () => {
     Object.defineProperty(navigator, 'onLine', { value: false, configurable: true });
     const send = vi.fn().mockResolvedValue({ id: 'd1', duplicate: false });

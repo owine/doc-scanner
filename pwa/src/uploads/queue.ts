@@ -152,12 +152,15 @@ export class UploadQueue {
     this.kick();
   }
 
-  /** Not while it is being sent: the server may already have it. */
+  /**
+   * Not while it is being sent: the server may already have it. Memory first,
+   * so a kick while storage is still removing it can't send it.
+   */
   async remove(id: string): Promise<boolean> {
     if (this.active === id) return false;
-    await this.store.remove(id);
     this.items = this.items.filter((i) => i.id !== id);
     this.emit();
+    await this.store.remove(id);
     return true;
   }
 
@@ -195,8 +198,12 @@ export class UploadQueue {
     return this.loading;
   }
 
-  /** Memory first: a storage failure must not leave the item due again at once. */
+  /**
+   * Memory first: a storage failure must not leave the item due again at once.
+   * An item removed meanwhile stays removed, in memory and in storage.
+   */
   private async save(item: UploadItem): Promise<void> {
+    if (!this.items.some((i) => i.id === item.id)) return;
     this.items = this.items.map((i) => (i.id === item.id ? item : i));
     this.emit();
     await this.store.put(item);
