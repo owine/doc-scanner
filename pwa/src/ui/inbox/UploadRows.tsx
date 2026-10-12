@@ -19,16 +19,33 @@ export function UploadRow({ item, queue }: { item: UploadItem; queue: UploadQueu
         <div class="doc-name" id={nameId}>
           {item.name}
         </div>
-        <div class={item.state === 'failed' ? 'error-text' : 'muted'}>{status(item, queue)}</div>
-        {sending && <progress max={1} value={queue.progressOf(item.id) ?? 0} aria-describedby={nameId} />}
+        <div class={item.state === 'failed' ? 'error-text' : 'muted'} role="status">
+          {status(item, queue)}
+        </div>
+        {sending && <progress max={1} value={queue.progressOf(item.id) ?? 0} aria-labelledby={nameId} />}
       </div>
       {item.state === 'failed' && item.size <= MAX_UPLOAD_BYTES && (
-        <button type="button" class="btn btn-small" aria-describedby={nameId} onClick={() => void queue.retry(item.id)}>
+        <button
+          type="button"
+          class="btn btn-small"
+          aria-describedby={nameId}
+          onClick={() => {
+            // The error's name only: never the file's.
+            queue.retry(item.id).catch((e: unknown) => console.error('could not retry the upload', (e as Error)?.name));
+          }}
+        >
           Retry
         </button>
       )}
       {item.state === 'failed' && (
-        <button type="button" class="btn btn-secondary btn-small" aria-describedby={nameId} onClick={() => void queue.remove(item.id)}>
+        <button
+          type="button"
+          class="btn btn-secondary btn-small"
+          aria-describedby={nameId}
+          onClick={() => {
+            queue.remove(item.id).catch((e: unknown) => console.error('could not remove the upload', (e as Error)?.name));
+          }}
+        >
           Remove
         </button>
       )}
@@ -51,6 +68,9 @@ export function DeviceScanRow({ scan, onSend, onDelete, error = null }: DeviceSc
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
   const nameId = `scan-name-${scan.id}`;
+  const dateId = `scan-date-${scan.id}`;
+  // The date too: two scans of the same length must be told apart.
+  const describedBy = `${nameId} ${dateId}`;
   async function run(action: () => Promise<void>, what: string) {
     setBusy(true);
     setFailed(null);
@@ -68,17 +88,19 @@ export function DeviceScanRow({ scan, onSend, onDelete, error = null }: DeviceSc
         <div class="doc-name" id={nameId}>
           Scan · {scan.pageCount} {scan.pageCount === 1 ? 'page' : 'pages'}
         </div>
-        <div class="muted">{new Date(scan.updatedAt).toLocaleString()}</div>
+        <div class="muted" id={dateId}>
+          {new Date(scan.updatedAt).toLocaleString()}
+        </div>
         {(failed ?? error) && <div class="error-text">{failed ?? error}</div>}
       </div>
-      <button type="button" class="btn btn-small" disabled={busy} aria-describedby={nameId} onClick={() => void run(onSend, 'Could not send this scan. Try again.')}>
+      <button type="button" class="btn btn-small" disabled={busy} aria-describedby={describedBy} onClick={() => void run(onSend, 'Could not send this scan. Try again.')}>
         Send to inbox
       </button>
       <button
         type="button"
         class="btn btn-secondary btn-small"
         disabled={busy}
-        aria-describedby={nameId}
+        aria-describedby={describedBy}
         onClick={() => {
           if (window.confirm('Delete this scan from this device? It has not been sent anywhere.')) void run(onDelete, 'Could not delete this scan.');
         }}

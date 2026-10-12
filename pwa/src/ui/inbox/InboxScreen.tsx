@@ -77,11 +77,20 @@ export function InboxScreen({
       uploads.add(chosen.map((f) => ({ blob: f, name: f.name, source: 'picker' as const }))).catch((e: unknown) => {
         // The error's name only: the files' names stay on this device.
         console.error('could not add files', (e as Error)?.name);
-        setAddError("Couldn't add the files. Try again.");
+        setAddError("Some files couldn't be added.");
       });
     },
     [uploads],
   );
+  // The add error stays until the queue next changes: a later add, or an upload finishing.
+  useEffect(() => {
+    let seen = uploads.list();
+    return uploads.subscribe(() => {
+      if (uploads.list() === seen) return; // a progress tick, or the connection
+      seen = uploads.list();
+      setAddError(null);
+    });
+  }, [uploads]);
   // The whole window takes dropped files while the inbox shows, margins
   // included: a drop the page doesn't take makes the browser open the file.
   useEffect(() => {

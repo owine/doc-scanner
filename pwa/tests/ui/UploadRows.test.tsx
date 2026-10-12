@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/preact';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/preact';
 import { DeviceScanRow, UploadRow } from '../../src/ui/inbox/UploadRows.js';
 import { UploadQueue, MAX_UPLOAD_BYTES } from '../../src/uploads/queue.js';
 import type { UploadItem } from '../../src/uploads/types.js';
@@ -35,6 +35,32 @@ describe('UploadRow', () => {
     expect(retry).toHaveBeenCalledWith('u1');
   });
 
+  it('announces its status, and labels its progress bar with the file name', async () => {
+    const queue = idle();
+    vi.spyOn(queue, 'isSending').mockReturnValue(true);
+    vi.spyOn(queue, 'progressOf').mockReturnValue(0.25);
+    render(<ul><UploadRow item={item()} queue={queue} /></ul>);
+    expect(within(screen.getByRole('status')).getByText('Uploading… 25%')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('progressbar', { name: 'northwind-bill.pdf' })).toBeInTheDocument());
+  });
+
+  it('logs only the name of an error from Retry or Remove', async () => {
+    const queue = idle();
+    vi.spyOn(queue, 'retry').mockRejectedValue(new Error('northwind storage'));
+    vi.spyOn(queue, 'remove').mockRejectedValue(new TypeError('northwind storage'));
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      render(<ul><UploadRow item={item({ state: 'failed', error: 'The file is empty.' })} queue={queue} /></ul>);
+      fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+      await waitFor(() => expect(logged).toHaveBeenCalledWith('could not remove the upload', 'TypeError'));
+      expect(logged).toHaveBeenCalledWith('could not retry the upload', 'Error');
+      expect(JSON.stringify(logged.mock.calls)).not.toContain('northwind');
+    } finally {
+      logged.mockRestore();
+    }
+  });
+
   it('offers no Retry for a file over the limit', async () => {
     render(<ul><UploadRow item={item({ state: 'failed', error: 'Too large to upload (the limit is 50 MB).', size: MAX_UPLOAD_BYTES + 1 })} queue={idle()} /></ul>);
     expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
@@ -50,6 +76,13 @@ describe('DeviceScanRow', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send to inbox' }));
     expect(await screen.findByText('Could not send this scan. Try again.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Send to inbox' })).toBeEnabled();
+  });
+
+  it('describes its buttons by the date too, so two scans of the same length can be told apart', async () => {
+    render(<ul><DeviceScanRow scan={scan} onSend={vi.fn()} onDelete={vi.fn()} /></ul>);
+    const when = new Date(scan.updatedAt).toLocaleString();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Send to inbox' })).toHaveAccessibleDescription(`Scan · 2 pages ${when}`));
+    expect(screen.getByRole('button', { name: 'Delete' })).toHaveAccessibleDescription(`Scan · 2 pages ${when}`);
   });
 
   it('asks before deleting', async () => {

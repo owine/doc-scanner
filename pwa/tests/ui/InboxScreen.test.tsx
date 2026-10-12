@@ -502,11 +502,19 @@ describe('InboxScreen uploads', () => {
     expect(await screen.findByText('Waiting to upload')).toBeInTheDocument();
   });
 
-  it('says so when the files cannot be kept for upload', async () => {
+  it('says so when the files cannot be kept for upload, until the queue next changes', async () => {
     const { uploads } = setup([]);
-    vi.spyOn(uploads, 'add').mockRejectedValue(new Error('quota'));
-    fireEvent.change(fileInput(), { target: { files: [pdf('a.pdf')] } });
-    expect(await screen.findByText("Couldn't add the files. Try again.")).toBeInTheDocument();
+    const add = vi.spyOn(uploads, 'add').mockRejectedValueOnce(new Error('quota'));
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      fireEvent.change(fileInput(), { target: { files: [pdf('a.pdf')] } });
+      expect(await screen.findByText("Some files couldn't be added.")).toBeInTheDocument();
+      add.mockRestore();
+      await act(() => uploads.add([{ blob: pdf('b.pdf'), name: 'b.pdf', source: 'picker' }]));
+      await waitFor(() => expect(screen.queryByText("Some files couldn't be added.")).toBeNull());
+    } finally {
+      logged.mockRestore();
+    }
   });
 });
 
@@ -567,8 +575,18 @@ describe('InboxScreen scans on this device', () => {
   });
 
   it('has no device section without saved scans', async () => {
-    setup([]);
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'Inbox' })).toBeInTheDocument());
-    expect(screen.queryByRole('region', { name: 'Scans on this device' })).toBeNull();
+    const listed = vi.spyOn(ScansStore.prototype, 'listCompleted');
+    try {
+      setup([]);
+      // After the list has been read and its result rendered, not before.
+      await waitFor(() => expect(listed).toHaveBeenCalled());
+      await act(async () => {
+        await listed.mock.results[0]!.value;
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      expect(screen.queryByRole('region', { name: 'Scans on this device' })).toBeNull();
+    } finally {
+      listed.mockRestore();
+    }
   });
 });
