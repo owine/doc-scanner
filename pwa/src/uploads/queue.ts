@@ -258,7 +258,16 @@ export class UploadQueue {
     await this.store.put(item);
   }
 
-  private readonly onConnection = (): void => {
+  private readonly onConnection = (e: Event): void => {
+    if (e.type === 'online') {
+      // The backoff was waiting for the network, which is back: everything
+      // queued is due now. In memory only; a stored time is long past by the
+      // next start anyway.
+      const now = this.now();
+      if (this.items.some((i) => i.state === 'queued' && i.nextAttemptAt > now)) {
+        this.items = this.items.map((i) => (i.state === 'queued' && i.nextAttemptAt > now ? { ...i, nextAttemptAt: now } : i));
+      }
+    }
     this.emit(); // the rows say whether they wait for a connection
     this.kick();
   };

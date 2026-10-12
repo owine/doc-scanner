@@ -206,6 +206,26 @@ describe('UploadQueue', () => {
     await vi.waitFor(() => expect(q.list()).toEqual([]));
   });
 
+  it('sends a waiting item as soon as the connection comes back, without waiting out its backoff', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    const send = vi.fn()
+      .mockRejectedValueOnce(new UploadError(0, 'network'))
+      .mockResolvedValueOnce({ id: 'd1', duplicate: false });
+    const q = make({ send });
+    q.start();
+    await q.add([file('a.pdf')]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(q.list()[0]).toMatchObject({ state: 'queued', attempts: 1 });
+    Object.defineProperty(navigator, 'onLine', { value: false, configurable: true });
+    window.dispatchEvent(new Event('offline'));
+    await vi.advanceTimersByTimeAsync(1_000);
+    Reflect.deleteProperty(navigator, 'onLine');
+    window.dispatchEvent(new Event('online'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(send).toHaveBeenCalledTimes(2); // 1 s in, not after the 5 s backoff
+    expect(q.list()).toEqual([]);
+  });
+
   it('tells subscribers when the connection comes and goes', () => {
     const q = make({ send: () => new Promise(() => {}) });
     q.start();
