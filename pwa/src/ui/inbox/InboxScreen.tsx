@@ -11,7 +11,8 @@ import { confirmDiscard } from './labels.js';
 import { ReviewCard } from './ReviewCard.js';
 import type { ScansStore } from '../../scanner/scans-store.js';
 import { useUploads, type UploadQueue } from '../../uploads/queue.js';
-import { UploadRow } from './UploadRows.js';
+import { sendScanToInbox, useDeviceScans } from '../../uploads/scans.js';
+import { DeviceScanRow, UploadRow } from './UploadRows.js';
 
 export interface InboxScreenProps {
   sync: DocumentSync;
@@ -44,9 +45,11 @@ export function InboxScreen({
   onSettings,
   onSignInAgain,
   uploads,
+  scans,
 }: InboxScreenProps) {
   const { docs, loaded, error } = useDocuments(sync);
   const pending = useUploads(uploads);
+  const device = useDeviceScans(scans, uploads);
   const fileInput = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
@@ -203,6 +206,26 @@ export function InboxScreen({
         <Section id="uploading" title="Uploading">
           {pending.map((item) => <UploadRow key={item.id} item={item} queue={uploads} />)}
         </Section>
+      )}
+
+      {device.scans.length > 0 && (
+        <section aria-labelledby="h-device">
+          <h2 id="h-device">Scans on this device</h2>
+          <p class="muted">Saved before scans went straight to your inbox. Send them or delete them.</p>
+          <ul class="doc-list" role="list">
+            {device.scans.map((s) => (
+              <DeviceScanRow
+                key={s.id}
+                scan={s}
+                onSend={() => sendScanToInbox(scans, uploads, s.id)}
+                onDelete={async () => {
+                  await scans.delete(s.id);
+                  await device.reload();
+                }}
+              />
+            ))}
+          </ul>
+        </section>
       )}
 
       <section aria-labelledby="h-review">

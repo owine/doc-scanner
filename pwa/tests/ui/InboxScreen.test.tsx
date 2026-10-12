@@ -1,4 +1,6 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeAll } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { act, render, screen, fireEvent, waitFor, within } from '@testing-library/preact';
 import { InboxScreen } from '../../src/ui/inbox/InboxScreen.js';
 import { DocumentSync } from '../../src/documents/sync.js';
@@ -33,6 +35,19 @@ afterEach(() => {
   for (const q of queues.splice(0)) q.stop();
   Reflect.deleteProperty(navigator, 'onLine');
 });
+
+const JPEG = resolve(__dirname, '../../src/pdf/fixtures/2x1-red.jpg');
+const QUAD = { tl: { x: 0, y: 0 }, tr: { x: 2, y: 0 }, bl: { x: 0, y: 1 }, br: { x: 2, y: 1 } };
+
+/** A one-page scan finished before this slice, saved through a store of its own. */
+async function savedScan(): Promise<string> {
+  const store = new ScansStore();
+  await store.open();
+  const id = await store.createInProgress();
+  await store.appendPage(id, new Blob([readFileSync(JPEG)], { type: 'image/jpeg' }), QUAD);
+  await store.finish(id);
+  return id;
+}
 
 const pdf = (name: string) => new File(['%PDF'], name, { type: 'application/pdf' });
 const fileInput = () => document.querySelector<HTMLInputElement>('input[type="file"][multiple]')!;
@@ -445,5 +460,52 @@ describe('InboxScreen uploads', () => {
     vi.spyOn(uploads, 'add').mockRejectedValue(new Error('quota'));
     fireEvent.change(fileInput(), { target: { files: [pdf('a.pdf')] } });
     expect(await screen.findByText("Couldn't add the files. Try again.")).toBeInTheDocument();
+  });
+});
+
+describe('InboxScreen scans on this device', () => {
+  beforeAll(async () => {
+    await import('../../src/pdf/build.js');
+  });
+
+  it('lists a scan saved on the device', async () => {
+    await savedScan();
+    setup([]);
+    const region = await screen.findByRole('region', { name: 'Scans on this device' });
+    expect(within(region).getByText('Scan · 1 page')).toBeInTheDocument();
+    expect(within(region).getByText(/saved before scans went straight to your inbox/i)).toBeInTheDocument();
+  });
+
+  it('sends a scan to the inbox', async () => {
+    const id = await savedScan();
+    const { uploads } = setup([]);
+    const region = await screen.findByRole('region', { name: 'Scans on this device' });
+    fireEvent.click(within(region).getByRole('button', { name: 'Send to inbox' }));
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Scans on this device' })).toBeNull());
+    expect(await screen.findByRole('region', { name: 'Uploading' })).toBeInTheDocument();
+    expect(uploads.list()).toMatchObject([{ source: 'scanner', scanId: id }]);
+  });
+
+  it('deletes a scan once the user confirms, and keeps it otherwise', async () => {
+    const nativeConfirm = window.confirm;
+    window.confirm = vi.fn().mockReturnValueOnce(false).mockReturnValueOnce(true);
+    try {
+      await savedScan();
+      setup([]);
+      const region = await screen.findByRole('region', { name: 'Scans on this device' });
+      fireEvent.click(within(region).getByRole('button', { name: 'Delete' }));
+      expect(window.confirm).toHaveBeenCalledTimes(1);
+      expect(within(region).getByText('Scan · 1 page')).toBeInTheDocument();
+      fireEvent.click(within(region).getByRole('button', { name: 'Delete' }));
+      await waitFor(() => expect(screen.queryByRole('region', { name: 'Scans on this device' })).toBeNull());
+    } finally {
+      window.confirm = nativeConfirm;
+    }
+  });
+
+  it('has no device section without saved scans', async () => {
+    setup([]);
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Inbox' })).toBeInTheDocument());
+    expect(screen.queryByRole('region', { name: 'Scans on this device' })).toBeNull();
   });
 });
