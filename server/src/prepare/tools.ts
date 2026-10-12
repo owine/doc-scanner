@@ -16,11 +16,56 @@ export const TEMP_PREFIX = 'docscanner-prepare-';
 /** No job runs this long, so a directory untouched for longer belongs to a process that died. */
 const STALE_TEMP_MS = 2 * OCR_TIMEOUT_MS;
 
-/** img2pdf takes these directly (BMP through Pillow, which sharp's prebuilt binary lacks); WebP and GIF go through JPEG first. */
-const IMG2PDF_NATIVE = new Set(['image/jpeg', 'image/png', 'image/tiff', 'image/bmp']);
-
 export class ToolFailedError extends Error {
   override name = 'ToolFailedError';
+}
+
+/*
+ * The tool is picked by the type the client declared, but Ghostscript and
+ * sharp go by the bytes: a PostScript file declared as a PDF would run as a
+ * program in gs, and sharp would render an SVG. So the bytes are checked first.
+ */
+
+/** Readers accept leading junk before the header; Acrobat looks in the first 1024 bytes. */
+const PDF_HEADER_WINDOW = 1024;
+
+/** `%PDF-` within the first 1024 bytes. */
+function looksLikePdf(bytes: Uint8Array): boolean {
+  return Buffer.from(bytes.buffer, bytes.byteOffset, Math.min(bytes.length, PDF_HEADER_WINDOW)).includes('%PDF-');
+}
+
+function startsWith(bytes: Uint8Array, sig: readonly number[]): boolean {
+  return bytes.length >= sig.length && sig.every((b, i) => bytes[i] === b);
+}
+
+/**
+ * img2pdf takes these types directly (BMP through Pillow, which sharp's
+ * prebuilt binary lacks); WebP and GIF go through JPEG first. Each with its
+ * magic bytes: JPEG FF D8 FF; PNG 89 50 4E 47 0D 0A 1A 0A; TIFF "II*\0"
+ * (49 49 2A 00, little-endian) or "MM\0*" (4D 4D 00 2A, big-endian); BMP
+ * "BM" (42 4D).
+ */
+const IMG2PDF_NATIVE: Record<string, readonly (readonly number[])[]> = {
+  'image/jpeg': [[0xff, 0xd8, 0xff]],
+  'image/png': [[0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]],
+  'image/tiff': [
+    [0x49, 0x49, 0x2a, 0x00],
+    [0x4d, 0x4d, 0x00, 0x2a],
+  ],
+  'image/bmp': [[0x42, 0x4d]],
+};
+
+/** The formats sharp may decode here; anything else (SVG above all) is refused. */
+const SHARP_FORMATS = new Set(['jpeg', 'png', 'webp', 'tiff', 'gif', 'heif']);
+
+/** Whether sharp sees a raster format it may decode (it reads the header only). */
+async function sharpMayDecode(bytes: Uint8Array): Promise<boolean> {
+  try {
+    const { format } = await sharp(bytes).metadata();
+    return format !== undefined && SHARP_FORMATS.has(format);
+  } catch {
+    return false;
+  }
 }
 
 export type OcrResult =
@@ -85,6 +130,7 @@ export function createPrepareTools(): PrepareTools {
   sweepStaleTempDirs();
   return {
     async ocrPdf(pdf) {
+      if (!looksLikePdf(pdf)) throw new ToolFailedError('not a PDF');
       return inTempDir(async (dir) => {
         await writeFile(join(dir, 'in.pdf'), pdf);
         const r = await runTool(
@@ -106,8 +152,12 @@ export function createPrepareTools(): PrepareTools {
     },
 
     async imageToPdf(image, mime) {
+      const signatures = Object.hasOwn(IMG2PDF_NATIVE, mime) ? IMG2PDF_NATIVE[mime] : undefined;
+      const native = signatures !== undefined;
+      if (native ? !signatures.some((sig) => startsWith(image, sig)) : !(await sharpMayDecode(image))) {
+        throw new ToolFailedError('not the image type it was declared as');
+      }
       return inTempDir(async (dir) => {
-        const native = IMG2PDF_NATIVE.has(mime);
         const input = native ? image : new Uint8Array(await sharp(image).rotate().jpeg({ quality: 90 }).toBuffer());
         const name = native ? `in.${mime.split('/')[1]}` : 'in.jpeg';
         await writeFile(join(dir, name), input);
@@ -122,13 +172,14 @@ export function createPrepareTools(): PrepareTools {
       const fromImage = async (img: Uint8Array) =>
         new Uint8Array(await sharp(img).rotate().resize({ width, withoutEnlargement: true }).jpeg({ quality: 80 }).toBuffer());
       if (mime.startsWith('image/')) {
+        if (!(await sharpMayDecode(bytes))) return null; // an SVG, or BMP, which sharp's prebuilt binary lacks
         try {
           return await fromImage(bytes);
         } catch {
           return null; // HEIC, BMP and anything else sharp can't decode
         }
       }
-      if (mime !== 'application/pdf') return null;
+      if (mime !== 'application/pdf' || !looksLikePdf(bytes)) return null;
       return inTempDir(async (dir) => {
         await writeFile(join(dir, 'in.pdf'), bytes);
         // Render into a fixed box, so a page that claims a huge size can't make

@@ -93,7 +93,9 @@ describe('PrepareTools (fake binaries)', () => {
   it('fails imageToPdf on a non-zero exit, and gives no thumbnail when Ghostscript fails', async () => {
     fakeTool({}, 1);
     const tools = createPrepareTools();
-    await expect(tools.imageToPdf(new Uint8Array([1, 2, 3]), 'image/png')).rejects.toBeInstanceOf(ToolFailedError);
+    const png = await sharp({ create: { width: 4, height: 4, channels: 3, background: '#ffffff' } }).png().toBuffer();
+    await expect(tools.imageToPdf(new Uint8Array(png), 'image/png')).rejects.toBeInstanceOf(ToolFailedError);
+    expect(calls.map((c) => c.cmd)).toEqual(['img2pdf']);
     expect(await tools.thumbnail(PDF, 'application/pdf')).toBeNull();
   });
 
@@ -142,6 +144,70 @@ describe('PrepareTools (fake binaries)', () => {
     expect(args[0]).toEqual(expect.arrayContaining(['-dFIXEDMEDIA', '-dPDFFitPage', '-g800x1200']));
     expect(args[1]).toContain('-g2550x3825');
     expect(args[0]!.some((a) => a.startsWith('-r'))).toBe(false);
+  });
+});
+
+describe('checking the bytes before a tool or sharp parses them', () => {
+  const enc = (t: string) => new TextEncoder().encode(t);
+  const POSTSCRIPT = enc('%!PS-Adobe-3.0\n%%Title: fictional\n/Helvetica findfont 12 scalefont setfont\nshowpage\n');
+  const SVG = enc('<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10"/></svg>');
+  const solid = () => sharp({ create: { width: 4, height: 4, channels: 3, background: '#ffffff' } });
+
+  it('refuses a PostScript file declared as a PDF, without running a tool', async () => {
+    fakeTool({ 'side.txt': 'x', 'out.pdf': 'x', 'page.jpg': 'x' });
+    const tools = createPrepareTools();
+    await expect(tools.ocrPdf(POSTSCRIPT)).rejects.toThrow(new ToolFailedError('not a PDF'));
+    expect(await tools.thumbnail(POSTSCRIPT, 'application/pdf')).toBeNull();
+    expect(calls).toEqual([]);
+  });
+
+  it('finds the PDF header within the first 1024 bytes, and only there', async () => {
+    fakeTool({ 'side.txt': '[OCR skipped on page(s) 1]' });
+    const tools = createPrepareTools();
+    const junk = (n: number) => new Uint8Array(n).fill(0x20);
+    const at = (n: number) => new Uint8Array([...junk(n), ...PDF]);
+    expect(await tools.ocrPdf(at(1019))).toEqual({ kind: 'unchanged' });
+    await expect(tools.ocrPdf(at(1020))).rejects.toThrow(new ToolFailedError('not a PDF'));
+    expect(calls).toHaveLength(1);
+  });
+
+  it('refuses an SVG declared as an image, without running a tool or rendering it', async () => {
+    fakeTool({ 'out.pdf': '%PDF-' });
+    const tools = createPrepareTools();
+    for (const mime of ['image/png', 'image/webp', 'image/gif', 'image/jpeg']) {
+      await expect(tools.imageToPdf(SVG, mime)).rejects.toBeInstanceOf(ToolFailedError);
+      expect([mime, await tools.thumbnail(SVG, mime)]).toEqual([mime, null]);
+    }
+    expect(calls).toEqual([]);
+  });
+
+  it('refuses an image whose bytes are not the type it was declared as', async () => {
+    fakeTool({ 'out.pdf': '%PDF-' });
+    const tools = createPrepareTools();
+    const jpeg = new Uint8Array(await solid().jpeg().toBuffer());
+    const png = new Uint8Array(await solid().png().toBuffer());
+    const tiff = new Uint8Array(await solid().tiff().toBuffer());
+    for (const [bytes, mime] of [
+      [jpeg, 'image/png'],
+      [png, 'image/jpeg'],
+      [png, 'image/tiff'],
+      [tiff, 'image/bmp'],
+      [enc('BM fictional'), 'image/png'],
+      [POSTSCRIPT, 'image/tiff'],
+    ] as const) {
+      await expect(tools.imageToPdf(bytes, mime)).rejects.toBeInstanceOf(ToolFailedError);
+    }
+    expect(calls).toEqual([]);
+    // Each matching its declared type goes through.
+    for (const [bytes, mime] of [
+      [jpeg, 'image/jpeg'],
+      [png, 'image/png'],
+      [tiff, 'image/tiff'],
+      [enc('BM fictional'), 'image/bmp'],
+    ] as const) {
+      await tools.imageToPdf(bytes, mime);
+    }
+    expect(calls.map((c) => c.args.at(-1))).toEqual(['in.jpeg', 'in.png', 'in.tiff', 'in.bmp']);
   });
 });
 
