@@ -6,6 +6,7 @@ import { getAnyLiveSession, onLiveSessionRegistered, type LiveSession } from '..
 import { AtRestCipher } from '../crypto/at-rest.js';
 import { FolderCacheStore } from '../drive/folder-cache-store.js';
 import { captureDocumentFailure } from '../observability/report.js';
+import { createPrepareTools, type PrepareTools } from '../prepare/tools.js';
 import { SettingsStore, type EffectiveSettings } from '../settings/settings-store.js';
 import { logger } from '../logger.js';
 import { errorName } from '../observability/error-name.js';
@@ -22,6 +23,8 @@ export interface PipelineOptions {
   analyzerFor: (settings: EffectiveSettings) => Analyzer;
   liveSession?: () => LiveSession | undefined;
   now?: () => Date;
+  /** The OCR, image-to-PDF and thumbnail tools; the real ones by default. */
+  prepare?: PrepareTools;
 }
 
 export interface Pipeline {
@@ -57,6 +60,7 @@ export function createPipeline(o: PipelineOptions): Pipeline {
     liveSession: o.liveSession ?? getAnyLiveSession,
     now,
     report: captureDocumentFailure,
+    prepare: o.prepare ?? createPrepareTools(),
   });
   let unsubscribe: (() => void) | null = null;
   return {

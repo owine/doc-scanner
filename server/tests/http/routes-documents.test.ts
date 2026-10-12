@@ -12,7 +12,7 @@ import type { DriveClient } from '../../src/drive/client.js';
 import { MailboxSecret } from '../../src/auth/secrets/mailbox-password.js';
 import type { DecryptedUserKey } from '../../src/auth/keys.js';
 import { createPipeline, type Pipeline } from '../../src/documents/pipeline.js';
-import { ANALYSIS, TREE, okOutcome } from '../documents/harness.js';
+import { ANALYSIS, TREE, okOutcome, fakePrepare } from '../documents/harness.js';
 import { logger } from '../../src/logger.js';
 
 const KEY = Buffer.alloc(32, 1).toString('base64');
@@ -49,6 +49,7 @@ async function setup(opts: { liveSession?: () => LiveSession | undefined } = {})
     defaults: { model: 'm', effort: 'medium', autoFileThreshold: 0.8, autoFileEnabled: false, excludePaths: [] },
     analyzerFor: () => ({ analyze }),
     liveSession: opts.liveSession ?? (() => undefined),
+    prepare: fakePrepare(),
   });
   const fakeAuth = {
     login: vi.fn().mockResolvedValue({

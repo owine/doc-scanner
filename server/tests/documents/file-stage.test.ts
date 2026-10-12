@@ -404,4 +404,15 @@ describe('fileStage', () => {
       parentFolderUid: 'BILLS',
     });
   });
+
+  it('ignores a prepared blob the row does not record', async () => {
+    h = makeHarness();
+    const doc = h.add(new TextEncoder().encode('photo bytes'), 'image/jpeg');
+    // As left by a preparation whose result was thrown away (a discard, then a restore).
+    h.inbox.put(doc.id, 'prepared', new TextEncoder().encode('%PDF- fictional'));
+    h.repo.transition(doc.id, 'received', 'filing', { decision: EXISTING, analysis: ANALYSIS });
+    await fileStage(h.repo.get(doc.id)!, h.ctx);
+    const [name, bytes, mime] = h.drive.uploadFile.mock.calls[0]!;
+    expect([name, new TextDecoder().decode(bytes), mime]).toEqual(['Northwind Energy Sep 2026.jpg', 'photo bytes', 'image/jpeg']);
+  });
 });

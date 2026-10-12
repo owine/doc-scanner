@@ -70,7 +70,9 @@ export async function fileStage(doc: DocumentRow, ctx: StageContext): Promise<vo
     }
     const { folderLinkId, folderPath } = await resolveFolder(doc.id, decision, ctx, drive);
 
-    const kind = ctx.inbox.has(doc.id, 'prepared') ? 'prepared' : 'original';
+    // Only a prepared blob the row records (preparedMime is written with it):
+    // one left by a run whose result was thrown away doesn't count.
+    const kind = doc.preparedMime !== null && ctx.inbox.has(doc.id, 'prepared') ? 'prepared' : 'original';
     const bytes = ctx.inbox.get(doc.id, kind);
     // The type of the blob actually sent: a recorded prepared type without its blob doesn't apply.
     const mime = kind === 'prepared' ? (doc.preparedMime ?? doc.mime) : doc.mime;
