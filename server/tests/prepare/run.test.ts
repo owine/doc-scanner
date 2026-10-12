@@ -53,14 +53,26 @@ describe('runTool', () => {
       const g = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
       process.stdout.write(String(g.pid));
       setInterval(() => {}, 1000);`;
-    let grandchild = 0;
+    // Room for two Node start-ups on a loaded machine before the kill, and the
+    // pid may arrive in more than one chunk.
+    let out = '';
     const started = Date.now();
     await expect(
-      runTool(node, ['-e', script], { timeoutMs: 300, onStdout: (s) => { grandchild = Number(s); } }),
+      runTool(node, ['-e', script], { timeoutMs: 2000, onStdout: (s) => { out += s; } }),
     ).rejects.toBeInstanceOf(ToolTimeoutError);
     expect(Date.now() - started).toBeLessThan(5000);
+    const grandchild = Number(out);
     expect(grandchild).toBeGreaterThan(0);
-    await new Promise((r) => setTimeout(r, 100));
-    expect(() => process.kill(grandchild, 0)).toThrow(); // gone
-  });
+    // The kill is delivered at once, but the exit can take a moment to show.
+    const alive = () => {
+      try {
+        process.kill(grandchild, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    for (const until = Date.now() + 3000; alive() && Date.now() < until; ) await new Promise((r) => setTimeout(r, 50));
+    expect(alive()).toBe(false); // gone
+  }, 15_000);
 });
