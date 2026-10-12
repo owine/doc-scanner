@@ -100,6 +100,50 @@ describe('fileStage', () => {
     expect(h.repo.get(doc.id)).toMatchObject({ state: 'filed', driveNodeUid: 'NODE0' });
   });
 
+  it('records the Drive link returned by the upload', async () => {
+    h = makeHarness();
+    const doc = filingDoc(EXISTING);
+    await fileStage(doc, h.ctx);
+    expect(h.repo.get(doc.id)!.driveUrl).toBe('https://drive.proton.me/share/file/n1');
+    expect(h.drive.nodeUrl).not.toHaveBeenCalled();
+  });
+
+  it('saves the upload\'s Drive link with the filed transition, not a second one', async () => {
+    h = makeHarness();
+    const spy = vi.spyOn(h.repo, 'transition');
+    const doc = filingDoc(EXISTING);
+    await fileStage(doc, h.ctx);
+    const filed = spy.mock.calls.filter((c) => c[2] === 'filed');
+    expect(filed).toHaveLength(1);
+    expect(filed[0]![3]).toMatchObject({ driveUrl: 'https://drive.proton.me/share/file/n1' });
+  });
+
+  it('looks up the Drive link of a file found by SHA-1', async () => {
+    h = makeHarness();
+    h.drive.findFileBySha1.mockResolvedValue({ uid: 'NODE0', name: 'Northwind Energy Sep 2026.pdf' });
+    const doc = filingDoc(EXISTING, { filingTarget: { folderLinkId: 'BILLS', name: 'Northwind Energy Sep 2026.pdf' } });
+    await fileStage(doc, h.ctx);
+    expect(h.drive.nodeUrl).toHaveBeenCalledWith('NODE0');
+    expect(h.repo.get(doc.id)!.driveUrl).toBe('https://drive.proton.me/share/file/found');
+  });
+
+  it('still files the document when no Drive link is available', async () => {
+    h = makeHarness();
+    h.drive.uploadFile.mockResolvedValue({ nodeUid: 'NODE1', driveUrl: null, name: 'Northwind Energy Sep 2026.pdf' });
+    const doc = filingDoc(EXISTING);
+    await fileStage(doc, h.ctx);
+    expect(h.repo.get(doc.id)).toMatchObject({ state: 'filed', driveUrl: null });
+  });
+
+  it('still files the document when looking up the Drive link throws', async () => {
+    h = makeHarness();
+    h.drive.findFileBySha1.mockResolvedValue({ uid: 'NODE0', name: 'Northwind Energy Sep 2026.pdf' });
+    h.drive.nodeUrl.mockRejectedValue(new Error('boom'));
+    const doc = filingDoc(EXISTING, { filingTarget: { folderLinkId: 'BILLS', name: 'Northwind Energy Sep 2026.pdf' } });
+    await fileStage(doc, h.ctx);
+    expect(h.repo.get(doc.id)).toMatchObject({ state: 'filed', driveUrl: null });
+  });
+
   it('waits for a login when the Proton session has expired', async () => {
     h = makeHarness();
     const expired = Object.defineProperty(new ServerError('unauthorised'), 'statusCode', { value: 401 });

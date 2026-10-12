@@ -154,13 +154,26 @@ describe('DriveClient.uploadFile', () => {
     }
   });
 
-  it('falls back to a constructed url when getNodeUrl throws', async () => {
+  it('returns a null drive url when getNodeUrl throws', async () => {
     mockSdk.experimental.getNodeUrl.mockRejectedValue(new Error('no url'));
     const { db, cleanup } = createTestDb();
     try {
       const client = await makeClient(db);
       const result = await client.uploadFile('doc.pdf', new Uint8Array([9]), 'application/pdf');
-      expect(result.driveUrl).toBe('https://drive.proton.me/node-1');
+      expect(result.driveUrl).toBeNull();
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('nodeUrl returns the SDK URL, or null when the SDK cannot build one', async () => {
+    const { db, cleanup } = createTestDb();
+    try {
+      const client = await makeClient(db);
+      mockSdk.experimental.getNodeUrl.mockResolvedValueOnce('https://drive.proton.me/share/file/node');
+      await expect(client.nodeUrl('vol~node')).resolves.toBe('https://drive.proton.me/share/file/node');
+      mockSdk.experimental.getNodeUrl.mockRejectedValueOnce(new Error('no share'));
+      await expect(client.nodeUrl('vol~node')).resolves.toBeNull();
     } finally {
       cleanup();
     }

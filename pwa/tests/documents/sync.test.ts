@@ -1,0 +1,218 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { DocumentSync } from '../../src/documents/sync.js';
+import { ApiError } from '../../src/api.js';
+import { makeDoc } from './fixtures.js';
+
+function setVisibility(v: 'visible' | 'hidden') {
+  Object.defineProperty(document, 'visibilityState', { value: v, configurable: true });
+  document.dispatchEvent(new Event('visibilitychange'));
+}
+
+beforeEach(() => { setVisibility('visible'); });
+afterEach(() => { vi.useRealTimers(); });
+
+describe('DocumentSync', () => {
+  it('forgets a removed document, and emits only when something was removed', () => {
+    const sync = new DocumentSync({ list: vi.fn() });
+    const doc = makeDoc({ seq: 1 });
+    sync.upsert(doc);
+    const before = sync.all();
+    const seen = vi.fn();
+    sync.subscribe(seen);
+    sync.remove('nope');
+    expect(seen).not.toHaveBeenCalled();
+    expect(sync.all()).toBe(before);
+    sync.remove(doc.id);
+    expect(seen).toHaveBeenCalledTimes(1);
+    expect(sync.all()).toEqual([]);
+  });
+
+  it('pulls pages until one is empty and advances the cursor', async () => {
+    const a = makeDoc({ seq: 1 });
+    const b = makeDoc({ seq: 2 });
+    const list = vi.fn()
+      .mockResolvedValueOnce({ documents: [a], cursor: 1 })
+      .mockResolvedValueOnce({ documents: [b], cursor: 2 })
+      .mockResolvedValueOnce({ documents: [], cursor: 2 });
+    const sync = new DocumentSync({ list });
+    await sync.poll();
+    expect(list.mock.calls.map((c) => c[0])).toEqual([0, 1, 2]);
+    expect(sync.all().map((d) => d.id).sort()).toEqual([a.id, b.id].sort());
+    expect(sync.loaded).toBe(true);
+  });
+
+  it('keeps the newer version of a document', async () => {
+    const sync = new DocumentSync({ list: vi.fn().mockResolvedValue({ documents: [], cursor: 0 }) });
+    const doc = makeDoc({ seq: 5, state: 'filing' });
+    sync.upsert(doc);
+    sync.upsert({ ...doc, seq: 4, state: 'needs_review' });
+    expect(sync.all()[0]!.state).toBe('filing');
+    sync.upsert({ ...doc, seq: 6, state: 'filed' });
+    expect(sync.all()[0]!.state).toBe('filed');
+  });
+
+  it('notifies subscribers and stops notifying after unsubscribe', async () => {
+    const sync = new DocumentSync({ list: vi.fn().mockResolvedValue({ documents: [], cursor: 0 }) });
+    const fn = vi.fn();
+    const off = sync.subscribe(fn);
+    sync.upsert(makeDoc());
+    expect(fn).toHaveBeenCalledTimes(1);
+    off();
+    sync.upsert(makeDoc());
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it('shares one in-flight poll', async () => {
+    const list = vi.fn().mockResolvedValue({ documents: [], cursor: 0 });
+    const sync = new DocumentSync({ list });
+    await Promise.all([sync.poll(), sync.poll()]);
+    expect(list).toHaveBeenCalledTimes(1);
+  });
+
+  it('polls on an interval while visible, and not while hidden', async () => {
+    vi.useFakeTimers();
+    const list = vi.fn().mockResolvedValue({ documents: [], cursor: 0 });
+    const sync = new DocumentSync({ list, intervalMs: 1000 });
+    try {
+      sync.start();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(list).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(list).toHaveBeenCalledTimes(2);
+      setVisibility('hidden');
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(list).toHaveBeenCalledTimes(2);
+      setVisibility('visible');
+      await vi.advanceTimersByTimeAsync(0);
+      expect(list).toHaveBeenCalledTimes(3);
+    } finally {
+      sync.stop();
+    }
+  });
+
+  it('drops a poll that was in flight when reset', async () => {
+    let release!: (v: { documents: unknown[]; cursor: number }) => void;
+    const list = vi.fn().mockReturnValueOnce(new Promise((r) => { release = r; }));
+    const sync = new DocumentSync({ list });
+    const pending = sync.poll();
+    sync.reset();
+    release({ documents: [makeDoc()], cursor: 1 });
+    await pending;
+    expect(sync.all()).toEqual([]);
+  });
+
+  it('records an error and keeps what it had', async () => {
+    const doc = makeDoc();
+    const list = vi.fn()
+      .mockResolvedValueOnce({ documents: [doc], cursor: doc.seq })
+      .mockResolvedValueOnce({ documents: [], cursor: doc.seq })
+      .mockRejectedValueOnce(new TypeError('Load failed'));
+    const sync = new DocumentSync({ list });
+    await sync.poll();
+    await sync.poll();
+    expect(sync.error).toBeInstanceOf(TypeError);
+    expect(sync.all()).toHaveLength(1);
+  });
+
+  it('calls onUnauthorized and stops on a 401', async () => {
+    const onUnauthorized = vi.fn();
+    const list = vi.fn().mockRejectedValue(new ApiError('not_authenticated', 401, 'not_authenticated'));
+    vi.useFakeTimers();
+    const sync = new DocumentSync({ list, onUnauthorized, intervalMs: 1000 });
+    try {
+      sync.start();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(onUnauthorized).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(list).toHaveBeenCalledTimes(1);
+    } finally {
+      sync.stop();
+    }
+  });
+
+  it('runs one timer loop after stop and start with a poll in flight', async () => {
+    vi.useFakeTimers();
+    let release!: (v: { documents: never[]; cursor: number }) => void;
+    const list = vi.fn()
+      .mockReturnValueOnce(new Promise((r) => { release = r; }))
+      .mockResolvedValue({ documents: [], cursor: 0 });
+    const sync = new DocumentSync({ list, intervalMs: 1000 });
+    try {
+      sync.start();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(list).toHaveBeenCalledTimes(1);
+      sync.stop();
+      sync.start();
+      release({ documents: [], cursor: 0 });
+      await vi.advanceTimersByTimeAsync(0);
+      const before = list.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(list).toHaveBeenCalledTimes(before + 1);
+    } finally {
+      sync.stop();
+    }
+  });
+
+  it('does not poll on visibility after stop', async () => {
+    const list = vi.fn().mockResolvedValue({ documents: [], cursor: 0 });
+    const sync = new DocumentSync({ list });
+    await sync.poll();
+    sync.start();
+    await vi.waitFor(() => expect(list).toHaveBeenCalledTimes(2));
+    await new Promise((r) => setTimeout(r, 0));
+    sync.stop();
+    setVisibility('visible');
+    await Promise.resolve();
+    expect(list).toHaveBeenCalledTimes(2);
+  });
+
+  it('reset forgets everything', async () => {
+    const sync = new DocumentSync({ list: vi.fn().mockResolvedValue({ documents: [], cursor: 0 }) });
+    sync.upsert(makeDoc());
+    sync.reset();
+    expect(sync.all()).toEqual([]);
+    expect(sync.loaded).toBe(false);
+  });
+});
+
+describe('DocumentSync notifications', () => {
+  it('does not notify on an idle poll once loaded, and does when a document changes', async () => {
+    const doc = makeDoc({ seq: 1 });
+    const list = vi.fn()
+      .mockResolvedValueOnce({ documents: [doc], cursor: 1 })
+      .mockResolvedValueOnce({ documents: [], cursor: 1 })
+      .mockResolvedValueOnce({ documents: [], cursor: 1 })
+      .mockResolvedValueOnce({ documents: [{ ...doc, seq: 2, state: 'filed' }], cursor: 2 })
+      .mockResolvedValue({ documents: [], cursor: 2 });
+    const sync = new DocumentSync({ list });
+    await sync.poll();
+    const fn = vi.fn();
+    sync.subscribe(fn);
+    const before = sync.all();
+    await sync.poll();
+    expect(fn).not.toHaveBeenCalled();
+    expect(sync.all()).toBe(before);
+    await sync.poll();
+    expect(fn).toHaveBeenCalledTimes(1);
+    expect(sync.all()).not.toBe(before);
+  });
+
+  it('notifies when the error changes, and when it clears', async () => {
+    const boom = new TypeError('Load failed');
+    const list = vi.fn()
+      .mockResolvedValueOnce({ documents: [], cursor: 0 })
+      .mockRejectedValueOnce(boom)
+      .mockRejectedValueOnce(boom)
+      .mockResolvedValue({ documents: [], cursor: 0 });
+    const sync = new DocumentSync({ list });
+    await sync.poll();
+    const fn = vi.fn();
+    sync.subscribe(fn);
+    await sync.poll();
+    expect(fn).toHaveBeenCalledTimes(1);
+    await sync.poll();
+    expect(fn).toHaveBeenCalledTimes(1);
+    await sync.poll();
+    expect(fn).toHaveBeenCalledTimes(2);
+  });
+});

@@ -60,7 +60,8 @@ export interface ListRootResult {
 
 export interface UploadResult {
   nodeUid: string;
-  driveUrl: string;
+  /** The node's Drive web URL, or null when the SDK can't build one. */
+  driveUrl: string | null;
   /** The name actually used, which may be de-duplicated by the SDK. */
   name: string;
 }
@@ -118,6 +119,7 @@ function toHost(baseUrl: string): string {
  *                               into the root or a given folder
  *   - findChildFolder / createFolder — resolve or create a folder by name
  *   - findFileBySha1()        — find an already-uploaded file in a folder
+ *   - nodeUrl()               — a node's Drive web URL, or null
  *   - clearCaches()           — drop persisted state on logout
  *
  * Construction is cheap; the adapters do the heavy lifting lazily.
@@ -228,14 +230,16 @@ export class DriveClient {
       return controller.completion();
     }, [name, availableName]);
 
-    let driveUrl: string;
-    try {
-      driveUrl = await this.sdk.experimental.getNodeUrl(nodeUid);
-    } catch {
-      driveUrl = `https://drive.proton.me/${nodeUid}`;
-    }
+    return { nodeUid, driveUrl: await this.nodeUrl(nodeUid), name: availableName };
+  }
 
-    return { nodeUid, driveUrl, name: availableName };
+  /** The node's Drive web URL, or null when the SDK can't build one. */
+  async nodeUrl(nodeUid: string): Promise<string | null> {
+    try {
+      return await this.sdk.experimental.getNodeUrl(nodeUid);
+    } catch {
+      return null;
+    }
   }
 
   /**

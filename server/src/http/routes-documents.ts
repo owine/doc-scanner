@@ -86,6 +86,12 @@ function currentFolder(want: FolderWant, pathOf: ReadonlyMap<string, string>): D
   return parentPath && name ? { kind: 'new', parentLinkId: want.parentLinkId, parentPath, name } : null;
 }
 
+/** The folder's own path; for a new folder, the one it will have once created (so it is under its parent's). */
+function folderPath(folder: Decision['folder']): string {
+  if (folder.kind === 'existing') return folder.path;
+  return `${folder.parentPath === '/' ? '' : folder.parentPath}/${folder.name}`;
+}
+
 /** Where a failed document picks up on retry: as late as what it already has allows. */
 function restartState(d: DocumentRow): DocumentState {
   return d.decision ? 'filing' : d.analysis ? 'ready' : 'received';
@@ -191,8 +197,15 @@ export function documentRoutes(deps: { store: SessionStore; pipeline: Pipeline }
     // current tree, since a suggested folder may have moved or gone since.
     const want = body.data.folder ?? doc.analysis?.folder;
     if (!want) return c.json({ error: 'folder_required' }, 400);
+    if (want.kind === 'new' && !sanitiseName(want.name, '')) return c.json({ error: 'invalid_folder_name' }, 400);
     const folder = currentFolder(want, pathOf);
     if (!folder) return c.json({ error: 'unknown_folder' }, 400);
+    // The folder may have joined the never-file-here list since the analysis.
+    // Approving "as suggested" must not file there; a folder the user picked
+    // themselves is their call.
+    if (!body.data.folder && isUnderAny(folderPath(folder), deps.pipeline.settings.get().excludePaths)) {
+      return c.json({ error: 'excluded_folder' }, 400);
+    }
 
     const userEdited = name !== doc.analysis?.name || !sameFolder(folder, doc.analysis?.folder);
     const moved = repo.transition(doc.id, 'needs_review', 'filing', {

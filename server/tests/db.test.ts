@@ -23,7 +23,7 @@ describe('openDb', () => {
     cleanupFn = cleanup;
 
     const v = db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number };
-    expect(v.v).toBe(5);
+    expect(v.v).toBe(6);
   });
 
   it('migration 002 creates drive cache tables', () => {
@@ -37,7 +37,14 @@ describe('openDb', () => {
     expect(names).toContain('event_cursors');
 
     const v = db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number };
-    expect(v.v).toBe(5);
+    expect(v.v).toBe(6);
+  });
+
+  it('migration 006 adds documents.drive_url', () => {
+    const { db, cleanup } = createTestDb();
+    cleanupFn = cleanup;
+    const cols = db.prepare("SELECT name FROM pragma_table_info('documents')").all() as { name: string }[];
+    expect(cols.map((c) => c.name)).toContain('drive_url');
   });
 
   it('migration 003 keys event cursors by scope and adds app_settings', () => {
@@ -67,7 +74,7 @@ describe('openDb', () => {
     const secondCount = (db2.prepare('SELECT COUNT(*) AS c FROM schema_version').get() as { c: number }).c;
     db2.close();
 
-    expect(secondCount).toBe(5);
+    expect(secondCount).toBe(6);
     expect(secondCount).toBe(firstCount);
     expect(secondApplied).toBe(firstApplied);
   });

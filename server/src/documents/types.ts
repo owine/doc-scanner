@@ -65,6 +65,7 @@ export interface DocumentRow {
   filedName: string | null;
   filedFolderPath: string | null;
   driveNodeUid: string | null;
+  driveUrl: string | null;
   autoFiled: boolean;
   userEdited: boolean;
   discardRequested: boolean;
@@ -95,6 +96,7 @@ export interface DocumentPatch {
   filedName?: string | null;
   filedFolderPath?: string | null;
   driveNodeUid?: string | null;
+  driveUrl?: string | null;
   autoFiled?: boolean;
   userEdited?: boolean;
   discardRequested?: boolean;
