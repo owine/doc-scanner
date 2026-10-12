@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useLayoutEffect, useState } from 'preact/hooks';
 import { api, ApiError } from '../api.js';
 import { documentsApi } from '../documents/api.js';
 import { DocumentSync } from '../documents/sync.js';
@@ -66,6 +66,20 @@ export function App() {
     store.open().catch((e: unknown) => console.error('open store', (e as Error)?.name));
   }, []);
 
+  // A layout effect: Preact 11 runs useEffect cleanups after paint, so at
+  // sign-out the queue and the poll would run on for a frame, and at unmount
+  // they'd touch window after it is gone (as in a test's teardown).
+  useLayoutEffect(() => {
+    if (!email) return;
+    sync.start();
+    uploads.start();
+    return () => {
+      uploads.stop();
+      sync.stop();
+      sync.reset();
+    };
+  }, [email]);
+
   useEffect(() => {
     if (!email) return;
     store
@@ -73,18 +87,11 @@ export function App() {
       .then(() => store.findInProgress())
       .then((s) => setResume(s))
       .catch((e: unknown) => console.error('find in-progress scan', (e as Error)?.name));
-    sync.start();
-    uploads.start();
     // Load the PDF builder now, while online: the service worker caches its
     // chunk (sw.js), so a scan finished offline later can still be built.
     // Otherwise the first scan after a deploy or a fresh install would fetch it
     // only when finished, and offline that fails. A failure here costs nothing.
     void import('../pdf/build.js').catch(() => {});
-    return () => {
-      uploads.stop();
-      sync.stop();
-      sync.reset();
-    };
   }, [email]);
 
   function signedOut() {

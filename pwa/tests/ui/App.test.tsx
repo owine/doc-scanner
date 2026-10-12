@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/preact';
+import { cleanup, render, screen, fireEvent, waitFor } from '@testing-library/preact';
 import { UploadStore } from '../../src/uploads/upload-store.js';
 import { ScansStore } from '../../src/scanner/scans-store.js';
 import { FakeXhr } from '../uploads/fake-xhr.js';
@@ -182,6 +182,41 @@ describe('App', () => {
       } finally {
         del.mockRestore();
         logged.mockRestore();
+      }
+    });
+
+    it('sends the same queued file again once signed in after a 401', async () => {
+      const first = await signedInWithQueuedFile();
+      first.respond(401, '{"error":"not_authenticated"}');
+      expect(await screen.findByRole('button', { name: /^sign in$/i })).toBeInTheDocument();
+      vi.stubGlobal(
+        'fetch',
+        route({
+          '/api/auth/login': { email: 'user@example.test' },
+          '/api/documents': { documents: [], cursor: 0 },
+          '/api/folders': new Response('{"error":"folders_not_loaded"}', { status: 503 }),
+        }),
+      );
+      fireEvent.input(screen.getByLabelText('Email'), { target: { value: 'user@example.test' } });
+      fireEvent.input(screen.getByLabelText('Password'), { target: { value: 'correct horse' } });
+      fireEvent.click(screen.getByRole('button', { name: /^sign in$/i }));
+      await waitFor(() => expect(FakeXhr.last).not.toBe(first));
+      const again = FakeXhr.last!;
+      await waitFor(() => expect(again.body).not.toBeNull());
+      expect(again.body!.get('originalName')).toBe('northwind-bill.pdf');
+      again.respond(202, '{"id":"d1"}');
+      await waitFor(() => expect(screen.queryByRole('region', { name: 'Uploading' })).toBeNull());
+    });
+
+    it('stops the upload queue as the app unmounts, not after paint', async () => {
+      await signedInWithQueuedFile();
+      const removed = vi.spyOn(window, 'removeEventListener');
+      try {
+        cleanup();
+        expect(removed).toHaveBeenCalledWith('online', expect.any(Function));
+        expect(removed).toHaveBeenCalledWith('offline', expect.any(Function));
+      } finally {
+        removed.mockRestore();
       }
     });
 
