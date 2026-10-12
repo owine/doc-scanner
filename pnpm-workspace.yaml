@@ -73,7 +73,6 @@ allowBuilds:
   # the SDK only needs it for photo-upload metadata, which this app does not use.
   exifreader: false
   esbuild: true
-  tesseract.js: true
 
 # minimumReleaseAgeExclude is MACHINE-WRITTEN — do not treat it as hand-curated.
 # Under strict:false an install that has to pick a version younger than the

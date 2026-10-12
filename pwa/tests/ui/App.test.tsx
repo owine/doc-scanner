@@ -3,15 +3,6 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/preact';
 import { UploadStore } from '../../src/uploads/upload-store.js';
 import { FakeXhr } from '../uploads/fake-xhr.js';
 
-// The OCR worker can't start in happy-dom; the inbox doesn't need it.
-vi.mock('../../src/ocr/worker-client.js', () => ({
-  WorkerClient: class {
-    init = async () => {};
-    recognize = async () => ({ text: '', words: [] });
-    terminate = () => {};
-  },
-}));
-
 const { App } = await import('../../src/ui/App.js');
 const { makeDoc } = await import('../documents/fixtures.js');
 
