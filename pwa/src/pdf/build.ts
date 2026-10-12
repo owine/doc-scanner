@@ -19,5 +19,6 @@ export async function buildImagePdf(pages: readonly Blob[]): Promise<Blob> {
     doc.addPage([widthPt, heightPt]).drawImage(image, { x: 0, y: 0, width: widthPt, height: heightPt });
   }
   const out = await doc.save();
-  return new Blob([out.buffer as ArrayBuffer], { type: 'application/pdf' });
+  // The bytes themselves: `out.buffer` may be larger than the PDF it holds.
+  return new Blob([out as Uint8Array<ArrayBuffer>], { type: 'application/pdf' });
 }
