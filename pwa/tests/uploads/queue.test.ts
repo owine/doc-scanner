@@ -240,7 +240,7 @@ describe('UploadQueue', () => {
     expect(send).toHaveBeenCalledTimes(1);
   });
 
-  it('keeps an accepted scan on its way until onUploaded has finished', async () => {
+  it('keeps an accepted scan on its way for the rest of the session, and never queues it again', async () => {
     const cleanup = deferred<void>();
     const onUploaded = vi.fn(() => cleanup.promise);
     const q = make({ send: vi.fn().mockResolvedValue({ id: 'd1', duplicate: false }), onUploaded });
@@ -250,7 +250,12 @@ describe('UploadQueue', () => {
     expect(q.hasScan('s1')).toBe(true);
     cleanup.resolve();
     await vi.waitFor(() => expect(q.list()).toEqual([]));
-    expect(q.hasScan('s1')).toBe(false);
+    // Its local copy may not be gone yet (a device-scan list read just before
+    // the delete), or the delete failed: it must not show as left on the device.
+    expect(q.hasScan('s1')).toBe(true);
+    const build = vi.fn();
+    await q.addScan('s1', build);
+    expect(build).not.toHaveBeenCalled();
   });
 
   it('knows which scans are already queued', async () => {
@@ -266,12 +271,26 @@ describe('UploadQueue', () => {
     const build = vi.fn(() => pdf.promise);
     const first = q.addScan('s1', build);
     expect(q.hasScan('s1')).toBe(true);
-    await q.addScan('s1', build);
-    expect(build).toHaveBeenCalledTimes(1);
+    // The second call waits on the first: it resolves once the scan is queued.
+    const second = q.addScan('s1', build);
+    expect(second).toBe(first);
     pdf.resolve({ blob: new Blob(['x']), name: 'Scan.pdf', source: 'scanner' });
-    await first;
+    await second;
+    expect(build).toHaveBeenCalledTimes(1);
     expect(q.list()).toHaveLength(1);
     expect(q.list()[0]).toMatchObject({ scanId: 's1', source: 'scanner' });
+  });
+
+  it('fails a second send of a scan along with the first, then lets it be queued again', async () => {
+    const q = make({ send: () => new Promise(() => {}) });
+    const pdf = deferred<{ blob: Blob; name: string; source: 'scanner' }>();
+    const first = q.addScan('s1', () => pdf.promise);
+    const second = q.addScan('s1', vi.fn());
+    pdf.reject(new Error('no pages'));
+    await expect(first).rejects.toThrow('no pages');
+    await expect(second).rejects.toThrow('no pages');
+    await q.addScan('s1', async () => ({ blob: new Blob(['x']), name: 'Scan.pdf', source: 'scanner' }));
+    expect(q.list()).toHaveLength(1);
   });
 
   it('lets a scan be queued again when building its PDF failed', async () => {

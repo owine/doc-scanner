@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'preact/hooks';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import type { ScansStore } from '../scanner/scans-store.js';
 import type { Scan } from '../scanner/types.js';
 import type { UploadQueue } from './queue.js';
@@ -32,14 +32,27 @@ export async function sendScanToInbox(store: ScansStore, queue: UploadQueue, sca
  */
 export function useDeviceScans(store: ScansStore, queue: UploadQueue): { scans: Scan[]; reload: () => Promise<void> } {
   const [all, setAll] = useState<Scan[]>([]);
-  const reload = async () => {
+  // Reads can finish out of order: only the latest one's list is shown.
+  const latest = useRef(0);
+  // Set in a layout-effect cleanup: an effect cleanup can run after paint, too late to stop a read landing.
+  const mounted = useRef(true);
+  useLayoutEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  const reload = useCallback(async () => {
+    const read = ++latest.current;
+    let scans: Scan[];
     try {
       await store.open(); // App's open, shared: this waits for it rather than racing it
-      setAll(await store.listCompleted());
+      scans = await store.listCompleted();
     } catch {
-      setAll([]);
+      scans = [];
     }
-  };
+    if (mounted.current && read === latest.current) setAll(scans);
+  }, [store]);
   useEffect(() => {
     void reload();
     // Reload when the queue's items change (an upload finished, and its scan
@@ -50,6 +63,6 @@ export function useDeviceScans(store: ScansStore, queue: UploadQueue): { scans: 
       seen = queue.list();
       void reload();
     });
-  }, [store, queue]);
+  }, [reload, queue]);
   return { scans: all.filter((s) => !queue.hasScan(s.id)), reload };
 }

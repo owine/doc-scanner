@@ -57,6 +57,14 @@ export class UploadQueue {
   private readonly listeners = new Set<() => void>();
   /** Scans whose PDF is being built: on their way, though not queued yet. */
   private readonly claimed = new Set<string>();
+  /** The addScan call for each scan being built, so a second call waits on the first. */
+  private readonly building = new Map<string, Promise<void>>();
+  /**
+   * Scans the server has accepted this session. Their local copy may outlive
+   * the upload (a device-scan read from just before the delete, or a failed
+   * delete), and must not show as left on the device meanwhile.
+   */
+  private readonly sentScans = new Set<string>();
   private readonly store: UploadStorage;
   private readonly send: NonNullable<UploadQueueOptions['send']>;
   private readonly now: () => number;
@@ -88,9 +96,9 @@ export class UploadQueue {
     return this.active === id;
   }
 
-  /** Queued, being sent, or having its PDF built. */
+  /** Queued, being sent, having its PDF built, or accepted this session. */
   hasScan(scanId: string): boolean {
-    return this.claimed.has(scanId) || this.items.some((i) => i.scanId === scanId);
+    return this.claimed.has(scanId) || this.sentScans.has(scanId) || this.items.some((i) => i.scanId === scanId);
   }
 
   subscribe(fn: () => void): () => void {
@@ -129,19 +137,28 @@ export class UploadQueue {
   }
 
   /**
-   * Queues a scan once. The claim is taken before `build` runs, so a second
-   * call, or the device-scans list, sees the scan as on its way at once.
+   * Queues a scan once. The claim is taken before `build` runs, so the
+   * device-scans list sees the scan as on its way at once. A second call while
+   * the first is building gets the first's promise: it settles when the scan
+   * is queued, or fails with it.
    */
-  async addScan(scanId: string, build: () => Promise<Omit<NewUpload, 'scanId'>>): Promise<void> {
-    if (this.hasScan(scanId)) return;
+  addScan(scanId: string, build: () => Promise<Omit<NewUpload, 'scanId'>>): Promise<void> {
+    const inFlight = this.building.get(scanId);
+    if (inFlight) return inFlight;
+    if (this.hasScan(scanId)) return Promise.resolve();
     this.claimed.add(scanId);
     this.emit();
-    try {
-      await this.add([{ ...(await build()), scanId }]);
-    } finally {
-      this.claimed.delete(scanId);
-      this.emit();
-    }
+    // Built on a later tick, so the entry below is always set before `finally` deletes it.
+    const queued = Promise.resolve()
+      .then(build)
+      .then((pdf) => this.add([{ ...pdf, scanId }]))
+      .finally(() => {
+        this.claimed.delete(scanId);
+        this.building.delete(scanId);
+        this.emit();
+      });
+    this.building.set(scanId, queued);
+    return queued;
   }
 
   /** Sends a failed item again. Not one over the size limit: the server would refuse it again. */
@@ -270,6 +287,7 @@ export class UploadQueue {
       // The upload succeeded; a failing follow-up must not put it back.
     }
     // Only now: until its local copy is gone, a scan must still read as on its way.
+    if (item.scanId) this.sentScans.add(item.scanId);
     this.items = this.items.filter((i) => i.id !== item.id);
   }
 
