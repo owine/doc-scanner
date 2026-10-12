@@ -138,4 +138,11 @@ describe('ScansStore', () => {
     await expect(store.appendPage(id, blobOf('p1'), Q)).rejects.toThrow(/quota/i);
     (store as any).db.transaction = realTx;
   });
+
+  it('shares one open between every caller', async () => {
+    const fresh = new ScansStore();
+    const first = fresh.open();
+    expect(fresh.open()).toBe(first);
+    await first;
+  });
 });

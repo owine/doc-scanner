@@ -33,7 +33,14 @@ function uuid(): string {
 export class ScansStore {
   private db: IDBPDatabase<DocScannerSchema> | null = null;
 
-  async open(): Promise<void> {
+  private opening: Promise<void> | null = null;
+
+  /** Idempotent: every caller shares one open (App's at start, and the inbox's device-scan list). */
+  open(): Promise<void> {
+    return (this.opening ??= this.connect());
+  }
+
+  private async connect(): Promise<void> {
     this.db = await openDB<DocScannerSchema>(DB_NAME, DB_VERSION, {
       upgrade(db, oldVersion) {
         if (oldVersion < 1) {
