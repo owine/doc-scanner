@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { existsSync, lutimesSync, mkdtempSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, lutimesSync, mkdtempSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import sharp from 'sharp';
@@ -256,6 +256,30 @@ describe('sweepStaleTempDirs', () => {
     expect(() => statSync(link)).toThrow();
     expect(existsSync(join(target, 'keep.txt'))).toBe(true);
     rmSync(target, { recursive: true, force: true });
+  });
+
+  it('at startup, removes every job directory and prefixed link, however new', () => {
+    const fresh = mkdtempSync(join(tmpdir(), TEMP_PREFIX));
+    const other = mkdtempSync(join(tmpdir(), 'someone-elses-'));
+    const target = mkdtempSync(join(tmpdir(), 'symlink-target-'));
+    writeFileSync(join(target, 'keep.txt'), 'x');
+    const link = join(tmpdir(), `${TEMP_PREFIX}link-${Date.now()}`);
+    symlinkSync(target, link);
+    sweepStaleTempDirs({ all: true });
+    expect(existsSync(fresh)).toBe(false);
+    expect(() => lstatSync(link)).toThrow();
+    expect(existsSync(join(target, 'keep.txt'))).toBe(true);
+    expect(existsSync(other)).toBe(true);
+    rmSync(other, { recursive: true, force: true });
+    rmSync(target, { recursive: true, force: true });
+  });
+
+  it('sweeps everything only when created at startup', () => {
+    const fresh = mkdtempSync(join(tmpdir(), TEMP_PREFIX));
+    createPrepareTools();
+    expect(existsSync(fresh)).toBe(true); // perhaps another process's running job
+    createPrepareTools({ atStartup: true });
+    expect(existsSync(fresh)).toBe(false); // no job runs before startup
   });
 
   it('sweeps before every job, not just at startup', async () => {

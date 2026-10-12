@@ -90,9 +90,12 @@ export interface PrepareTools {
 /**
  * Removes job directories a crashed process left behind (inTempDir's finally
  * never ran): they hold a document's plaintext. Only old ones, so a job
- * running in another process is left alone.
+ * running in another process is left alone; with `all`, every one (at server
+ * startup, when no job of ours can be running yet, so a crash and a quick
+ * restart leave nothing behind).
  */
-export function sweepStaleTempDirs(now = Date.now()): void {
+export function sweepStaleTempDirs(o: { all?: boolean; now?: number } = {}): void {
+  const now = o.now ?? Date.now();
   let names: string[];
   try {
     names = readdirSync(tmpdir());
@@ -104,7 +107,7 @@ export function sweepStaleTempDirs(now = Date.now()): void {
     const dir = join(tmpdir(), name);
     try {
       const st = lstatSync(dir); // never follow a link
-      if (now - st.mtimeMs <= STALE_TEMP_MS) continue;
+      if (!o.all && now - st.mtimeMs <= STALE_TEMP_MS) continue;
       if (st.isSymbolicLink()) unlinkSync(dir); // the link only, not its target
       else if (st.isDirectory()) rmSync(dir, { recursive: true, force: true });
     } catch {
@@ -131,8 +134,14 @@ async function inTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
   }
 }
 
-export function createPrepareTools(): PrepareTools {
-  sweepStaleTempDirs();
+/**
+ * `atStartup`: the server process owns the temp directory and no job runs
+ * before it starts, so every job directory there is a dead one. Only the
+ * server's own start says so; anything else (tests, scripts) may share the
+ * directory with a running job.
+ */
+export function createPrepareTools(o: { atStartup?: boolean } = {}): PrepareTools {
+  sweepStaleTempDirs({ all: o.atStartup === true });
   return {
     async ocrPdf(pdf) {
       if (!looksLikePdf(pdf)) throw new ToolFailedError('not a PDF');
