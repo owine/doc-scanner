@@ -8,6 +8,7 @@ import { dirname } from 'node:path';
 import { loadConfig } from './config.js';
 import { openDb } from './db.js';
 import { analyzerForClient, createPipeline } from './documents/pipeline.js';
+import { createPrepareTools } from './prepare/tools.js';
 import { createApp } from './http/server.js';
 import { logger } from './logger.js';
 
@@ -27,6 +28,8 @@ const pipeline = createPipeline({
     excludePaths: [],
   },
   analyzerFor: analyzerForClient(new Anthropic({ apiKey: config.ANTHROPIC_API_KEY })),
+  // Startup: removes every preparation folder a crashed run left, however new.
+  prepare: createPrepareTools({ atStartup: true }),
 });
 
 const app = createApp({

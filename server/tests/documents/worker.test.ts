@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { makeHarness, ANALYSIS } from './harness.js';
+import { makeHarness, ANALYSIS, okOutcome } from './harness.js';
 import { DocumentWorker, MAX_ATTEMPTS } from '../../src/documents/worker.js';
 import type { DocumentRow } from '../../src/documents/types.js';
 
@@ -15,6 +15,14 @@ function afterMicrotasks(depth: number, fn: () => void): void {
 }
 
 describe('DocumentWorker', () => {
+  it('prepares a document whose analysis was unusable, then sends it to review with the reason', async () => {
+    h = makeHarness();
+    h.analyze.mockResolvedValue({ ...okOutcome(), status: 'invalid', detail: 'schema mismatch' });
+    const doc = h.add();
+    await new DocumentWorker(h.ctx).wake();
+    expect(h.repo.get(doc.id)).toMatchObject({ state: 'needs_review', analysis: null, reviewReason: 'analysis invalid: schema mismatch' });
+  });
+
   it('takes a document from received to filed when it can auto-file', async () => {
     h = makeHarness();
     const doc = h.add();
@@ -43,6 +51,28 @@ describe('DocumentWorker', () => {
     expect(h.repo.get(doc.id)).toMatchObject({ state: 'failed', attempts: MAX_ATTEMPTS });
     expect(h.report).toHaveBeenCalledTimes(1);
     expect(h.report.mock.calls[0][1]).toBe('analyze');
+  });
+
+  it('retries a preparation whose result could not be stored, then fails it as the prepare stage', async () => {
+    h = makeHarness();
+    h.prepare.ocrPdf.mockResolvedValue({ kind: 'ocred', pdf: new TextEncoder().encode('%PDF- ocred') });
+    const doc = h.add(new TextEncoder().encode('%PDF- scan'), 'application/pdf');
+    const put = h.inbox.put.bind(h.inbox);
+    vi.spyOn(h.inbox, 'put').mockImplementation((id, kind, bytes) => {
+      if (kind === 'prepared') throw new Error('disk full');
+      return put(id, kind, bytes);
+    });
+    const w = new DocumentWorker(h.ctx);
+    await w.wake();
+    expect(h.repo.get(doc.id)).toMatchObject({ state: 'preparing', attempts: 1, error: 'disk full' });
+    for (let i = 1; i < MAX_ATTEMPTS; i++) {
+      h.advance(10 * 60_000);
+      await w.wake();
+    }
+    expect(h.repo.get(doc.id)).toMatchObject({ state: 'failed', attempts: MAX_ATTEMPTS });
+    expect(h.prepare.ocrPdf).toHaveBeenCalledTimes(MAX_ATTEMPTS);
+    expect(h.report).toHaveBeenCalledOnce();
+    expect(h.report.mock.calls[0]![1]).toBe('prepare');
   });
 
   it('applies a discard that arrived while the document waited out a backoff', async () => {

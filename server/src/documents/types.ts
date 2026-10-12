@@ -67,6 +67,8 @@ export interface DocumentRow {
   driveNodeUid: string | null;
   driveUrl: string | null;
   autoFiled: boolean;
+  prepareNote: string | null;
+  hasThumbnail: boolean;
   userEdited: boolean;
   discardRequested: boolean;
   discardedAt: string | null;
@@ -98,6 +100,8 @@ export interface DocumentPatch {
   driveNodeUid?: string | null;
   driveUrl?: string | null;
   autoFiled?: boolean;
+  prepareNote?: string | null;
+  hasThumbnail?: boolean;
   userEdited?: boolean;
   discardRequested?: boolean;
   discardedAt?: Date | null;

@@ -49,15 +49,27 @@ export async function reportingDriveFailure<T>(
 /** 'storage': a document row whose sealed details would not decrypt (see DocumentRepo). */
 export type DocumentStage = 'analyze' | 'prepare' | 'file' | 'storage';
 
+/** `fallback`: the stage gave up on an extra (a text layer) and the document carries on. */
+export interface DocumentReportOptions {
+  outcome?: 'fallback';
+}
+
 /**
  * Reports a document that reached `failed`, tagged with the stage that
- * broke. Names passed in `sensitive` (and their extension-less stems) are
+ * broke, or, with `outcome: 'fallback'`, a stage that fell back and carried
+ * on. Names passed in `sensitive` (and their extension-less stems) are
  * redacted wherever they appear in the event's free text. Callers must not
  * throw errors that embed document content.
  */
-export function captureDocumentFailure(error: unknown, stage: DocumentStage, sensitive: readonly string[] = []): void {
+export function captureDocumentFailure(
+  error: unknown,
+  stage: DocumentStage,
+  sensitive: readonly string[] = [],
+  o: DocumentReportOptions = {},
+): void {
   Sentry.withScope((scope) => {
     scope.setTag('document.stage', stage);
+    if (o.outcome) scope.setTag('document.outcome', o.outcome);
     const values = sensitive.filter((v) => v.length > 0);
     if (values.length > 0) scope.addEventProcessor((event) => redactExact(event, values));
     Sentry.captureException(error);

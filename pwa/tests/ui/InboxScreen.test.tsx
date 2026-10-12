@@ -118,12 +118,13 @@ describe('InboxScreen', () => {
   it('lists filed documents with who filed them and a Drive link', async () => {
     setup([
       makeDoc({ state: 'filed', autoFiled: true, filed: { name: 'Northwind Energy Bill 2026-08', folderPath: '/Bills/Energy', driveNodeUid: 'v~1', driveUrl: 'https://drive.proton.me/u/0/s/file/1' } }),
-      makeDoc({ state: 'filed', userEdited: true, filed: { name: 'Water Bill 2026-08', folderPath: '/Bills/Water', driveNodeUid: 'v~2', driveUrl: null } }),
+      makeDoc({ state: 'filed', userEdited: true, prepareNote: 'No text layer: OCR took too long.', filed: { name: 'Water Bill 2026-08', folderPath: '/Bills/Water', driveNodeUid: 'v~2', driveUrl: null } }),
     ]);
     const filed = screen.getByRole('region', { name: 'Recently filed' });
     expect(within(filed).getByText('auto')).toBeInTheDocument();
     expect(within(filed).getByText('you edited')).toBeInTheDocument();
     expect(within(filed).getAllByRole('link', { name: /open in drive/i })).toHaveLength(1);
+    expect(within(filed).getByText('No text layer: OCR took too long.')).toBeInTheDocument();
     await waitFor(() => expect(filed).toBeInTheDocument());
   });
 

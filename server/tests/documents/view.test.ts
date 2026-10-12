@@ -32,6 +32,8 @@ const row = (over: Partial<DocumentRow> = {}): DocumentRow => ({
   discardRequested: false,
   discardedAt: null,
   uploadUnverified: false,
+  prepareNote: null,
+  hasThumbnail: false,
   ...over,
 });
 
@@ -54,6 +56,12 @@ describe('toView', () => {
     expect(filed.filed).toEqual({ name: TARGET.name, folderPath: '/Bills', driveNodeUid: 'N1', driveUrl: 'https://drive.example/N1' });
     expect(toView(row({ state: 'received' })).filed).toBeNull();
     expect(toView(row({ state: 'awaiting_login', filingTarget: null })).possiblyInDrive).toBe(false);
+  });
+
+  it('passes the prepare note through and shows a thumbnail only while not filed', () => {
+    expect(toView(row({ prepareNote: 'OCR is not installed on this server' })).prepareNote).toBe('OCR is not installed on this server');
+    expect(toView(row({ state: 'ready', hasThumbnail: true })).hasThumbnail).toBe(true);
+    expect(toView(row({ state: 'filed', hasThumbnail: true })).hasThumbnail).toBe(false);
   });
 
   it('leaves out blobs, hashes and the analysis text snippet', () => {

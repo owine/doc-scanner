@@ -49,6 +49,15 @@ describe('fileStage', () => {
     expect(bills.files[0]!.name).toBe('Northwind Energy Sep 2026.pdf');
   });
 
+  it('clears the thumbnail flag and deletes the thumbnail blob when filed', async () => {
+    h = makeHarness();
+    const doc = filingDoc(EXISTING, { hasThumbnail: true });
+    h.inbox.put(doc.id, 'thumbnail', new Uint8Array([1]));
+    await fileStage(doc, h.ctx);
+    expect(h.repo.get(doc.id)).toMatchObject({ state: 'filed', hasThumbnail: false });
+    expect(h.inbox.has(doc.id, 'thumbnail')).toBe(false);
+  });
+
   it('creates an approved new folder once, saving its uid before uploading', async () => {
     h = makeHarness();
     const doc = filingDoc(NEW);
@@ -394,5 +403,16 @@ describe('fileStage', () => {
     expect(h.drive.uploadFile).toHaveBeenCalledWith('Northwind Energy Sep 2026.jpg', expect.any(Uint8Array), 'image/jpeg', {
       parentFolderUid: 'BILLS',
     });
+  });
+
+  it('ignores a prepared blob the row does not record', async () => {
+    h = makeHarness();
+    const doc = h.add(new TextEncoder().encode('photo bytes'), 'image/jpeg');
+    // As left by a preparation whose result was thrown away (a discard, then a restore).
+    h.inbox.put(doc.id, 'prepared', new TextEncoder().encode('%PDF- fictional'));
+    h.repo.transition(doc.id, 'received', 'filing', { decision: EXISTING, analysis: ANALYSIS });
+    await fileStage(h.repo.get(doc.id)!, h.ctx);
+    const [name, bytes, mime] = h.drive.uploadFile.mock.calls[0]!;
+    expect([name, new TextDecoder().decode(bytes), mime]).toEqual(['Northwind Energy Sep 2026.jpg', 'photo bytes', 'image/jpeg']);
   });
 });

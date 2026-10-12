@@ -1,11 +1,15 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { makeHarness, okOutcome, ANALYSIS, TREE } from './harness.js';
 import { analyzeStage } from '../../src/documents/stages/analyze.js';
 import { prepareStage } from '../../src/documents/stages/prepare.js';
 import { decideStage, reviewReason } from '../../src/documents/stages/decide.js';
+import { logger } from '../../src/logger.js';
 
 let h: ReturnType<typeof makeHarness>;
-afterEach(() => h.cleanup());
+afterEach(() => {
+  vi.restoreAllMocks();
+  h.cleanup();
+});
 
 describe('analyzeStage', () => {
   it('defers when there is no folder tree yet, without calling the model', async () => {
@@ -42,12 +46,29 @@ describe('analyzeStage', () => {
     expect(folders.map((f) => f.path)).toEqual(['/', '/Bills']);
   });
 
-  it('sends an unusable answer to review with the reason', async () => {
+  it('sends an unusable answer on to preparing, with the reason for review', async () => {
     h = makeHarness();
     h.analyze.mockResolvedValue({ ...okOutcome(), status: 'refusal', detail: 'declined (cyber)' });
     const doc = h.add();
     await analyzeStage(doc, h.ctx);
-    expect(h.repo.get(doc.id)).toMatchObject({ state: 'needs_review', reviewReason: 'analysis refusal: declined (cyber)' });
+    expect(h.repo.get(doc.id)).toMatchObject({ state: 'preparing', analysis: null, reviewReason: 'analysis refusal: declined (cyber)' });
+  });
+
+  it('drops an earlier analysis when the new answer is unusable', async () => {
+    h = makeHarness();
+    h.analyze.mockResolvedValue({ ...okOutcome(), status: 'truncated', detail: 'max_tokens' });
+    const doc = h.add();
+    h.repo.transition(doc.id, 'received', 'received', { analysis: ANALYSIS });
+    await analyzeStage(h.repo.get(doc.id)!, h.ctx);
+    expect(h.repo.get(doc.id)).toMatchObject({ state: 'preparing', analysis: null, reviewReason: 'analysis truncated: max_tokens' });
+  });
+
+  it('clears a review reason an earlier, unusable answer left when the new one is ok', async () => {
+    h = makeHarness();
+    const doc = h.add();
+    h.repo.transition(doc.id, 'received', 'received', { reviewReason: 'analysis refusal: declined' });
+    await analyzeStage(h.repo.get(doc.id)!, h.ctx);
+    expect(h.repo.get(doc.id)).toMatchObject({ state: 'preparing', reviewReason: null, analysis: { name: ANALYSIS.name } });
   });
 
   it('honours a discard requested while the model was working', async () => {
@@ -63,13 +84,13 @@ describe('analyzeStage', () => {
 });
 
 describe('analyzeStage retry state and recovery', () => {
-  it('resets retry state when an unusable answer goes to review', async () => {
+  it('resets retry state when an unusable answer moves on', async () => {
     h = makeHarness();
     h.analyze.mockResolvedValue({ ...okOutcome(), status: 'refusal', detail: 'declined' });
     const doc = h.add();
     h.repo.transition(doc.id, 'received', 'received', { attempts: 2, error: 'x' });
     await analyzeStage(h.repo.get(doc.id)!, h.ctx);
-    expect(h.repo.get(doc.id)).toMatchObject({ state: 'needs_review', attempts: 0, error: null });
+    expect(h.repo.get(doc.id)).toMatchObject({ state: 'preparing', attempts: 0, error: null });
   });
 
   it('refreshes the folder cache when a session is live and there is no tree', async () => {
@@ -143,6 +164,35 @@ describe('decideStage', () => {
       autoFiled: true,
       decision: { name: ANALYSIS.name, folder: ANALYSIS.folder },
     });
+  });
+
+  it('sends a document whose analysis was unusable to review with the recorded reason', () => {
+    h = makeHarness();
+    const doc = h.add();
+    h.repo.transition(doc.id, 'received', 'ready', { reviewReason: 'analysis refusal: declined' });
+    decideStage(h.repo.get(doc.id)!, h.ctx);
+    expect(h.repo.get(doc.id)).toMatchObject({ state: 'needs_review', reviewReason: 'analysis refusal: declined' });
+  });
+
+  it('never logs the analyzer\'s detail for an unusable analysis', () => {
+    h = makeHarness();
+    const info = vi.spyOn(logger, 'info');
+    const doc = h.add();
+    // The schema error can quote the model's output, which quotes the document.
+    const detail = 'analysis invalid: answer did not match the schema: name "Northwind Energy Sep 2026" too long';
+    h.repo.transition(doc.id, 'received', 'ready', { reviewReason: detail });
+    decideStage(h.repo.get(doc.id)!, h.ctx);
+    expect(h.repo.get(doc.id)).toMatchObject({ state: 'needs_review', reviewReason: detail });
+    expect(info).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'review', reason: 'analysis unusable' }), 'document decided');
+    expect(JSON.stringify(info.mock.calls)).not.toContain('Northwind');
+  });
+
+  it('sends a document with a recorded reason to review even when it could auto-file', () => {
+    h = makeHarness();
+    const doc = h.add();
+    h.repo.transition(doc.id, 'received', 'ready', { analysis: ANALYSIS, reviewReason: 'restored after discard' });
+    decideStage(h.repo.get(doc.id)!, h.ctx);
+    expect(h.repo.get(doc.id)).toMatchObject({ state: 'needs_review', reviewReason: 'restored after discard', autoFiled: false });
   });
 
   it('sends everything to review while auto-filing is off', () => {

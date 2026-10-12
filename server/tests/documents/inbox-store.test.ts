@@ -37,6 +37,16 @@ describe('InboxStore', () => {
     expect(s.has('doc1', 'original')).toBe(false);
   });
 
+  it('remove deletes one blob, leaves the others, and ignores an absent one', () => {
+    const s = store();
+    s.put('doc1', 'original', new Uint8Array([1]));
+    s.put('doc1', 'thumbnail', new Uint8Array([2]));
+    s.remove('doc1', 'thumbnail');
+    expect(s.has('doc1', 'thumbnail')).toBe(false);
+    expect(s.has('doc1', 'original')).toBe(true);
+    expect(() => s.remove('doc1', 'prepared')).not.toThrow();
+  });
+
   it('rejects ids that could escape the directory', () => {
     expect(() => store().put('../x', 'original', new Uint8Array([1]))).toThrow(/invalid document id/);
   });

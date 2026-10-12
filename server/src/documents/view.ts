@@ -29,6 +29,9 @@ export function toView(d: DocumentRow) {
         ? { name: d.filedName, folderPath: d.filedFolderPath, driveNodeUid: d.driveNodeUid, driveUrl: d.driveUrl }
         : null,
     autoFiled: d.autoFiled,
+    prepareNote: d.prepareNote,
+    // The blobs are deleted once a document is filed.
+    hasThumbnail: d.hasThumbnail && d.state !== 'filed',
     userEdited: d.userEdited,
     // An upload was started: discarding now may leave a copy in Drive (the PWA warns).
     possiblyInDrive: d.state !== 'filed' && (d.filingTarget !== null || d.uploadUnverified),

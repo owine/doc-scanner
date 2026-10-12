@@ -12,7 +12,7 @@ import type { DriveClient } from '../../src/drive/client.js';
 import { MailboxSecret } from '../../src/auth/secrets/mailbox-password.js';
 import type { DecryptedUserKey } from '../../src/auth/keys.js';
 import { createPipeline, type Pipeline } from '../../src/documents/pipeline.js';
-import { ANALYSIS, TREE, okOutcome } from '../documents/harness.js';
+import { ANALYSIS, TREE, okOutcome, fakePrepare } from '../documents/harness.js';
 import { logger } from '../../src/logger.js';
 
 const KEY = Buffer.alloc(32, 1).toString('base64');
@@ -49,6 +49,7 @@ async function setup(opts: { liveSession?: () => LiveSession | undefined } = {})
     defaults: { model: 'm', effort: 'medium', autoFileThreshold: 0.8, autoFileEnabled: false, excludePaths: [] },
     analyzerFor: () => ({ analyze }),
     liveSession: opts.liveSession ?? (() => undefined),
+    prepare: fakePrepare(),
   });
   const fakeAuth = {
     login: vi.fn().mockResolvedValue({
@@ -82,6 +83,7 @@ describe('document routes', () => {
       ['GET', '/api/documents'],
       ['POST', '/api/documents'],
       ['GET', '/api/documents/some-id'],
+      ['GET', '/api/documents/some-id/thumbnail'],
       ['POST', '/api/documents/some-id/approve'],
       ['POST', '/api/documents/some-id/discard'],
       ['POST', '/api/documents/some-id/restore'],
@@ -167,17 +169,27 @@ describe('document routes', () => {
   it('discards, restores and retries', async () => {
     const { app, cookie, pipeline } = await setup();
     const doc = pipeline.repo.insert({ source: 'picker', originalName: 'a.pdf', mime: 'application/pdf', size: 1, sha256: 'y', sourceContext: null });
-    pipeline.repo.transition(doc.id, 'received', 'needs_review', { analysis: ANALYSIS });
+    pipeline.repo.transition(doc.id, 'received', 'needs_review', { analysis: ANALYSIS, preparedMime: 'application/pdf' });
     const post = (path: string) => app.request(`/api/documents/${doc.id}/${path}`, { method: 'POST', headers: { cookie } });
     expect((await post('discard')).status).toBe(200);
     expect(pipeline.repo.get(doc.id)?.state).toBe('discarded');
     expect((await post('restore')).status).toBe(200);
     expect(pipeline.repo.get(doc.id)?.state).toBe('needs_review');
-    pipeline.repo.transition(doc.id, 'needs_review', 'failed', { error: 'x' });
+    // As a failure while preparing leaves it: the stage clears preparedMime first.
+    pipeline.repo.transition(doc.id, 'needs_review', 'failed', { error: 'x', preparedMime: null });
+    pipeline.inbox.put(doc.id, 'original', new TextEncoder().encode('statement'));
     expect((await post('retry')).status).toBe(200);
-    // Retry resumes at `ready`; the worker then decides at once, and with
-    // auto-filing off that means review again.
-    expect(pipeline.repo.get(doc.id)).toMatchObject({ state: 'needs_review', reviewReason: 'auto-filing is off', error: null, attempts: 0 });
+    await pipeline.worker.wake(); // the prepare stage awaits its tools: let the drain finish
+    // Retry resumes at `preparing` (the failure may have cost the text layer
+    // or the thumbnail), so preparedMime is recorded; the worker then decides
+    // at once, keeping the restore's recorded reason: review again.
+    expect(pipeline.repo.get(doc.id)).toMatchObject({
+      state: 'needs_review',
+      preparedMime: 'application/pdf',
+      reviewReason: 'restored after discard',
+      error: null,
+      attempts: 0,
+    });
   });
 
   it('serves folders (minus never-file-here) and settings', async () => {
@@ -218,7 +230,8 @@ type App = Awaited<ReturnType<typeof setup>>['app'];
 /** A document waiting in review with the harness's analysis. */
 function inReview(pipeline: Pipeline, sha256 = 'r') {
   const doc = pipeline.repo.insert({ source: 'picker', originalName: 'a.pdf', mime: 'application/pdf', size: 1, sha256, sourceContext: null });
-  pipeline.repo.transition(doc.id, 'received', 'needs_review', { analysis: ANALYSIS });
+  // Prepared, as every analysed document in review has been.
+  pipeline.repo.transition(doc.id, 'received', 'needs_review', { analysis: ANALYSIS, preparedMime: 'application/pdf' });
   return doc;
 }
 
@@ -418,6 +431,24 @@ describe('intake', () => {
     expect(pipeline.repo.get(id)).toMatchObject({ state: 'received', attempts: 0, error: null });
   });
 
+  it('re-uploading a failed, analysed document prepares it again', async () => {
+    const { app, cookie, pipeline } = await setup();
+    const { id } = (await (await upload(app, cookie)).json()) as { id: string };
+    expect(pipeline.repo.transition(id, 'received', 'failed', { analysis: ANALYSIS, attempts: 3, error: 'boom' })).toBe(true);
+    const again = await upload(app, cookie);
+    expect(await again.json()).toEqual({ id, duplicate: true });
+    await pipeline.worker.wake(); // let the drain finish
+    // Restarted at `preparing`, which records preparedMime; then decided, and
+    // with auto-filing off that means review.
+    expect(pipeline.repo.get(id)).toMatchObject({
+      state: 'needs_review',
+      preparedMime: 'text/plain',
+      reviewReason: 'auto-filing is off',
+      attempts: 0,
+      error: null,
+    });
+  });
+
   it('re-uploading a document with a pending discard keeps it', async () => {
     const { app, cookie, pipeline } = await setup();
     const { id } = (await (await upload(app, cookie)).json()) as { id: string };
@@ -544,6 +575,44 @@ describe('restore and retry', () => {
     expect(pipeline.repo.get(doc.id)).toMatchObject({ state: 'needs_review', reviewReason: 'restored after discard', error: null, attempts: 0 });
   });
 
+  it('prepares a document restored after a discard won during preparing, then sends it to review', async () => {
+    const { app, cookie, pipeline } = await setup();
+    const doc = pipeline.repo.insert({ source: 'picker', originalName: 'a.pdf', mime: 'application/pdf', size: 9, sha256: 'p1', sourceContext: null });
+    pipeline.inbox.put(doc.id, 'original', new TextEncoder().encode('%PDF- scan'));
+    pipeline.repo.transition(doc.id, 'received', 'preparing', { analysis: ANALYSIS });
+    expect(pipeline.repo.requestDiscard(doc.id)).toBe('requested');
+    expect(pipeline.repo.applyRequestedDiscard(doc.id)).toBe(true); // the discard won: nothing prepared
+    expect(pipeline.repo.get(doc.id)).toMatchObject({ state: 'discarded', preparedMime: null });
+    const res = await post(app, cookie, doc.id, 'restore');
+    expect(res.status).toBe(200);
+    await pipeline.worker.wake(); // let the drain finish
+    expect(pipeline.repo.get(doc.id)).toMatchObject({
+      state: 'needs_review',
+      preparedMime: 'application/pdf',
+      reviewReason: 'restored after discard',
+    });
+  });
+
+  it('restores a document that was already prepared straight into review', async () => {
+    const { app, cookie, pipeline } = await setup();
+    const doc = inReview(pipeline, 'p2');
+    pipeline.repo.transition(doc.id, 'needs_review', 'needs_review', { preparedMime: 'application/pdf' });
+    expect((await post(app, cookie, doc.id, 'discard')).status).toBe(200);
+    const res = await post(app, cookie, doc.id, 'restore');
+    expect(((await res.json()) as { state: string }).state).toBe('needs_review');
+    expect(pipeline.repo.get(doc.id)).toMatchObject({ state: 'needs_review', reviewReason: 'restored after discard', preparedMime: 'application/pdf' });
+  });
+
+  it('restores a document that may already be in Drive into review, as it is', async () => {
+    const { app, cookie, pipeline } = await setup();
+    const doc = inReview(pipeline, 'p3');
+    const target = { folderLinkId: 'BILLS', name: 'Northwind Energy Sep 2026.pdf' };
+    pipeline.repo.transition(doc.id, 'needs_review', 'failed', { filingTarget: target, preparedMime: null, error: 'boom', attempts: 3 });
+    expect((await post(app, cookie, doc.id, 'discard')).status).toBe(200);
+    expect((await post(app, cookie, doc.id, 'restore')).status).toBe(200);
+    expect(pipeline.repo.get(doc.id)).toMatchObject({ state: 'needs_review', preparedMime: null, filingTarget: target });
+  });
+
   it('restores an unanalysed document without a review reason', async () => {
     const { app, cookie, pipeline } = await setup();
     const doc = pipeline.repo.insert({ source: 'picker', originalName: 'a.pdf', mime: 'application/pdf', size: 1, sha256: 's', sourceContext: null });
@@ -641,5 +710,37 @@ describe('document route edges', () => {
     expect(res.status).toBe(413);
     expect(await res.json()).toEqual({ error: 'payload_too_large' });
     expect(pipeline.repo.listChangedSince(0).rows).toHaveLength(0);
+  });
+});
+
+describe('thumbnail', () => {
+  it('serves the thumbnail blob', async () => {
+    const { app, cookie, pipeline } = await setup();
+    const doc = pipeline.repo.insert({ source: 'picker', originalName: 'a.pdf', mime: 'application/pdf', size: 1, sha256: 't1', sourceContext: null });
+    pipeline.repo.transition(doc.id, 'received', 'needs_review', { hasThumbnail: true });
+    pipeline.inbox.put(doc.id, 'thumbnail', new Uint8Array([0xff, 0xd8, 1, 2]));
+    const res = await app.request(`/api/documents/${doc.id}/thumbnail`, { headers: { cookie } });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toBe('image/jpeg');
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    expect(res.headers.get('x-content-type-options')).toBe('nosniff');
+    expect([...new Uint8Array(await res.arrayBuffer())]).toEqual([0xff, 0xd8, 1, 2]);
+  });
+
+  it('is not found for an unknown id, no thumbnail, a filed document or a missing blob', async () => {
+    const { app, cookie, pipeline } = await setup();
+    const add = (sha256: string) =>
+      pipeline.repo.insert({ source: 'picker', originalName: 'a.pdf', mime: 'application/pdf', size: 1, sha256, sourceContext: null });
+    const none = add('n1');
+    const filed = add('n2');
+    pipeline.repo.transition(filed.id, 'received', 'filed', { hasThumbnail: true });
+    pipeline.inbox.put(filed.id, 'thumbnail', new Uint8Array([1]));
+    const blobless = add('n3');
+    pipeline.repo.transition(blobless.id, 'received', 'needs_review', { hasThumbnail: true });
+    for (const id of ['nope', none.id, filed.id, blobless.id]) {
+      const res = await app.request(`/api/documents/${id}/thumbnail`, { headers: { cookie } });
+      expect([id, res.status]).toEqual([id, 404]);
+      expect(await res.json()).toEqual({ error: 'not_found' });
+    }
   });
 });

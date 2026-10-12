@@ -29,7 +29,9 @@ export function reviewReason(a: StoredAnalysis | null, s: EffectiveSettings): st
 
 export function decideStage(doc: DocumentRow, ctx: StageContext): void {
   const a = doc.analysis;
-  const reason = reviewReason(a, ctx.settings.get());
+  // A recorded reason wins: the model's answer was unusable (analyzeStage
+  // recorded why), or the document was restored after a discard.
+  const reason = doc.reviewReason ?? (a ? reviewReason(a, ctx.settings.get()) : 'no analysis');
   const moved =
     reason === null && a && a.folder
       ? ctx.repo.transition(doc.id, 'ready', 'filing', {
@@ -40,6 +42,8 @@ export function decideStage(doc: DocumentRow, ctx: StageContext): void {
           error: null,
         })
       : ctx.repo.transition(doc.id, 'ready', 'needs_review', { reviewReason: reason, attempts: 0, error: null });
-  if (moved) logger.info({ documentId: doc.id, outcome: reason === null ? 'auto-filed' : 'review', reason }, 'document decided');
+  // A fixed reason when there is no analysis: the recorded one can quote the
+  // model's answer (a schema error), and so the document.
+  if (moved) logger.info({ documentId: doc.id, outcome: reason === null ? 'auto-filed' : 'review', reason: a ? reason : 'analysis unusable' }, 'document decided');
   else ctx.repo.applyRequestedDiscard(doc.id);
 }

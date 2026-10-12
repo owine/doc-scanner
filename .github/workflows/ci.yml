@@ -97,6 +97,8 @@ jobs:
           context: .
           platforms: ${{ matrix.platform }}
           push: false
+          # Loaded into the runner's Docker, so the smoke step can run it.
+          load: true
           cache-from: type=gha,scope=docker-${{ matrix.platform }}
           cache-to: type=gha,mode=max,scope=docker-${{ matrix.platform }}
           tags: doc-scanner:ci
@@ -104,3 +106,13 @@ jobs:
             GIT_SHA=${{ steps.meta.outputs.git_sha }}
             BUILD_DATE=${{ steps.meta.outputs.build_date }}
             VERSION=${{ steps.meta.outputs.version }}
+
+      - name: Smoke-test the OCR tools (${{ matrix.platform }})
+        # The real ocrmypdf, img2pdf and Ghostscript in the built image. Catches
+        # an apk bump that changes their output or exit codes, which the sidecar
+        # check and the protected-PDF detection rely on. --init reaps killed tools.
+        run: |
+          docker run --rm --init \
+            -v "$PWD/server/scripts:/app/server/scripts:ro" \
+            --entrypoint sh doc-scanner:ci \
+            -c "cd server && node --import tsx scripts/smoke-prepare.ts"

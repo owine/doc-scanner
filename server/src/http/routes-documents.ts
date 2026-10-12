@@ -5,6 +5,7 @@ import { z, ZodError } from 'zod';
 import type { SessionStore } from '../auth/session-store.js';
 import { sanitiseName } from '../analyze/resolve.js';
 import type { Pipeline } from '../documents/pipeline.js';
+import { InboxBlobMissingError } from '../documents/inbox-store.js';
 import type { Decision, DocumentRow, DocumentState } from '../documents/types.js';
 import { intakeMime } from '../documents/extension.js';
 import { toView } from '../documents/view.js';
@@ -94,7 +95,8 @@ function folderPath(folder: Decision['folder']): string {
 
 /** Where a failed document picks up on retry: as late as what it already has allows. */
 function restartState(d: DocumentRow): DocumentState {
-  return d.decision ? 'filing' : d.analysis ? 'ready' : 'received';
+  // An analysed document is prepared again: a failure there may have cost its text layer or thumbnail.
+  return d.decision ? 'filing' : d.analysis ? 'preparing' : 'received';
 }
 
 export function documentRoutes(deps: { store: SessionStore; pipeline: Pipeline }) {
@@ -162,6 +164,26 @@ export function documentRoutes(deps: { store: SessionStore; pipeline: Pipeline }
     if (!Number.isInteger(since) || since < 0) return c.json({ error: 'invalid_cursor' }, 400);
     const { rows, cursor } = repo.listChangedSince(since);
     return c.json({ documents: rows.map(toView), cursor });
+  });
+
+  r.get('/:id/thumbnail', (c) => {
+    const doc = repo.get(c.req.param('id'));
+    if (!doc || !doc.hasThumbnail || doc.state === 'filed' || !inbox.has(doc.id, 'thumbnail')) {
+      return c.json({ error: 'not_found' }, 404);
+    }
+    let jpeg: Uint8Array<ArrayBuffer>;
+    try {
+      // Copied into a plain Uint8Array<ArrayBuffer>: a Buffer is not a BodyInit to the type checker.
+      jpeg = new Uint8Array(inbox.get(doc.id, 'thumbnail'));
+    } catch (err) {
+      // Filing deletes the inbox blobs, and may have done so since has().
+      if (err instanceof InboxBlobMissingError) return c.json({ error: 'not_found' }, 404);
+      throw err;
+    }
+    // no-store: it is a picture of the document, and a re-prepared document keeps this URL.
+    return new Response(jpeg, {
+      headers: { 'content-type': 'image/jpeg', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' },
+    });
   });
 
   r.get('/:id', (c) => {
@@ -234,10 +256,15 @@ export function documentRoutes(deps: { store: SessionStore; pipeline: Pipeline }
     const doc = repo.get(c.req.param('id'));
     if (!doc) return c.json({ error: 'not_found' }, 404);
     if (doc.state !== 'discarded') return c.json({ error: 'not_discarded' }, 409);
-    const to: DocumentState = doc.analysis ? 'needs_review' : 'received';
+    // An analysed document goes back to review, through preparing when a
+    // discard won while it was being prepared (no text layer or thumbnail
+    // yet). Not one that may already be in Drive: it keeps what was filed.
+    const unprepared = doc.preparedMime === null && !doc.filingTarget;
+    const to: DocumentState = !doc.analysis ? 'received' : unprepared ? 'preparing' : 'needs_review';
     const moved = repo.transition(doc.id, 'discarded', to, {
       discardedAt: null,
-      reviewReason: to === 'needs_review' ? 'restored after discard' : null,
+      // decideStage keeps a recorded reason, so a restored document is always reviewed.
+      reviewReason: doc.analysis ? 'restored after discard' : null,
       error: null,
       attempts: 0,
       nextAttemptAt: new Date(),

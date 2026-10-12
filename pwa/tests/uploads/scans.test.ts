@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { openDB } from 'idb';
 import { resolve } from 'node:path';
@@ -21,6 +21,11 @@ class MemoryStore implements UploadStorage {
 }
 
 const idleQueue = () => new UploadQueue({ store: new MemoryStore(), send: () => new Promise(() => {}) });
+
+// sendScanToInbox imports the PDF builder lazily; the first transform of pdf-lib is slow under parallel load.
+beforeAll(async () => {
+  await import('../../src/pdf/build.js');
+}, 30_000);
 
 let store: ScansStore;
 beforeEach(async () => {

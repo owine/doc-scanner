@@ -12,6 +12,7 @@ import type { StageContext } from '../../src/documents/deps.js';
 import type { Analysis, AnalyzeOutcome } from '../../src/analyze/types.js';
 import type { LiveSession } from '../../src/auth/live-session.js';
 import type { TreeFolder } from '../../src/drive/folder-tree.js';
+import type { OcrResult } from '../../src/prepare/tools.js';
 
 export const KEY = Buffer.alloc(32, 9).toString('base64');
 
@@ -50,6 +51,15 @@ export function fakeDrive() {
   };
 }
 
+/** Fake preparation tools: born-digital PDFs, no thumbnails. Override per test. */
+export function fakePrepare() {
+  return {
+    ocrPdf: vi.fn<(pdf: Uint8Array) => Promise<OcrResult>>().mockResolvedValue({ kind: 'unchanged' }),
+    imageToPdf: vi.fn<(image: Uint8Array, mime: string) => Promise<Uint8Array>>().mockRejectedValue(new Error('not used')),
+    thumbnail: vi.fn<(bytes: Uint8Array, mime: string, o?: { width?: number }) => Promise<Uint8Array | null>>().mockResolvedValue(null),
+  };
+}
+
 export function makeHarness(opts: { settings?: Partial<EffectiveSettings>; withTree?: boolean } = {}) {
   const { db, cleanup: dbCleanup } = createTestDb();
   const dir = mkdtempSync(join(tmpdir(), 'pipeline-test-'));
@@ -72,6 +82,7 @@ export function makeHarness(opts: { settings?: Partial<EffectiveSettings>; withT
   let live: LiveSession | undefined = { sid: 's', driveClient: drive } as unknown as LiveSession;
   const report = vi.fn();
   const refreshFolderCache = vi.fn().mockResolvedValue(undefined);
+  const prepare = fakePrepare();
 
   const ctx: StageContext = {
     db,
@@ -83,6 +94,7 @@ export function makeHarness(opts: { settings?: Partial<EffectiveSettings>; withT
     liveSession: () => live,
     now,
     report,
+    prepare,
     refreshFolderCache,
   };
 
@@ -94,6 +106,7 @@ export function makeHarness(opts: { settings?: Partial<EffectiveSettings>; withT
     analyze,
     drive,
     report,
+    prepare,
     refreshFolderCache,
     setLive: (l: LiveSession | undefined) => (live = l),
     advance: (ms: number) => (clock = new Date(clock.getTime() + ms)),

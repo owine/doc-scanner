@@ -77,6 +77,8 @@ One table, `documents`, one state machine for every source. Migrations: the Phas
 received ─▶ analyzing ─▶ preparing ─▶ ready ─┬─▶ filing ─▶ filed
                                              ├─▶ needs_review ─(approve/edit)─▶ filing
                                              └─▶ awaiting_login ─(login)─▶ filing
+an unusable analysis (refused, truncated, invalid) takes the same path to review:
+  analyzing ─▶ preparing ─▶ ready ─▶ needs_review (with the analyzer's reason)
 any working state ─▶ failed (retry with backoff; visible after 3 attempts)
 any resting state before filing ─▶ discarded ─(7 days)─▶ purged
 ```
@@ -136,11 +138,26 @@ The system prompt asks for the user's naming conventions, an existing folder unl
 
 **Preparing** (no keys needed):
 
-- Image-only PDFs → `ocrmypdf --skip-text` → searchable PDF. `--skip-text` leaves pages that already have text alone; encrypted PDFs are passed through.
-- Document photos (`isDocument: true`) → `img2pdf` (bundled with `ocrmypdf`) then OCR → searchable PDF, so the filed type, MIME and extension become PDF. Formats `sharp` can't decode (HEIC) stay as images.
-- Ordinary photos, Office files and other types are kept as they are. The filename's extension always follows the **prepared** file.
-- **Thumbnail** for the review card: the first page rendered with Ghostscript (installed with `ocrmypdf`) for PDFs, `sharp` for images, none otherwise; stored encrypted beside the blob.
-- OCR failure or a 5-minute timeout files the original with a note: a text layer is never worth losing a document over.
+- **PDFs:** every PDF is OCR'd with `ocrmypdf --skip-text --output-type pdf --sidecar`. If the sidecar holds only `[OCR skipped on page(s) …]` placeholders, no text was added (born-digital) and the original is filed unchanged.
+- **Protected PDFs** are filed unchanged: a user password (exit 8), a digital signature (exit 2, `DigitalSignatureError`; an empty signature field counts) or a dynamic XFA form (exit 2). Exit 3 is a missing dependency, treated as a missing tool. A PDF with only an **owner** password is not refused: a born-digital one comes back unchanged, and an image-only one is OCR'd into an output without the owner restrictions, which is acceptable.
+- **Document photos** (`isDocument: true`) in JPEG, PNG, WebP, TIFF, GIF or BMP → `img2pdf`, then OCR → searchable PDF, so the filed type, MIME and extension become PDF. WebP and GIF are converted to JPEG with `sharp` first; BMP goes to `img2pdf` directly (sharp's prebuilt binary can't read it; Pillow can). A type img2pdf takes directly but refuses (a 16-bit PNG with transparency, which Pillow can't handle) is retried once as a JPEG through `sharp`. Every JPEG conversion puts transparency on white.
+- Ordinary photos, photos whose analysis was unusable (`isDocument` unknown), HEIC (which `sharp` can't decode), Office files and other types are kept as they are. The filename's extension always follows the **prepared** file.
+- **Unusable analyses are prepared too**, so the review card has a thumbnail and the file a text layer; `decide` then sends the row to review with the analyzer's reason.
+- **Thumbnail** for the review card: 400 px wide JPEG (quality 80) from the prepared file if there is one, else the original. PDFs are rendered by Ghostscript into a fixed box (`-dFIXEDMEDIA -dPDFFitPage`, so a page claiming a huge size can't make a huge bitmap), then resized with `sharp`; images use `sharp`; other types get none (a BMP document photo gets one from its prepared PDF). Stored encrypted beside the blob and deleted when the document is filed.
+- **Fallback:** a tool that is missing, fails or times out (OCR 5 min, img2pdf 60 s, thumbnail 30 s) files the original with a note (`prepare_note`), shown in the PWA and reported as an error type only. The notes are state-neutral, because the review card shows them before anything is filed: "No text layer: OCR is not installed on this server.", "No text layer: OCR took too long.", "No text layer: OCR failed." and "Could not turn the photo into a PDF." A text layer is never worth losing a document over.
+- **Safety:** tools run without a shell, from fixed argument lists, in a private temporary directory that is also their `TMPDIR` and is removed afterwards; leftover directories are swept at server startup (all of them, since no job can be running yet) and before every job (those older than 10 minutes) (lstat, no symlink following). A timeout kills the whole process group. Tools get an allowlisted environment (`PATH`, `HOME`, `LANG`, `LC_ALL`, `TMPDIR`, `OMP_THREAD_LIMIT`), so server secrets never reach them. Their output is never logged.
+- **Content checks:** before Ghostscript or `sharp` read a file, its bytes are checked: a PDF needs `%PDF-` within its first 1024 bytes, and Ghostscript and ocrmypdf only ever get it from that header on (Ghostscript runs a file as PostScript whenever `%!` comes before `%PDF-`, even after junk, a BOM or a NUL; with the prefix cut off, a PostScript/PDF polyglot is read as its PDF part, and a PDF with a BOM or newline before its header is still prepared; an `unchanged` result files the untouched original), img2pdf input must match its declared type's magic bytes, and `sharp` input must sniff as jpeg, png, webp, tiff, gif or heif. Anything else (PostScript with no PDF header named as a PDF, SVG named as an image) runs no tool, so the original is filed.
+- **Re-runs:** a row with `filingTarget` set skips preparing and keeps its recorded blobs and fields, so the file stage's SHA-1 dedupe still finds an upload that may already be in Drive. Every other run first clears `preparedMime`, `prepareNote` and `hasThumbnail`, so a crashed run's leftovers are never filed or served. If `imageToPdf` fails or times out the note reads "Could not turn the photo into a PDF."
+- **Retry** of a failed, analysed document resumes at `preparing`. Filing sends the prepared blob only when the row records `preparedMime`.
+- **Measured** (`node:24.21.0-alpine`, Alpine 3.24): `ocrmypdf` 16.11.1, Tesseract 5.5.2, `img2pdf` 0.6.3, Ghostscript 10.07.1 add about 319 MB (883 vs 564 MB; Python 3.14 comes in as a dependency). OCR takes about 5 s per noisy 300 dpi page on 2 cores (20 clean pages in 4.5 s on 10 cores); the 5-minute limit is roughly 60 pages on 2 cores. CI smoke-tests the tools in the built image on both architectures, so an `apk` bump that changes the sidecar text or exit codes fails CI.
+
+**Known limitations and follow-ups:**
+
+- `--skip-text` skips a page with any text, so a scan whose pages carry a little digital text (a copier's header, a Bates or page-number stamp) is treated as born-digital and stays unsearchable. `--redo-ocr` would handle it, at the cost of re-processing every born-digital PDF; revisit if real use shows such scans.
+- The container runs as root, so Ghostscript and ocrmypdf parse untrusted PDFs as root (`-dSAFER` sandboxes Ghostscript's file access, not a parser bug). Follow-up: run the image as the `node` user, which needs the `/data` volume's ownership handled for existing installs.
+- One worker, one document at a time: a long OCR job (up to 5 minutes) holds up every other document, filings included. Fine for personal use; revisit if it bites.
+- Owner-password-only PDFs are OCR'd when image-only, and the output drops the owner restrictions.
+- A native crash inside a stage (`sharp`, or a tool killing the process) doesn't count as an attempt, so the row re-runs on every restart.
 
 **Filing** (needs a live session; otherwise `awaiting_login`):
 
@@ -152,7 +169,7 @@ The system prompt asks for the user's naming conventions, an existing folder unl
 
 **Settings** (`app_settings`, `filing.*` keys; editable in the PWA): never-file-here folder paths (default empty), and overrides for the auto-file threshold, model and effort (env vars supply the defaults).
 
-**Docker**: add `ocrmypdf` (Tesseract, Ghostscript) to the Alpine image; measure the size impact in the plan.
+**Docker**: `ocrmypdf`, `tesseract-ocr-data-eng`, `py3-img2pdf` and `ghostscript` are pinned `apk` packages in the main image (about +319 MB, above). The container must run with an init (tini in production, `--init` in CI) so killed tools are reaped.
 
 ### 5. Review and activity (PWA)
 
@@ -241,7 +258,7 @@ The plan should ship this in independently useful slices:
 
 1. **Server pipeline** (merged, #261) — `documents` table, inbox store, worker, intake endpoint, analyzer wired in, filing with auto-file, `awaiting_login`, settings. Usable through the API and a minimal list. Includes the **calibration check**: the Haiku eval re-run with the prompt stating 0.80 (done: 41% coverage, 94% precision). It missed the 95% bar, so slice 1 ships with auto-filing off and everything goes to review until real-use audit data supports switching it on.
 2. **Review UI** (merged, #263; plan: `docs/superpowers/plans/2026-10-10-review-ui.md`) — the inbox screen, review card, folder picker, discard/restore, activity log, settings screen.
-3. **Preparing** — `ocrmypdf`, `img2pdf`, thumbnails, the Docker image.
+3. **Preparing** (done; plan: `docs/superpowers/plans/2026-10-12-preparing.md`) — `ocrmypdf`, `img2pdf`, thumbnails, the Docker image.
 4. **Entrypoints** (plan: `docs/superpowers/plans/2026-10-12-entrypoints.md`) — Add screen and offline upload queue; the scanner posting image-only PDFs.
 
 ## Open items for the plan

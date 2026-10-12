@@ -169,6 +169,30 @@ describe('ReviewCard', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Discard' })).toBeEnabled());
   });
 
+  it('shows the first-page thumbnail when there is one', () => {
+    renderCard(makeDoc({ id: 'a/b c', hasThumbnail: true }));
+    const img = screen.getByRole('img', { name: 'First page preview' });
+    expect(img).toHaveAttribute('src', '/api/documents/a%2Fb%20c/thumbnail');
+    expect(img).toHaveAttribute('loading', 'lazy');
+  });
+
+  it('shows no thumbnail without one', () => {
+    renderCard();
+    expect(screen.queryByRole('img')).toBeNull();
+  });
+
+  it('hides a thumbnail that fails to load', () => {
+    renderCard(makeDoc({ hasThumbnail: true }));
+    const img = screen.getByRole('img', { name: 'First page preview' }) as HTMLImageElement;
+    fireEvent.error(img);
+    expect(img.hidden).toBe(true);
+  });
+
+  it('shows the preparation note, muted', () => {
+    renderCard(makeDoc({ prepareNote: 'No text layer: OCR failed.' }));
+    expect(screen.getByText('No text layer: OCR failed.')).toHaveClass('muted');
+  });
+
   it('returns focus to Change after Cancel', async () => {
     renderCard();
     fireEvent.click(screen.getByRole('button', { name: 'Change' }));

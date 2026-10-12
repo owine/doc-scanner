@@ -33,6 +33,8 @@ export function makeDoc(over: Partial<DocumentView> = {}): DocumentView {
     possiblyInDrive: false,
     discardRequested: false,
     discardedAt: null,
+    prepareNote: null,
+    hasThumbnail: false,
     ...over,
   };
 }

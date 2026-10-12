@@ -30,6 +30,18 @@ describe('document failure reporting', () => {
     expect(events[0]!.exception!.values![0]!.value).toBe('analysis failed for [filename]');
   });
 
+  it('tags a preparation fallback, and only that, with its outcome', async () => {
+    captureDocumentFailure(new Error('ocrmypdf exited 2'), 'prepare', [], { outcome: 'fallback' });
+    captureDocumentFailure(new Error('disk full'), 'prepare');
+    await flushEvents();
+    expect(events).toHaveLength(2);
+    // Matched by message: the transport need not keep the order.
+    const tagsOf = (message: string) => events.find((e) => e.exception!.values![0]!.value === message)!.tags as Record<string, unknown>;
+    expect(tagsOf('ocrmypdf exited 2')).toMatchObject({ 'document.stage': 'prepare', 'document.outcome': 'fallback' });
+    expect(tagsOf('disk full')).toMatchObject({ 'document.stage': 'prepare' });
+    expect(tagsOf('disk full')['document.outcome']).toBeUndefined();
+  });
+
   it('redacts the extension-less stem too', async () => {
     captureDocumentFailure(new Error(`no match for ${stem} (2)`), 'file', [docName]);
     await flushEvents();
