@@ -1,4 +1,4 @@
-import { useState } from 'preact/hooks';
+import { useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { api, ApiError } from '../api.js';
 
 export function LoginScreen({ onLoggedIn }: { onLoggedIn: (email: string) => void }) {
@@ -8,6 +8,13 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: (email: string) => voi
   const [needsTotp, setNeedsTotp] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const totpRef = useRef<HTMLInputElement>(null);
+
+  // The code field only exists after the server asks for it, so focus stays on
+  // the password field unless we move it.
+  useLayoutEffect(() => {
+    if (needsTotp) totpRef.current?.focus();
+  }, [needsTotp]);
 
   async function submit(e: Event) {
     e.preventDefault();
@@ -40,7 +47,7 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: (email: string) => voi
         {needsTotp && (
           <label class="field">
             <span class="field-label">TOTP</span>
-            <input type="text" inputMode="numeric" pattern="\d{6}" maxLength={6} value={totp} onInput={(e) => setTotp((e.target as HTMLInputElement).value)} required />
+            <input ref={totpRef} type="text" autoComplete="one-time-code" inputMode="numeric" pattern="\d{6}" maxLength={6} value={totp} onInput={(e) => setTotp((e.target as HTMLInputElement).value)} required />
           </label>
         )}
         {error && <p class="error-text">{error}</p>}
