@@ -17,7 +17,7 @@ export interface ToolResult {
 export interface RunOptions {
   timeoutMs: number;
   cwd?: string;
-  /** Added to the inherited environment, e.g. TMPDIR pointing at the job's private directory. */
+  /** Added to the allowlisted inherited environment, e.g. TMPDIR pointing at the job's private directory. */
   env?: Record<string, string>;
   /** Test hook: called with each stdout chunk as it arrives. */
   onStdout?: (chunk: string) => void;
@@ -28,6 +28,23 @@ export interface RunOptions {
  * went wrong last, after any warnings.
  */
 export const MAX_OUTPUT_CHARS = 64 * 1024;
+
+/**
+ * The only inherited variables a tool gets. These tools parse untrusted PDFs
+ * and images, so the server's secrets (SESSION_ENCRYPTION_KEY,
+ * ANTHROPIC_API_KEY, ...) must never reach them.
+ */
+const INHERITED_ENV = ['PATH', 'HOME', 'LANG', 'LC_ALL', 'TMPDIR'] as const;
+
+function toolEnv(extra: Record<string, string> | undefined): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const k of INHERITED_ENV) {
+    const v = process.env[k];
+    if (v !== undefined) env[k] = v;
+  }
+  // ocrmypdf parallelises pages itself; one thread per tesseract avoids oversubscription.
+  return { ...env, OMP_THREAD_LIMIT: '1', ...extra };
+}
 
 const keepEnd = (buf: string, chunk: string) => (buf + chunk).slice(-MAX_OUTPUT_CHARS);
 
@@ -46,8 +63,7 @@ export function runTool(cmd: string, args: readonly string[], o: RunOptions): Pr
       cwd: o.cwd,
       detached: true, // its own process group, killed as one on timeout
       stdio: ['ignore', 'pipe', 'pipe'],
-      // ocrmypdf parallelises pages itself; one thread per tesseract avoids oversubscription.
-      env: { ...process.env, OMP_THREAD_LIMIT: '1', ...o.env },
+      env: toolEnv(o.env),
     });
     let stdout = '';
     let stderr = '';

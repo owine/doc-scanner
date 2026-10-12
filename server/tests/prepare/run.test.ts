@@ -22,6 +22,18 @@ describe('runTool', () => {
     expect(r.stdout).toBe('/job/dir 1');
   });
 
+  it('does not pass secrets from the parent environment to the tool', async () => {
+    process.env.SESSION_ENCRYPTION_KEY = 'fictional-secret';
+    process.env.ANTHROPIC_API_KEY = 'fictional-key';
+    try {
+      const r = await runTool(node, ['-e', 'process.stdout.write(JSON.stringify([process.env.SESSION_ENCRYPTION_KEY, process.env.ANTHROPIC_API_KEY, typeof process.env.PATH]))'], { timeoutMs: 10_000 });
+      expect(JSON.parse(r.stdout)).toEqual([null, null, 'string']);
+    } finally {
+      delete process.env.SESSION_ENCRYPTION_KEY;
+      delete process.env.ANTHROPIC_API_KEY;
+    }
+  });
+
   it('keeps only the end of a long output, where a tool says what went wrong', async () => {
     const r = await runTool(node, ['-e', 'process.stderr.write("x".repeat(200000) + "END")'], { timeoutMs: 10_000 });
     expect(r.stderr).toHaveLength(MAX_OUTPUT_CHARS);
