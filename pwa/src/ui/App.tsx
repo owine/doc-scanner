@@ -33,9 +33,16 @@ export function App() {
     () =>
       new UploadQueue({
         onUploaded: async ({ scanId }) => {
-          // The server has the scan; its copy on this device can go.
-          if (scanId) await storeOpen.then(() => store.delete(scanId));
-          void sync.poll();
+          try {
+            // The server has the scan; its copy on this device can go.
+            if (scanId) await storeOpen.then(() => store.delete(scanId));
+          } catch (e) {
+            // The queue keeps it off the device list for this session. Never the scan's name.
+            console.error('could not delete the sent scan', (e as Error)?.name);
+          } finally {
+            // The new document shows either way.
+            void sync.poll();
+          }
         },
         onUnauthorized: () => {
           setEmail(null);

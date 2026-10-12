@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/preact';
 import { UploadStore } from '../../src/uploads/upload-store.js';
+import { ScansStore } from '../../src/scanner/scans-store.js';
 import { FakeXhr } from '../uploads/fake-xhr.js';
 
 const { App } = await import('../../src/ui/App.js');
@@ -106,12 +107,12 @@ describe('App', () => {
     }
 
     /** Signs in with one file left in the queue from an earlier session, and returns its upload request. */
-    async function signedInWithQueuedFile() {
+    async function signedInWithQueuedFile(scanId: string | null = null) {
       FakeXhr.last = null;
       vi.stubGlobal('XMLHttpRequest', FakeXhr);
       vi.stubGlobal('FormData', FakeFormData);
       await new UploadStore().put({
-        id: 'old', name: 'northwind-bill.pdf', size: 1, blob: new Blob(['x']), source: 'picker', scanId: null,
+        id: 'old', name: 'northwind-bill.pdf', size: 1, blob: new Blob(['x']), source: scanId ? 'scanner' : 'picker', scanId,
         createdAt: 1, attempts: 0, state: 'queued', error: null, nextAttemptAt: 0,
       });
       vi.stubGlobal(
@@ -134,6 +135,27 @@ describe('App', () => {
       expect(req.url).toBe('/api/documents');
       req.respond(202, '{"id":"d1"}');
       await waitFor(() => expect(screen.queryByRole('region', { name: 'Uploading' })).toBeNull());
+    });
+
+    it('refreshes the inbox even when deleting the sent scan fails, logging only the error name', async () => {
+      const del = vi.spyOn(ScansStore.prototype, 'delete').mockRejectedValue(new Error('northwind storage'));
+      const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        const req = await signedInWithQueuedFile('scan-1');
+        // The first poll has finished, so a later poll() starts a request of its own.
+        expect(await screen.findByText(/nothing to review/i)).toBeInTheDocument();
+        const polls = () => vi.mocked(fetch).mock.calls.filter(([u]) => String(u).split('?')[0] === '/api/documents').length;
+        const before = polls();
+        req.respond(202, '{"id":"d1"}');
+        await waitFor(() => expect(del).toHaveBeenCalledWith('scan-1'));
+        await waitFor(() => expect(polls()).toBeGreaterThan(before));
+        await waitFor(() => expect(screen.queryByRole('region', { name: 'Uploading' })).toBeNull());
+        expect(logged).toHaveBeenCalledWith('could not delete the sent scan', 'Error');
+        expect(JSON.stringify(logged.mock.calls)).not.toContain('northwind');
+      } finally {
+        del.mockRestore();
+        logged.mockRestore();
+      }
     });
 
     it('lands on the login screen when an upload finds the session gone', async () => {
