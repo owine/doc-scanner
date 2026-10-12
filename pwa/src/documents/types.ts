@@ -49,6 +49,8 @@ export interface DocumentView {
   possiblyInDrive: boolean;
   discardRequested: boolean;
   discardedAt: string | null;
+  prepareNote: string | null;
+  hasThumbnail: boolean;
 }
 
 export interface FolderEntry {

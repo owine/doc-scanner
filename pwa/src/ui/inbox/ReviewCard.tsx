@@ -91,6 +91,18 @@ export function ReviewCard({ doc, folders, onApprove, onDiscard }: ReviewCardPro
 
   return (
     <article class="card review-card" aria-label={`Review ${suggested?.name ?? doc.originalName ?? 'document'}`}>
+      {/* Hidden if it won't load (a signed-out session, a document filed meanwhile) rather than shown broken. */}
+      {doc.hasThumbnail && (
+        <img
+          class="review-thumb"
+          src={`/api/documents/${encodeURIComponent(doc.id)}/thumbnail`}
+          alt="First page preview"
+          loading="lazy"
+          onError={(e) => {
+            (e.currentTarget as HTMLImageElement).hidden = true;
+          }}
+        />
+      )}
       <p class="muted">
         {doc.originalName ?? 'Untitled'} · {SOURCE_LABEL[doc.source]}
       </p>
@@ -134,6 +146,7 @@ export function ReviewCard({ doc, folders, onApprove, onDiscard }: ReviewCardPro
         </p>
       )}
       {suggested?.rationale && <p class="rationale">{suggested.rationale}</p>}
+      {doc.prepareNote && <p class="muted">{doc.prepareNote}</p>}
       {suggested?.contentSeen === false && <p class="muted">Analysed from the file's details only; its contents could not be read.</p>}
       {error && (
         <p class="error-text" role="alert">

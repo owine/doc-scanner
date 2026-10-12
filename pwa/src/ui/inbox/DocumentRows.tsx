@@ -59,6 +59,7 @@ export function FiledRow({ doc }: { doc: DocumentView }) {
       <div class="doc-main">
         <div class="doc-name" id={nameId(doc)}>{displayName(doc)}</div>
         <div class="muted">{doc.filed?.folderPath ?? ''}</div>
+        {doc.prepareNote && <div class="muted">{doc.prepareNote}</div>}
       </div>
       <span class={doc.autoFiled ? 'chip chip-auto' : 'chip'}>{doc.autoFiled ? 'auto' : doc.userEdited ? 'you edited' : 'you approved'}</span>
       {url && (
