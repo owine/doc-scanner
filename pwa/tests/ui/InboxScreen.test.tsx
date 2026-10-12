@@ -486,6 +486,22 @@ describe('InboxScreen scans on this device', () => {
     expect(uploads.list()).toMatchObject([{ source: 'scanner', scanId: id }]);
   });
 
+  it('says why a scan could not be sent when its row comes back, logging only the error name', async () => {
+    await savedScan();
+    const { scans } = setup([]);
+    vi.spyOn(scans, 'getPages').mockRejectedValue(new Error('northwind pages gone'));
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      fireEvent.click(within(await screen.findByRole('region', { name: 'Scans on this device' })).getByRole('button', { name: 'Send to inbox' }));
+      const region = await screen.findByRole('region', { name: 'Scans on this device' });
+      expect(await within(region).findByText('Could not send this scan. Try again.')).toBeInTheDocument();
+      expect(logged).toHaveBeenCalledWith('could not send scan', 'Error');
+      expect(JSON.stringify(logged.mock.calls)).not.toContain('northwind');
+    } finally {
+      logged.mockRestore();
+    }
+  });
+
   it('deletes a scan once the user confirms, and keeps it otherwise', async () => {
     const nativeConfirm = window.confirm;
     window.confirm = vi.fn().mockReturnValueOnce(false).mockReturnValueOnce(true);

@@ -36,7 +36,18 @@ export function UploadRow({ item, queue }: { item: UploadItem; queue: UploadQueu
   );
 }
 
-export function DeviceScanRow({ scan, onSend, onDelete }: { scan: Scan; onSend: () => Promise<void>; onDelete: () => Promise<void> }) {
+export interface DeviceScanRowProps {
+  scan: Scan;
+  onSend: () => Promise<void>;
+  onDelete: () => Promise<void>;
+  /**
+   * Why the last send failed. Kept by the inbox, not the row: sending claims
+   * the scan at once, so this row unmounts and a fresh one comes back.
+   */
+  error?: string | null | undefined;
+}
+
+export function DeviceScanRow({ scan, onSend, onDelete, error = null }: DeviceScanRowProps) {
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
   const nameId = `scan-name-${scan.id}`;
@@ -58,7 +69,7 @@ export function DeviceScanRow({ scan, onSend, onDelete }: { scan: Scan; onSend: 
           Scan · {scan.pageCount} {scan.pageCount === 1 ? 'page' : 'pages'}
         </div>
         <div class="muted">{new Date(scan.updatedAt).toLocaleString()}</div>
-        {failed && <div class="error-text">{failed}</div>}
+        {(failed ?? error) && <div class="error-text">{failed ?? error}</div>}
       </div>
       <button type="button" class="btn btn-small" disabled={busy} aria-describedby={nameId} onClick={() => void run(onSend, 'Could not send this scan. Try again.')}>
         Send to inbox

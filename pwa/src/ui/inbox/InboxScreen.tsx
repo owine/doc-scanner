@@ -53,6 +53,22 @@ export function InboxScreen({
   const fileInput = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
+  // By scan id. The row unmounts while its scan is claimed, so it can't keep this itself.
+  const [sendErrors, setSendErrors] = useState<Record<string, string>>({});
+  const sendScan = async (id: string) => {
+    setSendErrors((prev) => {
+      if (!(id in prev)) return prev;
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    try {
+      await sendScanToInbox(scans, uploads, id);
+    } catch (e) {
+      console.error('could not send scan', (e as Error)?.name);
+      setSendErrors((prev) => ({ ...prev, [id]: 'Could not send this scan. Try again.' }));
+    }
+  };
   const addFiles = (files: ArrayLike<File> | null | undefined) => {
     const chosen = Array.from(files ?? []);
     if (chosen.length === 0) return;
@@ -217,7 +233,8 @@ export function InboxScreen({
               <DeviceScanRow
                 key={s.id}
                 scan={s}
-                onSend={() => sendScanToInbox(scans, uploads, s.id)}
+                onSend={() => sendScan(s.id)}
+                error={sendErrors[s.id]}
                 onDelete={async () => {
                   await scans.delete(s.id);
                   await device.reload();
