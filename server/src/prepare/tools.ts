@@ -166,19 +166,28 @@ export function createPrepareTools(o: { atStartup?: boolean } = {}): PrepareTool
     },
 
     async imageToPdf(image, mime) {
+      const img2pdf = (input: Uint8Array, name: string) =>
+        inTempDir(async (dir) => {
+          await writeFile(join(dir, name), input);
+          const r = await runTool('img2pdf', ['-o', 'out.pdf', name], { timeoutMs: IMG2PDF_TIMEOUT_MS, cwd: dir, env: { TMPDIR: dir } });
+          if (r.code !== 0) throw new ToolFailedError(`img2pdf exited ${r.code}`);
+          return new Uint8Array(await readFile(join(dir, 'out.pdf')));
+        });
       const signatures = Object.hasOwn(IMG2PDF_NATIVE, mime) ? IMG2PDF_NATIVE[mime] : undefined;
-      const native = signatures !== undefined;
-      if (native ? !signatures.some((sig) => startsWith(image, sig)) : !(await sharpMayDecode(image))) {
+      if (signatures) {
+        if (!signatures.some((sig) => startsWith(image, sig))) throw new ToolFailedError('not the image type it was declared as');
+        try {
+          return await img2pdf(image, `in.${mime.split('/')[1]}`);
+        } catch (err) {
+          // img2pdf refuses some images it takes directly (a 16-bit PNG, for
+          // one): retry once as a JPEG, if sharp can read it (not BMP). A
+          // missing or timed-out img2pdf won't do better the second time.
+          if (!(err instanceof ToolFailedError) || !(await sharpMayDecode(image))) throw err;
+        }
+      } else if (!(await sharpMayDecode(image))) {
         throw new ToolFailedError('not the image type it was declared as');
       }
-      return inTempDir(async (dir) => {
-        const input = native ? image : new Uint8Array(await sharp(image).rotate().jpeg({ quality: 90 }).toBuffer());
-        const name = native ? `in.${mime.split('/')[1]}` : 'in.jpeg';
-        await writeFile(join(dir, name), input);
-        const r = await runTool('img2pdf', ['-o', 'out.pdf', name], { timeoutMs: IMG2PDF_TIMEOUT_MS, cwd: dir, env: { TMPDIR: dir } });
-        if (r.code !== 0) throw new ToolFailedError(`img2pdf exited ${r.code}`);
-        return new Uint8Array(await readFile(join(dir, 'out.pdf')));
-      });
+      return img2pdf(new Uint8Array(await sharp(image).rotate().jpeg({ quality: 90 }).toBuffer()), 'in.jpeg');
     },
 
     async thumbnail(bytes, mime, o = {}) {

@@ -95,7 +95,10 @@ describe('PrepareTools (fake binaries)', () => {
     const tools = createPrepareTools();
     const png = await sharp({ create: { width: 4, height: 4, channels: 3, background: '#ffffff' } }).png().toBuffer();
     await expect(tools.imageToPdf(new Uint8Array(png), 'image/png')).rejects.toBeInstanceOf(ToolFailedError);
-    expect(calls.map((c) => c.cmd)).toEqual(['img2pdf']);
+    expect(calls.map((c) => [c.cmd, c.args.at(-1)])).toEqual([
+      ['img2pdf', 'in.png'],
+      ['img2pdf', 'in.jpeg'], // the one retry, through JPEG
+    ]);
     expect(await tools.thumbnail(PDF, 'application/pdf')).toBeNull();
   });
 
@@ -121,6 +124,37 @@ describe('PrepareTools (fake binaries)', () => {
       ['img2pdf', '-o', 'out.pdf', 'in.jpeg'],
     ]);
     expect(calls.every((c) => c.tmp === c.cwd)).toBe(true);
+  });
+
+  it('retries an image img2pdf refuses (a 16-bit PNG) once, as a JPEG', async () => {
+    const png16 = await sharp({ create: { width: 4, height: 4, channels: 3, background: '#ffffff' } }).png().toColourspace('rgb16').toBuffer();
+    let first = true;
+    run.mockImplementation(async (cmd, args, o) => {
+      calls.push({ cmd, args, cwd: o.cwd, tmp: o.env?.TMPDIR, mode: 0 });
+      if (first) {
+        first = false;
+        return { code: 1, stdout: '', stderr: 'img2pdf: error: Image with 16 bits per channel' };
+      }
+      writeFileSync(join(o.cwd!, 'out.pdf'), '%PDF- from jpeg');
+      return { code: 0, stdout: '', stderr: '' };
+    });
+    const pdf = await createPrepareTools().imageToPdf(new Uint8Array(png16), 'image/png');
+    expect(new TextDecoder().decode(pdf)).toBe('%PDF- from jpeg');
+    expect(calls.map((c) => c.args.at(-1))).toEqual(['in.png', 'in.jpeg']);
+  });
+
+  it('does not retry what sharp cannot read, or a missing or timed-out img2pdf', async () => {
+    const tools = createPrepareTools();
+    fakeTool({}, 1);
+    await expect(tools.imageToPdf(new TextEncoder().encode('BM fictional'), 'image/bmp')).rejects.toBeInstanceOf(ToolFailedError);
+    expect(calls).toHaveLength(1);
+    const png = new Uint8Array(await sharp({ create: { width: 4, height: 4, channels: 3, background: '#ffffff' } }).png().toBuffer());
+    for (const err of [new ToolMissingError('img2pdf is not installed'), new ToolTimeoutError('slow')]) {
+      run.mockReset();
+      run.mockRejectedValue(err);
+      await expect(tools.imageToPdf(png, 'image/png')).rejects.toBe(err);
+      expect(run).toHaveBeenCalledOnce();
+    }
   });
 
   it('renders a PDF thumbnail with Ghostscript in SAFER mode', async () => {

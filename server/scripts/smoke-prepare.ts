@@ -7,6 +7,7 @@ import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PDFDocument, StandardFonts } from '@cantoo/pdf-lib';
+import sharp from 'sharp';
 import { runTool, ToolTimeoutError } from '../src/prepare/run.js';
 import { createPrepareTools } from '../src/prepare/tools.js';
 
@@ -44,6 +45,8 @@ check('a born-digital PDF is left unchanged', (await tools.ocrPdf(born)).kind ==
 check('an image-only PDF gains a text layer', (await tools.ocrPdf(imageOnly)).kind === 'ocred');
 check('thumbnails a PDF', (await tools.thumbnail(born, 'application/pdf')) !== null);
 check('thumbnails a JPEG', (await tools.thumbnail(page!, 'image/jpeg')) !== null);
+const png16 = await sharp(page!).resize({ width: 300 }).png().toColourspace('rgb16').toBuffer();
+check('a 16-bit PNG becomes a PDF', Buffer.from((await tools.imageToPdf(new Uint8Array(png16), 'image/png')).subarray(0, 5)).toString() === '%PDF-');
 
 const dir = await mkdtemp(join(tmpdir(), 'smoke-'));
 try {
