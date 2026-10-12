@@ -189,8 +189,8 @@ describe('ReviewCard', () => {
   });
 
   it('shows the preparation note, muted', () => {
-    renderCard(makeDoc({ prepareNote: 'Filed without a text layer: OCR failed.' }));
-    expect(screen.getByText('Filed without a text layer: OCR failed.')).toHaveClass('muted');
+    renderCard(makeDoc({ prepareNote: 'No text layer: OCR failed.' }));
+    expect(screen.getByText('No text layer: OCR failed.')).toHaveClass('muted');
   });
 
   it('returns focus to Change after Cancel', async () => {

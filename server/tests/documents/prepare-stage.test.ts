@@ -98,10 +98,10 @@ describe('prepareStage', () => {
   });
 
   it.each([
-    [new ToolMissingError('ocrmypdf is not installed'), 'Filed without a text layer: OCR is not installed on this server.'],
-    [new ToolTimeoutError('ocrmypdf took longer than 300000 ms'), 'Filed without a text layer: OCR took too long.'],
-    [new ToolFailedError('ocrmypdf exited 2'), 'Filed without a text layer: OCR failed.'],
-    [new Error('anything else'), 'Filed without a text layer: OCR failed.'],
+    [new ToolMissingError('ocrmypdf is not installed'), 'No text layer: OCR is not installed on this server.'],
+    [new ToolTimeoutError('ocrmypdf took longer than 300000 ms'), 'No text layer: OCR took too long.'],
+    [new ToolFailedError('ocrmypdf exited 2'), 'No text layer: OCR failed.'],
+    [new Error('anything else'), 'No text layer: OCR failed.'],
   ])('files the original with a note when OCR throws %s', async (err, note) => {
     h = makeHarness();
     h.prepare.ocrPdf.mockRejectedValue(err);
@@ -116,7 +116,7 @@ describe('prepareStage', () => {
   it.each([
     [new ToolFailedError('img2pdf exited 1'), 'Could not turn the photo into a PDF.'],
     [new ToolTimeoutError('img2pdf took longer than 60000 ms'), 'Could not turn the photo into a PDF.'],
-    [new ToolMissingError('img2pdf is not installed'), 'Filed without a text layer: OCR is not installed on this server.'],
+    [new ToolMissingError('img2pdf is not installed'), 'No text layer: OCR is not installed on this server.'],
   ])('files the photo as it is, with a note, when making its PDF throws %s', async (err, note) => {
     h = makeHarness();
     h.prepare.imageToPdf.mockRejectedValue(err);
@@ -137,7 +137,7 @@ describe('prepareStage', () => {
     });
     const doc = preparing('application/pdf');
     await prepareStage(doc, h.ctx);
-    expect(h.repo.get(doc.id)).toMatchObject({ state: 'ready', prepareNote: 'Filed without a text layer: OCR took too long.' });
+    expect(h.repo.get(doc.id)).toMatchObject({ state: 'ready', prepareNote: 'No text layer: OCR took too long.' });
   });
 
   it('removes blobs an earlier, crashed run left', async () => {
@@ -212,7 +212,7 @@ describe('prepareStage', () => {
     // An earlier, completed run left the photo as it was.
     const doc = preparing('image/jpeg', enc('photo bytes'));
     h.inbox.put(doc.id, 'thumbnail', THUMB);
-    h.repo.transition(doc.id, 'preparing', 'preparing', { preparedMime: 'image/jpeg', hasThumbnail: true, prepareNote: 'Filed without a text layer: OCR failed.' });
+    h.repo.transition(doc.id, 'preparing', 'preparing', { preparedMime: 'image/jpeg', hasThumbnail: true, prepareNote: 'No text layer: OCR failed.' });
     // This run makes a PDF, then the process dies before the row records it.
     h.prepare.imageToPdf.mockResolvedValue(enc('%PDF- fictional'));
     const transition = h.repo.transition.bind(h.repo);

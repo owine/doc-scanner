@@ -9,10 +9,10 @@ const DOCUMENT_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', '
 
 function fallbackNote(err: unknown, step: 'photo' | 'ocr'): string {
   // The tools come together: img2pdf missing means OCR is missing too.
-  if (err instanceof ToolMissingError) return 'Filed without a text layer: OCR is not installed on this server.';
+  if (err instanceof ToolMissingError) return 'No text layer: OCR is not installed on this server.';
   if (step === 'photo') return 'Could not turn the photo into a PDF.';
-  if (err instanceof ToolTimeoutError) return 'Filed without a text layer: OCR took too long.';
-  return 'Filed without a text layer: OCR failed.';
+  if (err instanceof ToolTimeoutError) return 'No text layer: OCR took too long.';
+  return 'No text layer: OCR failed.';
 }
 
 /**
