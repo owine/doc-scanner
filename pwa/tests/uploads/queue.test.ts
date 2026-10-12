@@ -285,6 +285,25 @@ describe('UploadQueue', () => {
     expect(build).not.toHaveBeenCalled();
   });
 
+  it('deletes the local scan before forgetting its upload, so a crash between sends it again rather than keeping both', async () => {
+    const order: string[] = [];
+    const store = new MemoryStore();
+    const forget = store.remove.bind(store);
+    store.remove = async (id) => {
+      order.push('forget upload');
+      await forget(id);
+    };
+    const onUploaded = vi.fn(async () => {
+      order.push('delete scan');
+    });
+    const q = make({ store, send: vi.fn().mockResolvedValue({ id: 'd1', duplicate: false }), onUploaded });
+    q.start();
+    await q.add([{ blob: new Blob(['x']), name: 'Scan.pdf', source: 'scanner', scanId: 's1' }]);
+    await vi.waitFor(() => expect(q.list()).toEqual([]));
+    expect(order).toEqual(['delete scan', 'forget upload']);
+    expect(store.items.size).toBe(0);
+  });
+
   it('knows which scans are already queued', async () => {
     const q = make({ send: () => new Promise(() => {}) });
     await q.add([{ blob: new Blob(['x']), name: 'Scan.pdf', source: 'scanner', scanId: 's1' }]);

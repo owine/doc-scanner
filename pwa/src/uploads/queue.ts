@@ -308,16 +308,22 @@ export class UploadQueue {
     }
   }
 
+  /**
+   * The follow-up (a scan's local delete) first, then the stored upload: a
+   * crash in between leaves the upload, which is sent again at the next start
+   * and answered as a duplicate. The other order would leave the scan on the
+   * device, shown as not sent.
+   */
   private async accepted(item: UploadItem, result: SendResult): Promise<void> {
-    try {
-      await this.store.remove(item.id);
-    } catch {
-      // The stored copy is sent again at the next start; the server answers it as a duplicate.
-    }
     try {
       await this.o.onUploaded?.(item, result);
     } catch {
       // The upload succeeded; a failing follow-up must not put it back.
+    }
+    try {
+      await this.store.remove(item.id);
+    } catch {
+      // The stored copy is sent again at the next start; the server answers it as a duplicate.
     }
     // Only now: until its local copy is gone, a scan must still read as on its way.
     if (item.scanId) this.sentScans.add(item.scanId);
