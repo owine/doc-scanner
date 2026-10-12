@@ -2,11 +2,11 @@
 
 A personal-use, self-hosted PWA for scanning paper documents from a phone camera and uploading them to Proton Drive. The server is a small TypeScript service that authenticates against Proton's SRP flow on the user's behalf and proxies end-to-end-encrypted uploads through the official Proton Drive SDK.
 
-> **Status:** Phases 1–4 are merged to `main`: Proton SRP login with encrypted-at-rest sessions, Drive upload via `@protontech/drive-sdk`, the camera scanner pipeline (auto-capture + crop), and client-side OCR with searchable-PDF assembly. The client-side Tesseract OCR from Phase 4 doesn't work on iOS Safari, so **Phase 5** replaces it with server-side Claude Haiku vision that OCRs a scan and suggests a filename and folder in one call. It also adds confirm-and-upload and an offline outbox. Phase 5 is designed ([spec](docs/superpowers/specs/2026-05-08-phase-5-ai-organize-design.md), [plan](docs/superpowers/plans/2026-05-08-phase-5-ai-organize.md)) and partly built on the unmerged `phase-5-ai-organize` branch, but none of it is on `main` yet. The app isn't deployed anywhere yet. CI builds the Docker image but doesn't push it.
+> **Status:** Phases 1–4 are merged to `main`: Proton SRP login with encrypted-at-rest sessions, Drive upload via `@protontech/drive-sdk`, the camera scanner pipeline (auto-capture + crop), and client-side OCR with searchable-PDF assembly. The client-side Tesseract OCR from Phase 4 doesn't work on iOS Safari, so it is retired: scans now go to the server as image-only PDFs, and files can be added from the inbox. **Phase 5** replaces it with server-side Claude Haiku vision that OCRs a scan and suggests a filename and folder in one call. It also adds confirm-and-upload and an offline outbox. Phase 5 is designed ([spec](docs/superpowers/specs/2026-05-08-phase-5-ai-organize-design.md), [plan](docs/superpowers/plans/2026-05-08-phase-5-ai-organize.md)) and partly built on the unmerged `phase-5-ai-organize` branch, but none of it is on `main` yet. The app isn't deployed anywhere yet. CI builds the Docker image but doesn't push it.
 
 ## Quickstart
 
-Prerequisites: Node.js `24.21.0` (pinned in `.nvmrc`) and pnpm `12.6.0` (the `packageManager` field, via Corepack). `engineStrict` is on, so `pnpm install` fails on any other Node version.
+Prerequisites: Node.js `24.21.0` (pinned in `.nvmrc`) and pnpm (the version pinned in the `packageManager` field, via Corepack). `engineStrict` is on, so `pnpm install` fails on any other Node version.
 
 ```bash
 fnm use                 # or: nvm use (reads .nvmrc)
@@ -40,7 +40,7 @@ For a containerised run, `docker compose up --build` reads `.env` for interpolat
 The repo is a pnpm workspace (`pnpm-workspace.yaml`) with two packages:
 
 - `server/` (`@doc-scanner/server`) is a Hono HTTP API in TypeScript, using Node's built-in `node:sqlite` for storage (forward-only SQL migrations applied on open). It runs from TypeScript source under `tsx` in dev and in production, with no compiled `dist/`. `@protontech/crypto`, a peer of the Drive SDK, ships raw `.ts` files that plain `node` refuses to load from `node_modules`. When `PWA_DIST_PATH` is set, the server also serves the built PWA.
-- `pwa/` (`@doc-scanner/pwa`) is a Preact + Vite PWA covering camera capture and auto-crop (jscanify), OCR (Tesseract.js, being replaced in Phase 5), searchable PDF assembly (`@cantoo/pdf-lib`), and local scan storage in IndexedDB (`idb`).
+- `pwa/` (`@doc-scanner/pwa`) is a Preact + Vite PWA covering camera capture and auto-crop (jscanify), an upload queue for added files and scans, image-only PDF assembly (`@cantoo/pdf-lib`), and local scan storage in IndexedDB (`idb`).
 
 ## Environment variables
 
