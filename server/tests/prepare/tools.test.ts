@@ -111,6 +111,19 @@ describe('PrepareTools (fake binaries)', () => {
     expect(calls[0]!.tmp).toBe(calls[0]!.cwd);
     expect((await sharp(t!).metadata()).width).toBe(400);
   });
+
+  it('bounds the Ghostscript render to a fixed box, whatever size the page claims', async () => {
+    const page = await sharp({ create: { width: 800, height: 1200, channels: 3, background: '#ffffff' } }).jpeg().toBuffer();
+    fakeTool({ 'page.jpg': page });
+    const tools = createPrepareTools();
+    await tools.thumbnail(PDF, 'application/pdf');
+    await tools.thumbnail(PDF, 'application/pdf', { width: 1275 });
+    const args = calls.map((c) => c.args);
+    // Twice the thumbnail width for a sharper downscale; 3:2 tall holds Letter and A4 portrait.
+    expect(args[0]).toEqual(expect.arrayContaining(['-dFIXEDMEDIA', '-dPDFFitPage', '-g800x1200']));
+    expect(args[1]).toContain('-g2550x3825');
+    expect(args[0]!.some((a) => a.startsWith('-r'))).toBe(false);
+  });
 });
 
 describe('sweepStaleTempDirs', () => {

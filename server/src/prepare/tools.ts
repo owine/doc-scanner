@@ -131,11 +131,16 @@ export function createPrepareTools(): PrepareTools {
       if (mime !== 'application/pdf') return null;
       return inTempDir(async (dir) => {
         await writeFile(join(dir, 'in.pdf'), bytes);
-        // 150 dpi renders a Letter page 1275 px wide: plenty for a 400 px card.
+        // Render into a fixed box, so a page that claims a huge size can't make
+        // a huge bitmap: twice the wanted width (a sharper downscale), 3:2 tall
+        // (holds Letter and A4 portrait, which fit by width and leave white at
+        // the bottom; a landscape page fits by width and leaves more).
         // -dSAFER keeps the PDF from touching files.
+        const boxW = width * 2;
+        const boxH = Math.round(boxW * 1.5);
         const r = await runTool(
           'gs',
-          ['-dSAFER', '-dBATCH', '-dNOPAUSE', '-dQUIET', '-sDEVICE=jpeg', '-dJPEGQ=85', '-r150', '-dFirstPage=1', '-dLastPage=1', '-sOutputFile=page.jpg', 'in.pdf'],
+          ['-dSAFER', '-dBATCH', '-dNOPAUSE', '-dQUIET', '-sDEVICE=jpeg', '-dJPEGQ=85', '-dFIXEDMEDIA', '-dPDFFitPage', `-g${boxW}x${boxH}`, '-dFirstPage=1', '-dLastPage=1', '-sOutputFile=page.jpg', 'in.pdf'],
           { timeoutMs: THUMBNAIL_TIMEOUT_MS, cwd: dir, env: { TMPDIR: dir } },
         );
         if (r.code !== 0) return null; // encrypted, corrupt
