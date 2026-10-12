@@ -1,5 +1,5 @@
 import type { ComponentChildren } from 'preact';
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { ApiError } from '../../api.js';
 import { documentsApi, type DocumentsApi } from '../../documents/api.js';
 import { groupDocuments } from '../../documents/group.js';
@@ -9,6 +9,9 @@ import { useFolders } from '../../documents/use-folders.js';
 import { DiscardedRow, FailedRow, FiledRow, WaitingRow } from './DocumentRows.js';
 import { confirmDiscard } from './labels.js';
 import { ReviewCard } from './ReviewCard.js';
+import type { ScansStore } from '../../scanner/scans-store.js';
+import { useUploads, type UploadQueue } from '../../uploads/queue.js';
+import { UploadRow } from './UploadRows.js';
 
 export interface InboxScreenProps {
   sync: DocumentSync;
@@ -16,9 +19,12 @@ export interface InboxScreenProps {
   documents?: DocumentsApi;
   now?: () => Date;
   onScan: () => void;
-  onSavedScans: () => void;
   onSettings: () => void;
   onSignInAgain: () => void;
+  /** Must be stable across renders, like `documents`. */
+  uploads: UploadQueue;
+  /** Must be stable. Task 6 lists its finished scans; the inbox shares App's open. */
+  scans: ScansStore;
 }
 
 function Section({ id, title, children }: { id: string; title: string; children: ComponentChildren }) {
@@ -35,11 +41,25 @@ export function InboxScreen({
   documents = documentsApi,
   now = () => new Date(),
   onScan,
-  onSavedScans,
   onSettings,
   onSignInAgain,
+  uploads,
 }: InboxScreenProps) {
   const { docs, loaded, error } = useDocuments(sync);
+  const pending = useUploads(uploads);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [dragging, setDragging] = useState(false);
+  const [addError, setAddError] = useState<string | null>(null);
+  const addFiles = (files: ArrayLike<File> | null | undefined) => {
+    const chosen = Array.from(files ?? []);
+    if (chosen.length === 0) return;
+    setAddError(null);
+    uploads.add(chosen.map((f) => ({ blob: f, name: f.name, source: 'picker' as const }))).catch((e: unknown) => {
+      // The error's name only: the files' names stay on this device.
+      console.error('could not add files', (e as Error)?.name);
+      setAddError("Couldn't add the files. Try again.");
+    });
+  };
   // A coarse clock. The server purges discarded documents without bumping their
   // seq, so the change feed never removes them; the day counts need it too.
   const [, setTick] = useState(0);
@@ -110,10 +130,47 @@ export function InboxScreen({
   const retry = (id: string) => act(id, () => documents.retry(id));
 
   return (
-    <main class="inbox">
+    <main
+      class="inbox"
+      onDragOver={(e) => {
+        if (!e.dataTransfer?.types.includes('Files')) return;
+        e.preventDefault(); // allows the drop
+        setDragging(true);
+      }}
+      onDragLeave={(e) => {
+        const to = e.relatedTarget as Node | null;
+        if (!to || !e.currentTarget.contains(to)) setDragging(false);
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        setDragging(false);
+        addFiles(e.dataTransfer?.files);
+      }}
+    >
+      {dragging && (
+        <div class="drop-overlay" aria-hidden="true">
+          Drop files to add them
+        </div>
+      )}
+      <input
+        type="file"
+        multiple
+        ref={fileInput}
+        class="visually-hidden"
+        tabIndex={-1}
+        aria-hidden="true"
+        onChange={(e) => {
+          const input = e.currentTarget;
+          addFiles(input.files);
+          input.value = ''; // so choosing the same file again still fires change
+        }}
+      />
       <header class="inbox-header">
         <h1>Inbox</h1>
         <div class="actions">
+          <button class="btn btn-secondary" onClick={() => fileInput.current?.click()}>
+            Add
+          </button>
           <button class="btn" onClick={onScan}>
             Scan
           </button>
@@ -125,6 +182,7 @@ export function InboxScreen({
 
       {/* Always rendered: a live region added together with its text is often not announced. */}
       <div role="status">
+        {addError && <p class="warn">{addError}</p>}
         {Boolean(error) && loaded && (
           <p class="warn">
             {docs.length > 0 ? "Can't reach the server. Showing what was last loaded." : "Can't reach the server."}
@@ -140,6 +198,12 @@ export function InboxScreen({
           </div>
         )}
       </div>
+
+      {pending.length > 0 && (
+        <Section id="uploading" title="Uploading">
+          {pending.map((item) => <UploadRow key={item.id} item={item} queue={uploads} />)}
+        </Section>
+      )}
 
       <section aria-labelledby="h-review">
         <h2 id="h-review">Needs review{g.review.length ? ` (${g.review.length})` : ''}</h2>
@@ -179,12 +243,6 @@ export function InboxScreen({
           {g.discarded.map((d) => <DiscardedRow key={d.id} doc={d} now={now()} onRestore={() => restore(d.id)} />)}
         </Section>
       )}
-
-      <footer class="inbox-footer">
-        <button class="btn btn-secondary" onClick={onSavedScans}>
-          Saved scans
-        </button>
-      </footer>
     </main>
   );
 }

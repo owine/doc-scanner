@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { act, render, screen, fireEvent, waitFor, within } from '@testing-library/preact';
 import { InboxScreen } from '../../src/ui/inbox/InboxScreen.js';
 import { DocumentSync } from '../../src/documents/sync.js';
@@ -6,6 +6,36 @@ import type { DocumentsApi } from '../../src/documents/api.js';
 import type { DocumentView } from '../../src/documents/types.js';
 import { ApiError } from '../../src/api.js';
 import { FOLDERS, makeDoc } from '../documents/fixtures.js';
+import { UploadQueue, type UploadQueueOptions } from '../../src/uploads/queue.js';
+import { UploadError } from '../../src/uploads/send.js';
+import type { UploadStorage } from '../../src/uploads/upload-store.js';
+import type { UploadItem } from '../../src/uploads/types.js';
+import { ScansStore } from '../../src/scanner/scans-store.js';
+
+class MemoryStore implements UploadStorage {
+  items = new Map<string, UploadItem>();
+  async all() { return [...this.items.values()]; }
+  async put(i: UploadItem) { this.items.set(i.id, i); }
+  async remove(id: string) { this.items.delete(id); }
+}
+
+type Send = NonNullable<UploadQueueOptions['send']>;
+
+const queues: UploadQueue[] = [];
+/** An upload queue over memory whose sends never finish, unless the test passes `send`. Stopped after each test. */
+function makeQueue(send: Send = () => new Promise(() => {})): UploadQueue {
+  const q = new UploadQueue({ store: new MemoryStore(), send });
+  queues.push(q);
+  return q;
+}
+
+afterEach(() => {
+  for (const q of queues.splice(0)) q.stop();
+  Reflect.deleteProperty(navigator, 'onLine');
+});
+
+const pdf = (name: string) => new File(['%PDF'], name, { type: 'application/pdf' });
+const fileInput = () => document.querySelector<HTMLInputElement>('input[type="file"][multiple]')!;
 
 const NOW = new Date('2026-10-10T12:00:00.000Z');
 
@@ -18,7 +48,7 @@ async function folderLoad(api: DocumentsApi) {
   });
 }
 
-function setup(docs: DocumentView[], over: Partial<DocumentsApi> = {}) {
+function setup(docs: DocumentView[], over: Partial<DocumentsApi> = {}, send?: Send) {
   const sync = new DocumentSync({ list: vi.fn().mockResolvedValue({ documents: [], cursor: 0 }) });
   sync.loaded = true;
   for (const d of docs) sync.upsert(d);
@@ -32,9 +62,12 @@ function setup(docs: DocumentView[], over: Partial<DocumentsApi> = {}) {
     retry: vi.fn(async (id: string) => ({ ...docs.find((d) => d.id === id)!, state: 'received' as const, seq: 999 })),
     ...over,
   } as unknown as DocumentsApi;
-  const props = { onScan: vi.fn(), onSavedScans: vi.fn(), onSettings: vi.fn(), onSignInAgain: vi.fn() };
-  render(<InboxScreen sync={sync} documents={api} now={() => NOW} {...props} />);
-  return { sync, api, props };
+  const uploads = makeQueue(send);
+  uploads.start();
+  const scans = new ScansStore();
+  const props = { onScan: vi.fn(), onSettings: vi.fn(), onSignInAgain: vi.fn() };
+  render(<InboxScreen sync={sync} documents={api} now={() => NOW} uploads={uploads} scans={scans} {...props} />);
+  return { sync, api, props, uploads, scans };
 }
 
 describe('InboxScreen', () => {
@@ -178,7 +211,7 @@ describe('InboxScreen', () => {
       sync.loaded = true;
       sync.upsert(makeDoc({ state: 'discarded', discardedAt: '2026-10-04T12:00:00.000Z' }));
       const api = { folders: vi.fn().mockResolvedValue({ walkedAt: NOW.toISOString(), folders: FOLDERS }), refreshFolders: vi.fn() } as unknown as DocumentsApi;
-      render(<InboxScreen sync={sync} documents={api} now={() => new Date(clock)} onScan={vi.fn()} onSavedScans={vi.fn()} onSettings={vi.fn()} onSignInAgain={vi.fn()} />);
+      render(<InboxScreen sync={sync} documents={api} now={() => new Date(clock)} onScan={vi.fn()} uploads={makeQueue()} scans={new ScansStore()} onSettings={vi.fn()} onSignInAgain={vi.fn()} />);
       expect(screen.getByRole('region', { name: 'Discarded' })).toBeInTheDocument();
       // Let the mount's own re-renders and the folder load settle first.
       await folderLoad(api);
@@ -200,7 +233,7 @@ describe('InboxScreen', () => {
     sync.loaded = true;
     sync.error = new Error('offline');
     const api = { folders: vi.fn().mockResolvedValue({ walkedAt: NOW.toISOString(), folders: FOLDERS }), refreshFolders: vi.fn() } as unknown as DocumentsApi;
-    render(<InboxScreen sync={sync} documents={api} now={() => NOW} onScan={vi.fn()} onSavedScans={vi.fn()} onSettings={vi.fn()} onSignInAgain={vi.fn()} />);
+    render(<InboxScreen sync={sync} documents={api} now={() => NOW} onScan={vi.fn()} uploads={makeQueue()} scans={new ScansStore()} onSettings={vi.fn()} onSignInAgain={vi.fn()} />);
     expect(screen.getByRole('status')).toHaveTextContent("Can't reach the server.");
     expect(screen.queryByText(/nothing to review/i)).toBeNull();
     expect(screen.queryByText(/showing what was last loaded/i)).toBeNull();
@@ -213,7 +246,7 @@ describe('InboxScreen', () => {
     sync.upsert(makeDoc());
     sync.error = new Error('offline');
     const api = { folders: vi.fn().mockResolvedValue({ walkedAt: NOW.toISOString(), folders: FOLDERS }), refreshFolders: vi.fn() } as unknown as DocumentsApi;
-    render(<InboxScreen sync={sync} documents={api} now={() => NOW} onScan={vi.fn()} onSavedScans={vi.fn()} onSettings={vi.fn()} onSignInAgain={vi.fn()} />);
+    render(<InboxScreen sync={sync} documents={api} now={() => NOW} onScan={vi.fn()} uploads={makeQueue()} scans={new ScansStore()} onSettings={vi.fn()} onSignInAgain={vi.fn()} />);
     expect(screen.getByText(/showing what was last loaded/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument();
     await folderLoad(api);
@@ -329,14 +362,88 @@ describe('InboxScreen', () => {
     expect(screen.getByRole('status')).toBe(status);
   });
 
-  it('opens the scanner, settings and saved scans', async () => {
+  it('opens the scanner and settings, and has no saved scans any more', async () => {
     const { props } = setup([]);
     fireEvent.click(screen.getByRole('button', { name: 'Scan' }));
     fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
-    fireEvent.click(screen.getByRole('button', { name: /saved scans/i }));
     expect(props.onScan).toHaveBeenCalled();
     expect(props.onSettings).toHaveBeenCalled();
-    expect(props.onSavedScans).toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: /saved scans/i })).toBeNull();
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Inbox' })).toBeInTheDocument());
+  });
+});
+
+describe('InboxScreen uploads', () => {
+  it('adds the files chosen with Add, and clears the picker for the next choice', async () => {
+    const { uploads } = setup([]);
+    const input = fileInput();
+    const click = vi.spyOn(input, 'click');
+    const cleared = vi.spyOn(input, 'value', 'set');
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    expect(click).toHaveBeenCalled();
+    fireEvent.change(input, { target: { files: [pdf('a.pdf'), pdf('b.pdf')] } });
+    const region = await screen.findByRole('region', { name: 'Uploading' });
+    await waitFor(() => expect(within(region).getAllByRole('listitem')).toHaveLength(2));
+    expect(uploads.list().map((i) => i.source)).toEqual(['picker', 'picker']);
+    expect(cleared).toHaveBeenCalledWith('');
+  });
+
+  it('adds files dropped on the inbox, with a hint while dragging', async () => {
+    const { uploads } = setup([]);
+    const main = screen.getByRole('main');
+    fireEvent.dragOver(main, { dataTransfer: { types: ['Files'] } });
+    expect(await screen.findByText('Drop files to add them')).toBeInTheDocument();
+    fireEvent.drop(main, { dataTransfer: { files: [pdf('a.pdf')] } });
+    await waitFor(() => expect(uploads.list()).toHaveLength(1));
+    await waitFor(() => expect(screen.queryByText('Drop files to add them')).toBeNull());
+  });
+
+  it('shows the progress of the file being sent', async () => {
+    let report!: (fraction: number) => void;
+    setup([], {}, (_input, onProgress) => {
+      report = onProgress;
+      return new Promise(() => {});
+    });
+    fireEvent.change(fileInput(), { target: { files: [pdf('a.pdf')] } });
+    await waitFor(() => expect(report).toBeDefined());
+    act(() => report(0.5));
+    expect(await screen.findByText('Uploading… 50%')).toBeInTheDocument();
+  });
+
+  it('explains a refused file and offers Retry and Remove', async () => {
+    const { uploads } = setup([], {}, vi.fn().mockRejectedValue(new UploadError(413, 'payload_too_large')));
+    const retry = vi.spyOn(uploads, 'retry');
+    fireEvent.change(fileInput(), { target: { files: [pdf('big.pdf')] } });
+    const region = await screen.findByRole('region', { name: 'Uploading' });
+    expect(await within(region).findByText(/50 MB/)).toBeInTheDocument();
+    fireEvent.click(within(region).getByRole('button', { name: 'Retry' }));
+    expect(retry).toHaveBeenCalled();
+    // Refused again; then Remove takes the row away.
+    fireEvent.click(await within(region).findByRole('button', { name: 'Remove' }));
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Uploading' })).toBeNull());
+  });
+
+  it('says which files wait, and which wait for a connection, as it comes and goes', async () => {
+    setup([]);
+    fireEvent.change(fileInput(), { target: { files: [pdf('a.pdf'), pdf('b.pdf')] } });
+    expect(await screen.findByText('Waiting to upload')).toBeInTheDocument();
+    expect(screen.getByText('Uploading… 0%')).toBeInTheDocument();
+    Object.defineProperty(navigator, 'onLine', { value: false, configurable: true });
+    act(() => {
+      window.dispatchEvent(new Event('offline'));
+    });
+    expect(await screen.findByText('Waiting for a connection')).toBeInTheDocument();
+    Reflect.deleteProperty(navigator, 'onLine');
+    act(() => {
+      window.dispatchEvent(new Event('online'));
+    });
+    expect(await screen.findByText('Waiting to upload')).toBeInTheDocument();
+  });
+
+  it('says so when the files cannot be kept for upload', async () => {
+    const { uploads } = setup([]);
+    vi.spyOn(uploads, 'add').mockRejectedValue(new Error('quota'));
+    fireEvent.change(fileInput(), { target: { files: [pdf('a.pdf')] } });
+    expect(await screen.findByText("Couldn't add the files. Try again.")).toBeInTheDocument();
   });
 });

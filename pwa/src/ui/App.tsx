@@ -14,6 +14,8 @@ import type { Scan } from '../scanner/types.js';
 import { OcrQueue } from '../ocr/queue.js';
 import { WorkerClient } from '../ocr/worker-client.js';
 import { buildSearchablePdf } from '../pdf/build.js';
+import { UploadQueue } from '../uploads/queue.js';
+import { captureRequestFailure } from '../observability/sentry.js';
 
 type Route =
   | { kind: 'inbox' }
@@ -32,8 +34,30 @@ export function App() {
   const [sync] = useState(
     () => new DocumentSync({ list: documentsApi.list, onUnauthorized: () => { setEmail(null); setRoute({ kind: 'inbox' }); } }),
   );
-  // One open, shared: the in-progress lookup below must not run before it finishes.
+  // One open, shared: the in-progress lookup and the inbox's device scans wait on it.
   const [storeOpen] = useState(() => store.open());
+  const [uploads] = useState(
+    () =>
+      new UploadQueue({
+        onUploaded: async ({ scanId }) => {
+          // The server has the scan; its copy on this device can go.
+          if (scanId) await storeOpen.then(() => store.delete(scanId));
+          void sync.poll();
+        },
+        onUnauthorized: () => {
+          setEmail(null);
+          setRoute({ kind: 'inbox' });
+        },
+        // Status and error code only (the code is the error's message); never the file's name.
+        report: (err) =>
+          captureRequestFailure(err, {
+            operation: 'document-upload',
+            path: '/api/documents',
+            failure: err.status > 0 ? 'http' : 'network',
+            ...(err.status > 0 ? { status: err.status } : {}),
+          }),
+      }),
+  );
 
   useEffect(() => {
     api.status().then((s) => setEmail(s.email))
@@ -51,7 +75,9 @@ export function App() {
       .then((s) => setResume(s))
       .catch((e) => console.error('find in-progress scan', e));
     sync.start();
+    uploads.start();
     return () => {
+      uploads.stop();
       sync.stop();
       sync.reset();
     };
@@ -94,7 +120,8 @@ export function App() {
       return <InboxScreen
         sync={sync}
         onScan={() => setRoute({ kind: 'scanner' })}
-        onSavedScans={() => setRoute({ kind: 'saved' })}
+        uploads={uploads}
+        scans={store}
         onSettings={() => setRoute({ kind: 'settings' })}
         onSignInAgain={() => void signInAgain()}
       />;
