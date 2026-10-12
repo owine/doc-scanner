@@ -45,8 +45,19 @@ LABEL org.opencontainers.image.title="doc-scanner" \
 # NOTE: the node base tag floats its Alpine version (node:24.21.0-alpine), so
 # when node's default Alpine moves to 3.25 both this pin and that `branch=v3.24`
 # must be hand-updated — the build fails loudly until then.
+# ocrmypdf, tesseract-ocr-data-eng, py3-img2pdf and ghostscript are slice 3's
+# OCR tools (spec §4): searchable PDFs and first-page thumbnails before filing.
+# They add about 319 MB (measured 2026-10-12). Their own dependencies
+# (Tesseract, Python, qpdf, pikepdf, Pillow, jbig2enc, pngquant, unpaper) are
+# pulled in unpinned, so they follow the pinned versions. Renovate's `apk`
+# datasource bumps these pins too (renovate.json, `branch=v3.24`, `community`
+# merged), and CI's smoke step runs every bump against the real tools.
 RUN apk add --no-cache \
-  tini=0.19.0-r3
+  tini=0.19.0-r3 \
+  ocrmypdf=16.11.1-r2 \
+  tesseract-ocr-data-eng=5.5.2-r0 \
+  py3-img2pdf=0.6.3-r1 \
+  ghostscript=10.07.1-r0
 COPY --from=deps /app/node_modules ./node_modules
 # pnpm's workspace layout symlinks tsx (now a server runtime dep) into
 # server/node_modules, not the root node_modules copied above — needed for
