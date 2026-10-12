@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach, beforeAll } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { act, render, screen, fireEvent, waitFor, within } from '@testing-library/preact';
+import { act, createEvent, render, screen, fireEvent, waitFor, within } from '@testing-library/preact';
 import { InboxScreen } from '../../src/ui/inbox/InboxScreen.js';
 import { DocumentSync } from '../../src/documents/sync.js';
 import type { DocumentsApi } from '../../src/documents/api.js';
@@ -50,6 +50,20 @@ async function savedScan(): Promise<string> {
 }
 
 const pdf = (name: string) => new File(['%PDF'], name, { type: 'application/pdf' });
+
+/**
+ * Dispatches a real drag event ("dragover", not "DragOver"). happy-dom's
+ * elements have no ondrag* properties, so Preact's fireEvent falls back to the
+ * capitalised name, which the inbox's window listeners never hear.
+ * Returns false when the inbox prevented the default.
+ */
+function drag(target: Element | Window, type: 'dragEnter' | 'dragOver' | 'dragLeave' | 'drop', files?: File[]): boolean {
+  let notPrevented = true;
+  act(() => {
+    notPrevented = target.dispatchEvent(createEvent[type](target, { dataTransfer: { types: ['Files'], files: files ?? [] } }));
+  });
+  return notPrevented;
+}
 const fileInput = () => document.querySelector<HTMLInputElement>('input[type="file"][multiple]')!;
 
 const NOW = new Date('2026-10-10T12:00:00.000Z');
@@ -81,8 +95,8 @@ function setup(docs: DocumentView[], over: Partial<DocumentsApi> = {}, send?: Se
   uploads.start();
   const scans = new ScansStore();
   const props = { onScan: vi.fn(), onSettings: vi.fn(), onSignInAgain: vi.fn() };
-  render(<InboxScreen sync={sync} documents={api} now={() => NOW} uploads={uploads} scans={scans} {...props} />);
-  return { sync, api, props, uploads, scans };
+  const { unmount } = render(<InboxScreen sync={sync} documents={api} now={() => NOW} uploads={uploads} scans={scans} {...props} />);
+  return { sync, api, props, uploads, scans, unmount };
 }
 
 describe('InboxScreen', () => {
@@ -406,11 +420,44 @@ describe('InboxScreen uploads', () => {
   it('adds files dropped on the inbox, with a hint while dragging', async () => {
     const { uploads } = setup([]);
     const main = screen.getByRole('main');
-    fireEvent.dragOver(main, { dataTransfer: { types: ['Files'] } });
+    drag(main, 'dragEnter');
+    expect(drag(main, 'dragOver')).toBe(false); // prevented: allows the drop
     expect(await screen.findByText('Drop files to add them')).toBeInTheDocument();
-    fireEvent.drop(main, { dataTransfer: { files: [pdf('a.pdf')] } });
+    expect(drag(main, 'drop', [pdf('a.pdf')])).toBe(false);
     await waitFor(() => expect(uploads.list()).toHaveLength(1));
     await waitFor(() => expect(screen.queryByText('Drop files to add them')).toBeNull());
+  });
+
+  it('takes a drop anywhere in the window, so a stray one never opens the file', async () => {
+    const { uploads } = setup([]);
+    drag(window, 'dragEnter');
+    expect(await screen.findByText('Drop files to add them')).toBeInTheDocument();
+    expect(drag(window, 'dragOver')).toBe(false); // prevented: allows the drop
+    expect(drag(window, 'drop', [pdf('a.pdf')])).toBe(false);
+    await waitFor(() => expect(uploads.list()).toHaveLength(1));
+    await waitFor(() => expect(screen.queryByText('Drop files to add them')).toBeNull());
+  });
+
+  it('keeps the drop hint while the drag moves between elements, even with no relatedTarget (WebKit)', async () => {
+    setup([]);
+    const main = screen.getByRole('main');
+    const header = screen.getByRole('heading', { name: 'Inbox' });
+    drag(main, 'dragEnter');
+    drag(header, 'dragEnter');
+    drag(main, 'dragLeave'); // no relatedTarget, as WebKit sends it
+    expect(await screen.findByText('Drop files to add them')).toBeInTheDocument();
+    drag(header, 'dragLeave');
+    await waitFor(() => expect(screen.queryByText('Drop files to add them')).toBeNull());
+  });
+
+  it('stops taking drops on the window once the inbox is gone', async () => {
+    const { uploads, unmount } = setup([]);
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Inbox' })).toBeInTheDocument());
+    unmount();
+    expect(drag(window, 'dragOver')).toBe(true);
+    expect(drag(window, 'drop', [pdf('a.pdf')])).toBe(true);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(uploads.list()).toEqual([]);
   });
 
   it('shows the progress of the file being sent', async () => {

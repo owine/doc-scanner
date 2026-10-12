@@ -1,5 +1,5 @@
 import type { ComponentChildren } from 'preact';
-import { useEffect, useRef, useState } from 'preact/hooks';
+import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
 import { ApiError } from '../../api.js';
 import { documentsApi, type DocumentsApi } from '../../documents/api.js';
 import { groupDocuments } from '../../documents/group.js';
@@ -69,16 +69,59 @@ export function InboxScreen({
       setSendErrors((prev) => ({ ...prev, [id]: 'Could not send this scan. Try again.' }));
     }
   };
-  const addFiles = (files: ArrayLike<File> | null | undefined) => {
-    const chosen = Array.from(files ?? []);
-    if (chosen.length === 0) return;
-    setAddError(null);
-    uploads.add(chosen.map((f) => ({ blob: f, name: f.name, source: 'picker' as const }))).catch((e: unknown) => {
-      // The error's name only: the files' names stay on this device.
-      console.error('could not add files', (e as Error)?.name);
-      setAddError("Couldn't add the files. Try again.");
-    });
-  };
+  const addFiles = useCallback(
+    (files: ArrayLike<File> | null | undefined) => {
+      const chosen = Array.from(files ?? []);
+      if (chosen.length === 0) return;
+      setAddError(null);
+      uploads.add(chosen.map((f) => ({ blob: f, name: f.name, source: 'picker' as const }))).catch((e: unknown) => {
+        // The error's name only: the files' names stay on this device.
+        console.error('could not add files', (e as Error)?.name);
+        setAddError("Couldn't add the files. Try again.");
+      });
+    },
+    [uploads],
+  );
+  // The whole window takes dropped files while the inbox shows, margins
+  // included: a drop the page doesn't take makes the browser open the file.
+  useEffect(() => {
+    const carriesFiles = (e: DragEvent) => Boolean(e.dataTransfer?.types.includes('Files'));
+    // dragenter and dragleave fire for every element crossed. Counting them
+    // tells when the drag has left the window: WebKit's relatedTarget is null.
+    let depth = 0;
+    const onEnter = (e: DragEvent) => {
+      if (!carriesFiles(e)) return;
+      depth += 1;
+      setDragging(true);
+    };
+    const onLeave = (e: DragEvent) => {
+      if (!carriesFiles(e)) return;
+      depth = Math.max(0, depth - 1);
+      if (depth === 0) setDragging(false);
+    };
+    const onOver = (e: DragEvent) => {
+      if (!carriesFiles(e)) return; // text dragged into a field keeps its default
+      e.preventDefault(); // allows the drop
+      setDragging(true);
+    };
+    const onDrop = (e: DragEvent) => {
+      if (!carriesFiles(e)) return;
+      e.preventDefault();
+      depth = 0;
+      setDragging(false);
+      addFiles(e.dataTransfer?.files);
+    };
+    window.addEventListener('dragenter', onEnter);
+    window.addEventListener('dragleave', onLeave);
+    window.addEventListener('dragover', onOver);
+    window.addEventListener('drop', onDrop);
+    return () => {
+      window.removeEventListener('dragenter', onEnter);
+      window.removeEventListener('dragleave', onLeave);
+      window.removeEventListener('dragover', onOver);
+      window.removeEventListener('drop', onDrop);
+    };
+  }, [addFiles]);
   // A coarse clock. The server purges discarded documents without bumping their
   // seq, so the change feed never removes them; the day counts need it too.
   const [, setTick] = useState(0);
@@ -149,23 +192,7 @@ export function InboxScreen({
   const retry = (id: string) => act(id, () => documents.retry(id));
 
   return (
-    <main
-      class="inbox"
-      onDragOver={(e) => {
-        if (!e.dataTransfer?.types.includes('Files')) return;
-        e.preventDefault(); // allows the drop
-        setDragging(true);
-      }}
-      onDragLeave={(e) => {
-        const to = e.relatedTarget as Node | null;
-        if (!to || !e.currentTarget.contains(to)) setDragging(false);
-      }}
-      onDrop={(e) => {
-        e.preventDefault();
-        setDragging(false);
-        addFiles(e.dataTransfer?.files);
-      }}
-    >
+    <main class="inbox">
       {dragging && (
         <div class="drop-overlay" aria-hidden="true">
           Drop files to add them
