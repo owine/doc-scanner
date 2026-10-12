@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { deleteDB, openDB } from 'idb';
 import { UploadStore } from '../../src/uploads/upload-store.js';
 import type { UploadItem } from '../../src/uploads/types.js';
 
@@ -22,5 +23,14 @@ describe('UploadStore', () => {
     await store.put(item('a', 1));
     const [got] = await store.all();
     expect(await got!.blob.text()).toBe('abc');
+  });
+
+  it('opens again after a failed open', async () => {
+    // A newer version on disk makes opening version 1 fail.
+    (await openDB('docscanner-uploads', 2)).close();
+    const store = new UploadStore();
+    await expect(store.all()).rejects.toMatchObject({ name: 'VersionError' });
+    await deleteDB('docscanner-uploads');
+    await expect(store.all()).resolves.toEqual([]);
   });
 });

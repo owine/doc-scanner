@@ -17,11 +17,15 @@ export interface UploadStorage {
 export class UploadStore implements UploadStorage {
   private db: Promise<IDBPDatabase<UploadsSchema>> | null = null;
 
+  /** One open, shared. A failed open is forgotten, so the next call tries again. */
   private get d(): Promise<IDBPDatabase<UploadsSchema>> {
     this.db ??= openDB<UploadsSchema>(DB_NAME, 1, {
       upgrade(db) {
         db.createObjectStore('uploads', { keyPath: 'id' });
       },
+    }).catch((e: unknown) => {
+      this.db = null;
+      throw e;
     });
     return this.db;
   }
