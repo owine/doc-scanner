@@ -58,8 +58,8 @@ export interface DeviceScanRowProps {
   onSend: () => Promise<void>;
   onDelete: () => Promise<void>;
   /**
-   * Why the last send failed. Kept by the inbox, not the row: sending claims
-   * the scan at once, so this row unmounts and a fresh one comes back.
+   * Why the last send failed. Kept by the upload queue, not the row: sending
+   * claims the scan at once, so this row unmounts and a fresh one comes back.
    */
   error?: string | null | undefined;
 }
@@ -102,7 +102,7 @@ export function DeviceScanRow({ scan, onSend, onDelete, error = null }: DeviceSc
         disabled={busy}
         aria-describedby={describedBy}
         onClick={() => {
-          if (window.confirm('Delete this scan from this device? It has not been sent anywhere.')) void run(onDelete, 'Could not delete this scan.');
+          if (window.confirm('Delete this scan from this device?')) void run(onDelete, 'Could not delete this scan.');
         }}
       >
         Delete

@@ -320,6 +320,23 @@ describe('UploadQueue', () => {
     expect(q.list()).toHaveLength(1);
   });
 
+  it('remembers why a scan could not be built until it is tried again', async () => {
+    const q = make({ send: () => new Promise(() => {}) });
+    const changed = vi.fn();
+    q.subscribe(changed);
+    await expect(q.addScan('s1', () => Promise.reject(new Error('no pages')))).rejects.toThrow('no pages');
+    expect(q.buildErrorOf('s1')).toBe('Could not send this scan. Try again.');
+    expect(q.buildErrorOf('s2')).toBeNull();
+    changed.mockClear();
+    const pdf = deferred<{ blob: Blob; name: string; source: 'scanner' }>();
+    const again = q.addScan('s1', () => pdf.promise);
+    expect(q.buildErrorOf('s1')).toBeNull();
+    expect(changed).toHaveBeenCalled();
+    pdf.resolve({ blob: new Blob(['x']), name: 'Scan.pdf', source: 'scanner' });
+    await again;
+    expect(q.buildErrorOf('s1')).toBeNull();
+  });
+
   it('lets a scan be queued again when building its PDF failed', async () => {
     const q = make({ send: () => new Promise(() => {}) });
     await expect(q.addScan('s1', () => Promise.reject(new Error('no pages')))).rejects.toThrow('no pages');

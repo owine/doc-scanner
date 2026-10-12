@@ -528,7 +528,7 @@ describe('InboxScreen scans on this device', () => {
     setup([]);
     const region = await screen.findByRole('region', { name: 'Scans on this device' });
     expect(within(region).getByText('Scan · 1 page')).toBeInTheDocument();
-    expect(within(region).getByText(/saved before scans went straight to your inbox/i)).toBeInTheDocument();
+    expect(within(region).getByText('Scans not sent yet. Send them or delete them.')).toBeInTheDocument();
   });
 
   it('sends a scan to the inbox', async () => {

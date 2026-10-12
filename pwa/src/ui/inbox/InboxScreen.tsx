@@ -53,20 +53,13 @@ export function InboxScreen({
   const fileInput = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
-  // By scan id. The row unmounts while its scan is claimed, so it can't keep this itself.
-  const [sendErrors, setSendErrors] = useState<Record<string, string>>({});
+  // The queue keeps why a send failed (uploads.buildErrorOf): the row
+  // unmounts while its scan is claimed, and Done in App sends scans too.
   const sendScan = async (id: string) => {
-    setSendErrors((prev) => {
-      if (!(id in prev)) return prev;
-      const next = { ...prev };
-      delete next[id];
-      return next;
-    });
     try {
       await sendScanToInbox(scans, uploads, id);
     } catch (e) {
       console.error('could not send scan', (e as Error)?.name);
-      setSendErrors((prev) => ({ ...prev, [id]: 'Could not send this scan. Try again.' }));
     }
   };
   const addFiles = useCallback(
@@ -265,14 +258,14 @@ export function InboxScreen({
       {device.scans.length > 0 && (
         <section aria-labelledby="h-device">
           <h2 id="h-device">Scans on this device</h2>
-          <p class="muted">Saved before scans went straight to your inbox. Send them or delete them.</p>
+          <p class="muted">Scans not sent yet. Send them or delete them.</p>
           <ul class="doc-list" role="list">
             {device.scans.map((s) => (
               <DeviceScanRow
                 key={s.id}
                 scan={s}
                 onSend={() => sendScan(s.id)}
-                error={sendErrors[s.id]}
+                error={uploads.buildErrorOf(s.id)}
                 onDelete={async () => {
                   await scans.delete(s.id);
                   await device.reload();

@@ -137,7 +137,8 @@ export function App() {
         onBack={() => setRoute({ kind: 'inbox' })}
         onDone={(scanId) => {
           setRoute({ kind: 'inbox' });
-          // A scan whose PDF can't be built stays on the device and shows under "Scans on this device".
+          // A scan whose PDF can't be built stays on the device and shows under
+          // "Scans on this device", with the reason the queue keeps for it.
           sendScanToInbox(store, uploads, scanId).catch((e: unknown) => console.error('could not queue scan', (e as Error)?.name));
         }}
       />;

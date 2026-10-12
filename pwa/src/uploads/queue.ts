@@ -17,6 +17,8 @@ export const MAX_UPLOAD_BYTES = 50 * 1024 * 1024 - 64 * 1024;
 
 const TOO_LARGE = 'Too large to upload (the limit is 50 MB).';
 
+const SCAN_NOT_BUILT = 'Could not send this scan. Try again.';
+
 /** Plain-language reasons for permanent refusals. */
 const REFUSALS: Record<string, string> = {
   payload_too_large: TOO_LARGE,
@@ -71,6 +73,12 @@ export class UploadQueue {
    * delete), and must not show as left on the device meanwhile.
    */
   private readonly sentScans = new Set<string>();
+  /**
+   * Why a scan's last addScan failed, by scan id. Kept here, not by a screen:
+   * both Done (in App) and the inbox's Send start a build, and the scan's row
+   * comes back fresh once the build gives up its claim.
+   */
+  private readonly buildErrors = new Map<string, string>();
   private readonly store: UploadStorage;
   private readonly send: NonNullable<UploadQueueOptions['send']>;
   private readonly now: () => number;
@@ -102,6 +110,11 @@ export class UploadQueue {
 
   isSending(id: string): boolean {
     return this.active === id;
+  }
+
+  /** Why the scan's last send failed before it could be queued, if it did. */
+  buildErrorOf(scanId: string): string | null {
+    return this.buildErrors.get(scanId) ?? null;
   }
 
   /** Queued, being sent, having its PDF built, or accepted this session. */
@@ -155,11 +168,16 @@ export class UploadQueue {
     if (inFlight) return inFlight;
     if (this.hasScan(scanId)) return Promise.resolve();
     this.claimed.add(scanId);
+    this.buildErrors.delete(scanId);
     this.emit();
     // Built on a later tick, so the entry below is always set before `finally` deletes it.
     const queued = Promise.resolve()
       .then(build)
       .then((pdf) => this.add([{ ...pdf, scanId }]))
+      .catch((e: unknown) => {
+        this.buildErrors.set(scanId, SCAN_NOT_BUILT);
+        throw e;
+      })
       .finally(() => {
         this.claimed.delete(scanId);
         this.building.delete(scanId);

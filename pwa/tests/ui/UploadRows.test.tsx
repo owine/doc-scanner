@@ -92,7 +92,7 @@ describe('DeviceScanRow', () => {
       const onDelete = vi.fn();
       render(<ul><DeviceScanRow scan={scan} onSend={vi.fn()} onDelete={onDelete} /></ul>);
       fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
-      await waitFor(() => expect(window.confirm).toHaveBeenCalled());
+      await waitFor(() => expect(window.confirm).toHaveBeenCalledWith('Delete this scan from this device?'));
       expect(onDelete).not.toHaveBeenCalled();
     } finally {
       window.confirm = nativeConfirm;
