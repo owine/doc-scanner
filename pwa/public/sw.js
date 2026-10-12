@@ -1,6 +1,8 @@
 // doc-scanner Service Worker.
-// Caches the scanner chunk (split out by Vite as a dynamic-import chunk) and
-// the jscanify wasm so subsequent opens work fully offline.
+// Caches the scanner chunk and the PDF builder chunk (both split out by Vite as
+// dynamic-import chunks) and the jscanify wasm, so subsequent opens work fully
+// offline and a scan finished offline can still be built into a PDF. App
+// loads the PDF builder after sign-in so it is cached before it's needed.
 
 const CACHE_NAME = 'docscanner-scanner-v5';
 const RUNTIME_CACHE_PATTERNS = [

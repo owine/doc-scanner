@@ -32,5 +32,3 @@ export interface PdfArtifact {
   blob: Blob;
   bytes: number;
 }
-
-export const ESTIMATED_PAGE_BYTES = 400_000;
