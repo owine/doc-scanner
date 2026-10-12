@@ -1,4 +1,4 @@
-import { readdirSync, rmSync, statSync } from 'node:fs';
+import { lstatSync, readdirSync, rmSync, unlinkSync } from 'node:fs';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -53,7 +53,10 @@ export function sweepStaleTempDirs(now = Date.now()): void {
     if (!name.startsWith(TEMP_PREFIX)) continue;
     const dir = join(tmpdir(), name);
     try {
-      if (now - statSync(dir).mtimeMs > STALE_TEMP_MS) rmSync(dir, { recursive: true, force: true });
+      const st = lstatSync(dir); // never follow a link
+      if (now - st.mtimeMs <= STALE_TEMP_MS) continue;
+      if (st.isSymbolicLink()) unlinkSync(dir); // the link only, not its target
+      else if (st.isDirectory()) rmSync(dir, { recursive: true, force: true });
     } catch {
       // Gone already, or not ours to remove.
     }
@@ -67,6 +70,9 @@ export function sweepStaleTempDirs(now = Date.now()): void {
  * even when a timeout kills them.
  */
 async function inTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
+  // Also before every job: a crash and a quick restart would otherwise leave
+  // plaintext in the temp directory until some later start.
+  sweepStaleTempDirs();
   const dir = await mkdtemp(join(tmpdir(), TEMP_PREFIX));
   try {
     return await fn(dir);

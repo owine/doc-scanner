@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { existsSync, mkdtempSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, lutimesSync, mkdtempSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import sharp from 'sharp';
@@ -110,5 +110,37 @@ describe('sweepStaleTempDirs', () => {
     expect(existsSync(old)).toBe(false);
     expect(existsSync(fresh)).toBe(true);
     rmSync(fresh, { recursive: true, force: true });
+  });
+
+  it('keeps an old directory without the prefix', () => {
+    const other = mkdtempSync(join(tmpdir(), 'someone-elses-'));
+    const anHourAgo = new Date(Date.now() - 3600_000);
+    utimesSync(other, anHourAgo, anHourAgo);
+    sweepStaleTempDirs();
+    expect(existsSync(other)).toBe(true);
+    rmSync(other, { recursive: true, force: true });
+  });
+
+  it('removes an old prefixed symlink without touching its target', () => {
+    const target = mkdtempSync(join(tmpdir(), 'symlink-target-'));
+    writeFileSync(join(target, 'keep.txt'), 'x');
+    const link = join(tmpdir(), `${TEMP_PREFIX}link-${Date.now()}`);
+    symlinkSync(target, link);
+    const anHourAgo = new Date(Date.now() - 3600_000);
+    lutimesSync(link, anHourAgo, anHourAgo);
+    sweepStaleTempDirs();
+    expect(() => statSync(link)).toThrow();
+    expect(existsSync(join(target, 'keep.txt'))).toBe(true);
+    rmSync(target, { recursive: true, force: true });
+  });
+
+  it('sweeps before every job, not just at startup', async () => {
+    const tools = createPrepareTools();
+    const old = mkdtempSync(join(tmpdir(), TEMP_PREFIX));
+    const anHourAgo = new Date(Date.now() - 3600_000);
+    utimesSync(old, anHourAgo, anHourAgo);
+    fakeTool({ 'side.txt': 'Northwind Energy', 'out.pdf': 'OCR' });
+    await tools.ocrPdf(PDF);
+    expect(existsSync(old)).toBe(false);
   });
 });
