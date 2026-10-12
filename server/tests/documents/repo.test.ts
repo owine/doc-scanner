@@ -463,6 +463,17 @@ describe('DocumentRepo', () => {
       expect(raw.drive_url).toBe(url);
     });
 
+    it('round-trips prepareNote and hasThumbnail, storing the note as plain text', () => {
+      const r = repo();
+      const a = r.insert(named());
+      expect(r.get(a.id)).toMatchObject({ prepareNote: null, hasThumbnail: false });
+      const note = 'OCR is not installed on this server';
+      expect(r.transition(a.id, 'received', 'analyzing', { prepareNote: note, hasThumbnail: true })).toBe(true);
+      expect(r.get(a.id)).toMatchObject({ prepareNote: note, hasThumbnail: true });
+      const raw = db.prepare('SELECT prepare_note, has_thumbnail FROM documents WHERE id = ?').get(a.id) as { prepare_note: unknown; has_thumbnail: unknown };
+      expect(raw).toEqual({ prepare_note: note, has_thumbnail: 1 });
+    });
+
     it('keeps a filed or discarded row in its state when quarantining it', () => {
       const r = repo();
       const a = r.insert(named());

@@ -71,6 +71,11 @@ export class InboxStore {
     return existsSync(this.path(id, kind));
   }
 
+  /** Deletes one blob; nothing to do if it isn't there. */
+  remove(id: string, kind: BlobKind): void {
+    rmSync(this.path(id, kind), { force: true });
+  }
+
   deleteAll(id: string): void {
     for (const kind of KINDS) {
       const p = this.path(id, kind);

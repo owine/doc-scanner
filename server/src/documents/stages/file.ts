@@ -117,6 +117,7 @@ export async function fileStage(doc: DocumentRow, ctx: StageContext): Promise<vo
         // Known right after an upload: saved with the transition so a crash can't lose it.
         driveUrl: uploaded.driveUrl ?? undefined,
         discardRequested: false,
+        hasThumbnail: false,
         error: null,
       },
       KEEP_GOING,

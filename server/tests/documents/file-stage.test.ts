@@ -49,6 +49,15 @@ describe('fileStage', () => {
     expect(bills.files[0]!.name).toBe('Northwind Energy Sep 2026.pdf');
   });
 
+  it('clears the thumbnail flag and deletes the thumbnail blob when filed', async () => {
+    h = makeHarness();
+    const doc = filingDoc(EXISTING, { hasThumbnail: true });
+    h.inbox.put(doc.id, 'thumbnail', new Uint8Array([1]));
+    await fileStage(doc, h.ctx);
+    expect(h.repo.get(doc.id)).toMatchObject({ state: 'filed', hasThumbnail: false });
+    expect(h.inbox.has(doc.id, 'thumbnail')).toBe(false);
+  });
+
   it('creates an approved new folder once, saving its uid before uploading', async () => {
     h = makeHarness();
     const doc = filingDoc(NEW);
