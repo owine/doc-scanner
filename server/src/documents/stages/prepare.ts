@@ -7,8 +7,10 @@ import type { DocumentRow } from '../types.js';
 /** Photos of documents become PDFs; these are the image types worth converting. */
 const DOCUMENT_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/tiff', 'image/gif', 'image/bmp']);
 
-function fallbackNote(err: unknown): string {
+function fallbackNote(err: unknown, step: 'photo' | 'ocr'): string {
+  // The tools come together: img2pdf missing means OCR is missing too.
   if (err instanceof ToolMissingError) return 'Filed without a text layer: OCR is not installed on this server.';
+  if (step === 'photo') return 'Could not turn the photo into a PDF.';
   if (err instanceof ToolTimeoutError) return 'Filed without a text layer: OCR took too long.';
   return 'Filed without a text layer: OCR failed.';
 }
@@ -39,19 +41,22 @@ export async function prepareStage(doc: DocumentRow, ctx: StageContext): Promise
   const original = ctx.inbox.get(doc.id, 'original'); // a missing original is a real failure: the worker retries it
   let prepared: { bytes: Uint8Array; mime: string } | null = null;
   let note: string | null = null;
+  let step: 'photo' | 'ocr' = 'ocr';
 
   try {
     if (doc.mime === 'application/pdf') {
       const r = await ctx.prepare.ocrPdf(original);
       if (r.kind === 'ocred') prepared = { bytes: r.pdf, mime: 'application/pdf' };
     } else if (DOCUMENT_IMAGE_TYPES.has(doc.mime) && doc.analysis?.isDocument) {
+      step = 'photo';
       const pdf = await ctx.prepare.imageToPdf(original, doc.mime);
+      step = 'ocr';
       const r = await ctx.prepare.ocrPdf(pdf);
       prepared = { bytes: r.kind === 'ocred' ? r.pdf : pdf, mime: 'application/pdf' };
     }
   } catch (err) {
     prepared = null;
-    note = fallbackNote(err);
+    note = fallbackNote(err, step);
     logger.warn({ documentId: doc.id, errName: errorName(err) }, 'document preparation fell back to the original');
     try {
       // These errors never carry a name or document text, so nothing to redact.

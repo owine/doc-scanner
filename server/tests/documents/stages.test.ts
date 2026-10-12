@@ -63,6 +63,14 @@ describe('analyzeStage', () => {
     expect(h.repo.get(doc.id)).toMatchObject({ state: 'preparing', analysis: null, reviewReason: 'analysis truncated: max_tokens' });
   });
 
+  it('clears a review reason an earlier, unusable answer left when the new one is ok', async () => {
+    h = makeHarness();
+    const doc = h.add();
+    h.repo.transition(doc.id, 'received', 'received', { reviewReason: 'analysis refusal: declined' });
+    await analyzeStage(h.repo.get(doc.id)!, h.ctx);
+    expect(h.repo.get(doc.id)).toMatchObject({ state: 'preparing', reviewReason: null, analysis: { name: ANALYSIS.name } });
+  });
+
   it('honours a discard requested while the model was working', async () => {
     h = makeHarness();
     const doc = h.add();

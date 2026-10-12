@@ -53,6 +53,28 @@ describe('DocumentWorker', () => {
     expect(h.report.mock.calls[0][1]).toBe('analyze');
   });
 
+  it('retries a preparation whose result could not be stored, then fails it as the prepare stage', async () => {
+    h = makeHarness();
+    h.prepare.ocrPdf.mockResolvedValue({ kind: 'ocred', pdf: new TextEncoder().encode('%PDF- ocred') });
+    const doc = h.add(new TextEncoder().encode('%PDF- scan'), 'application/pdf');
+    const put = h.inbox.put.bind(h.inbox);
+    vi.spyOn(h.inbox, 'put').mockImplementation((id, kind, bytes) => {
+      if (kind === 'prepared') throw new Error('disk full');
+      return put(id, kind, bytes);
+    });
+    const w = new DocumentWorker(h.ctx);
+    await w.wake();
+    expect(h.repo.get(doc.id)).toMatchObject({ state: 'preparing', attempts: 1, error: 'disk full' });
+    for (let i = 1; i < MAX_ATTEMPTS; i++) {
+      h.advance(10 * 60_000);
+      await w.wake();
+    }
+    expect(h.repo.get(doc.id)).toMatchObject({ state: 'failed', attempts: MAX_ATTEMPTS });
+    expect(h.prepare.ocrPdf).toHaveBeenCalledTimes(MAX_ATTEMPTS);
+    expect(h.report).toHaveBeenCalledOnce();
+    expect(h.report.mock.calls[0]![1]).toBe('prepare');
+  });
+
   it('applies a discard that arrived while the document waited out a backoff', async () => {
     h = makeHarness();
     h.analyze.mockRejectedValueOnce(new Error('overloaded'));

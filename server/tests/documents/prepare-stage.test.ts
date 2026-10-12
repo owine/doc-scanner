@@ -113,6 +113,22 @@ describe('prepareStage', () => {
     expect(h.report.mock.calls[0]![1]).toBe('prepare');
   });
 
+  it.each([
+    [new ToolFailedError('img2pdf exited 1'), 'Could not turn the photo into a PDF.'],
+    [new ToolTimeoutError('img2pdf took longer than 60000 ms'), 'Could not turn the photo into a PDF.'],
+    [new ToolMissingError('img2pdf is not installed'), 'Filed without a text layer: OCR is not installed on this server.'],
+  ])('files the photo as it is, with a note, when making its PDF throws %s', async (err, note) => {
+    h = makeHarness();
+    h.prepare.imageToPdf.mockRejectedValue(err);
+    const doc = preparing('image/jpeg');
+    await prepareStage(doc, h.ctx);
+    expect(h.prepare.ocrPdf).not.toHaveBeenCalled();
+    expect(h.inbox.has(doc.id, 'prepared')).toBe(false);
+    expect(h.repo.get(doc.id)).toMatchObject({ state: 'ready', preparedMime: 'image/jpeg', prepareNote: note });
+    expect(h.report).toHaveBeenCalledOnce();
+    expect(h.report.mock.calls[0]![1]).toBe('prepare');
+  });
+
   it('still files the original when reporting the fallback fails', async () => {
     h = makeHarness();
     h.prepare.ocrPdf.mockRejectedValue(new ToolTimeoutError('slow'));

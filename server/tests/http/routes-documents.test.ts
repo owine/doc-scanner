@@ -429,6 +429,24 @@ describe('intake', () => {
     expect(pipeline.repo.get(id)).toMatchObject({ state: 'received', attempts: 0, error: null });
   });
 
+  it('re-uploading a failed, analysed document prepares it again', async () => {
+    const { app, cookie, pipeline } = await setup();
+    const { id } = (await (await upload(app, cookie)).json()) as { id: string };
+    expect(pipeline.repo.transition(id, 'received', 'failed', { analysis: ANALYSIS, attempts: 3, error: 'boom' })).toBe(true);
+    const again = await upload(app, cookie);
+    expect(await again.json()).toEqual({ id, duplicate: true });
+    await pipeline.worker.wake(); // let the drain finish
+    // Restarted at `preparing`, which records preparedMime; then decided, and
+    // with auto-filing off that means review.
+    expect(pipeline.repo.get(id)).toMatchObject({
+      state: 'needs_review',
+      preparedMime: 'text/plain',
+      reviewReason: 'auto-filing is off',
+      attempts: 0,
+      error: null,
+    });
+  });
+
   it('re-uploading a document with a pending discard keeps it', async () => {
     const { app, cookie, pipeline } = await setup();
     const { id } = (await (await upload(app, cookie)).json()) as { id: string };
