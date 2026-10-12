@@ -110,7 +110,8 @@ describe('prepareStage', () => {
     expect(h.inbox.has(doc.id, 'prepared')).toBe(false);
     expect(h.repo.get(doc.id)).toMatchObject({ state: 'ready', preparedMime: 'application/pdf', prepareNote: note });
     expect(h.report).toHaveBeenCalledOnce();
-    expect(h.report.mock.calls[0]![1]).toBe('prepare');
+    const [reported, ...rest] = h.report.mock.calls[0]!;
+    expect([(reported as Error).name, ...rest]).toEqual([err.name, 'prepare', [], { outcome: 'fallback' }]);
   });
 
   it.each([
@@ -126,7 +127,25 @@ describe('prepareStage', () => {
     expect(h.inbox.has(doc.id, 'prepared')).toBe(false);
     expect(h.repo.get(doc.id)).toMatchObject({ state: 'ready', preparedMime: 'image/jpeg', prepareNote: note });
     expect(h.report).toHaveBeenCalledOnce();
-    expect(h.report.mock.calls[0]![1]).toBe('prepare');
+    expect(h.report).toHaveBeenCalledWith(err, 'prepare', [], { outcome: 'fallback' });
+  });
+
+  it('reports an error of an unknown kind by its type and a fixed message only', async () => {
+    h = makeHarness();
+    class LibraryError extends Error {
+      override name = 'LibraryError';
+    }
+    h.prepare.ocrPdf.mockRejectedValue(new LibraryError('could not read Northwind Energy statement'));
+    const doc = preparing('application/pdf');
+    await prepareStage(doc, h.ctx);
+    const [reported, stage, , opts] = h.report.mock.calls[0]!;
+    expect([(reported as Error).name, (reported as Error).message, stage, opts]).toEqual([
+      'LibraryError',
+      'preparation failed',
+      'prepare',
+      { outcome: 'fallback' },
+    ]);
+    expect(JSON.stringify(h.report.mock.calls)).not.toContain('Northwind');
   });
 
   it('still files the original when reporting the fallback fails', async () => {

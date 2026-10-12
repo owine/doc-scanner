@@ -1,11 +1,25 @@
 import { logger } from '../../logger.js';
 import { errorName } from '../../observability/error-name.js';
 import { ToolMissingError, ToolTimeoutError } from '../../prepare/run.js';
+import { ToolFailedError } from '../../prepare/tools.js';
 import type { StageContext } from '../deps.js';
 import type { DocumentRow } from '../types.js';
 
 /** Photos of documents become PDFs; these are the image types worth converting. */
 const DOCUMENT_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/tiff', 'image/gif', 'image/bmp']);
+
+/**
+ * What a fallback report carries: the tools' own errors as they are (their
+ * messages are fixed text: a tool name, an exit code, a time limit), anything
+ * else by its type alone, under a fixed message, since a library's message
+ * could quote what it read.
+ */
+function reportable(err: unknown): Error {
+  if (err instanceof ToolMissingError || err instanceof ToolTimeoutError || err instanceof ToolFailedError) return err;
+  const fixed = new Error('preparation failed');
+  fixed.name = errorName(err);
+  return fixed;
+}
 
 function fallbackNote(err: unknown, step: 'photo' | 'ocr'): string {
   // The tools come together: img2pdf missing means OCR is missing too.
@@ -59,8 +73,9 @@ export async function prepareStage(doc: DocumentRow, ctx: StageContext): Promise
     note = fallbackNote(err, step);
     logger.warn({ documentId: doc.id, errName: errorName(err) }, 'document preparation fell back to the original');
     try {
-      // These errors never carry a name or document text, so nothing to redact.
-      ctx.report(err, 'prepare', []);
+      // Tagged as a fallback: the document carries on. Nothing to redact:
+      // the reported error carries no name or document text.
+      ctx.report(reportable(err), 'prepare', [], { outcome: 'fallback' });
     } catch {
       // Reporting is best effort; the original is filed either way.
     }
