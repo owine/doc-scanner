@@ -6,8 +6,14 @@ import { UploadStore, type UploadStorage } from './upload-store.js';
 
 const BACKOFF_MS = [5_000, 15_000, 60_000, 300_000];
 
-/** The server's limit (spec §3). A bigger file fails here, before it costs any data. */
-export const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
+/**
+ * The largest file this side sends (spec §3). A bigger one fails here, before
+ * it costs any data. The server's bodyLimit (50 MiB) counts the whole
+ * multipart body, not just the file: the boundaries, part headers, file name
+ * and the other fields come out of it too. 64 KiB leaves room for those, so a
+ * file this side accepts isn't then refused by the server.
+ */
+export const MAX_UPLOAD_BYTES = 50 * 1024 * 1024 - 64 * 1024;
 
 const TOO_LARGE = 'Too large to upload (the limit is 50 MB).';
 

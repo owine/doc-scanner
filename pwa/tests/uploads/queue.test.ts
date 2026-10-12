@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { UploadQueue, type UploadQueueOptions } from '../../src/uploads/queue.js';
+import { MAX_UPLOAD_BYTES, UploadQueue, type UploadQueueOptions } from '../../src/uploads/queue.js';
 import { UploadError, type SendResult } from '../../src/uploads/send.js';
 import type { UploadItem } from '../../src/uploads/types.js';
 import type { UploadStorage } from '../../src/uploads/upload-store.js';
@@ -128,6 +128,16 @@ describe('UploadQueue', () => {
     await new Promise((r) => setTimeout(r, 0));
     expect(send).not.toHaveBeenCalled();
     expect(q.list()[0]!.state).toBe('failed');
+  });
+
+  it("fails a file of the server's full 50 MiB at once: the multipart wrapper must fit too", async () => {
+    expect(MAX_UPLOAD_BYTES).toBe(50 * 1024 * 1024 - 64 * 1024);
+    const send = vi.fn();
+    const q = make({ send });
+    q.start();
+    await q.add([{ blob: new Blob([new Uint8Array(50 * 1024 * 1024)]), name: 'big.pdf', source: 'picker' }]);
+    expect(q.list()[0]).toMatchObject({ state: 'failed', error: expect.stringMatching(/50 MB/) });
+    expect(send).not.toHaveBeenCalled();
   });
 
   it('retries a failed item when asked, and removes one when asked', async () => {
