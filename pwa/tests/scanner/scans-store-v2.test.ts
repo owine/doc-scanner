@@ -37,86 +37,24 @@ describe('ScansStore v2 migration', () => {
     const completed = await store.listCompleted();
     expect(completed.length).toBe(1);
     expect(completed[0]!.id).toBe('legacy-scan-1');
-    expect(completed[0]!.pdfStatus).toBeUndefined();   // legacy = undefined
 
     const pages = await store.getPages('legacy-scan-1');
     expect(pages.length).toBe(1);
     expect(await pages[0]!.blob.text()).toBe('p1');
-    expect(pages[0]!.ocrText).toBeUndefined();
-
-    // pdfs object store should now exist
-    expect(await store.getPdf('nonexistent')).toBeNull();
   });
 
-  it('findPendingPdf returns running + pending; excludes done, failed, and partial', async () => {
-    const store = new ScansStore();
-    await store.open();
-    // legacy: created via ScansStore, but with pdfStatus undefined
-    const a = await store.createInProgress();
-    await store.appendPage(a, blob('a'), Q);
-    await store.finish(a);
-    // pdfStatus is undefined after finish in Phase 3 code; we'll simulate 'running' / 'done' / 'failed' / 'partial'
-    await store.setPdfStatus(a, 'done');
-    const b = await store.createInProgress();
-    await store.appendPage(b, blob('b'), Q);
-    await store.finish(b);
-    await store.setPdfStatus(b, 'failed', 'oops');
-    const c = await store.createInProgress();
-    await store.appendPage(c, blob('c'), Q);
-    await store.finish(c);
-    await store.setPdfStatus(c, 'pending');
-    const d = await store.createInProgress();
-    await store.appendPage(d, blob('d'), Q);
-    await store.finish(d);
-    await store.setPdfStatus(d, 'running');
-    const e = await store.createInProgress();
-    await store.appendPage(e, blob('e'), Q);
-    await store.finish(e);
-    await store.setPdfStatus(e, 'partial');
-
-    const pending = await store.findPendingPdf();
-    const ids = pending.map((s) => s.id).sort();
-    expect(ids).toEqual([c, d].sort());
-  });
-
-  it('setPageOcr persists text + words on a page', async () => {
-    const store = new ScansStore();
-    await store.open();
-    const id = await store.createInProgress();
-    await store.appendPage(id, blob('p1'), Q);
-    await store.setPageOcr(id, 0, 'hello world', [
-      { text: 'hello', x: 0, y: 0, w: 50, h: 20, confidence: 90 },
-      { text: 'world', x: 60, y: 0, w: 60, h: 20, confidence: 88 },
-    ]);
-    const pages = await store.getPages(id);
-    expect(pages[0]!.ocrText).toBe('hello world');
-    expect(pages[0]!.ocrWords?.length).toBe(2);
-  });
-
-  it('setPdfBlob inserts into pdfs store and links the scan', async () => {
+  it('delete also removes a PDF left by on-device OCR', async () => {
     const store = new ScansStore();
     await store.open();
     const id = await store.createInProgress();
     await store.appendPage(id, blob('p1'), Q);
     await store.finish(id);
-    const pdfBlob = blob('%PDF-1.7 ... fake');
-    const pdfKey = await store.setPdfBlob(id, pdfBlob);
-    expect(pdfKey).toMatch(/^[0-9a-f-]+$/i);
-    const back = await store.getPdf(pdfKey);
-    expect(back).not.toBeNull();
-    expect(await back!.text()).toBe('%PDF-1.7 ... fake');
-    const list = await store.listCompleted();
-    expect(list[0]!.pdfKey).toBe(pdfKey);
-  });
-
-  it('delete cascades the pdf as well as pages and thumbnail', async () => {
-    const store = new ScansStore();
-    await store.open();
-    const id = await store.createInProgress();
-    await store.appendPage(id, blob('p1'), Q);
-    await store.finish(id);
-    const pdfKey = await store.setPdfBlob(id, blob('pdf'));
+    // What the retired OCR queue left behind: a pdfs row the scan points at.
+    const raw = await openDB(DB_NAME, 2);
+    await raw.put('pdfs', { id: 'legacy-pdf', blob: blob('pdf'), bytes: 3 });
+    await raw.put('scans', { ...(await raw.get('scans', id)), pdfKey: 'legacy-pdf' });
     await store.delete(id);
-    expect(await store.getPdf(pdfKey)).toBeNull();
+    expect(await raw.get('pdfs', 'legacy-pdf')).toBeUndefined();
+    raw.close();
   });
 });

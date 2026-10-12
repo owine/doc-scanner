@@ -4,12 +4,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A personal-use, self-hosted PWA for scanning paper documents from a phone camera and uploading them to Proton Drive. A phone-facing Preact PWA captures/crops pages; a small TypeScript server authenticates against Proton's SRP flow on the user's behalf and proxies **end-to-end-encrypted** uploads through the official Proton Drive SDK.
+A personal-use, self-hosted PWA for scanning paper documents from a phone camera and uploading them to Proton Drive. A phone-facing Preact PWA captures/crops pages and accepts any file from the inbox; a small TypeScript server authenticates against Proton's SRP flow on the user's behalf and proxies **end-to-end-encrypted** uploads through the official Proton Drive SDK.
 
 ## Toolchain (strict)
 
 - **Node `24.21.0`** (pinned in `.nvmrc`, enforced by `engineStrict` — `pnpm install` **fails** on any other version). Run `fnm use` / `nvm use` first. Node 26 breaks some happy-dom tests — that's an environment mismatch, not a real failure.
-- **pnpm `12.6.0`** via Corepack. This is a pnpm workspace; **do not use npm**.
+- **pnpm** at the version pinned in `packageManager` (via Corepack; Renovate bumps it, so don't hard-code a version). This is a pnpm workspace; **do not use npm**.
 - Install with `pnpm install`. All pnpm settings live in **`pnpm-workspace.yaml`**, not `.npmrc` — pnpm reads only auth/registry keys from `.npmrc` and silently ignores the rest, so anything put there looks enforced while doing nothing (pnpm 12 does now reject an unknown key in `pnpm-workspace.yaml` itself, with `ERR_PNPM_UNRECOGNIZED_WORKSPACE_SETTINGS`). The hardening block sets a 7-day `minimumReleaseAge`, exact pins, strict engines, and gates package build scripts through `allowBuilds`. `minimumReleaseAgeStrict` and `trustLockfile` are load-bearing for different reasons; the comments in that file are the canonical explanation, so read them before changing anything in the block.
 
 ## Common commands
@@ -53,7 +53,7 @@ The server runs its TypeScript **source** under `tsx` in dev, prod, and Docker (
 
 ## Architecture
 
-**Monorepo:** `server/` (Hono HTTP API on Node's built-in `node:sqlite`) and `pwa/` (Preact + Vite). Same-origin REST behind an HttpOnly session cookie; the server also serves the built PWA when `PWA_DIST_PATH` is set.
+**Monorepo:** `server/` (Hono HTTP API on Node's built-in `node:sqlite`) and `pwa/` (Preact 11 + Vite). Same-origin REST behind an HttpOnly session cookie; the server also serves the built PWA when `PWA_DIST_PATH` is set.
 
 ### Server (`server/src/`)
 
@@ -69,7 +69,11 @@ The server runs its TypeScript **source** under `tsx` in dev, prod, and Docker (
 
 ### PWA (`pwa/src/`)
 
-`documents/` (the documents API client, `DocumentSync` polling `GET /api/documents?since=`, pure grouping and folder search), `ui/inbox/` (the home screen: review cards, folder picker, activity rows) and `ui/SettingsScreen.tsx` (filing settings, folder refresh, theme, sign-out); `scanner/` (camera capture + auto-crop), `ocr/`, `pdf/` (`@cantoo/pdf-lib`), the rest of `ui/`, `theme/`; `api.ts` talks to the server; local state via `idb`. Tesseract.js assets are copied in by a `predev`/`prebuild` script.
+`documents/` (the documents API client, `DocumentSync` polling `GET /api/documents?since=`, pure grouping and folder search), `ui/inbox/` (the home screen: review cards, folder picker, activity rows) and `ui/SettingsScreen.tsx` (filing settings, folder refresh, theme, sign-out); `uploads/` (an IndexedDB upload queue, see below), `scanner/` (camera capture + auto-crop), `pdf/` (`@cantoo/pdf-lib`: image-only PDFs from scans, no text layer, loaded on demand), the rest of `ui/`, `theme/`; `api.ts` talks to the server; local state via `idb`. There is no on-device OCR; the server reads the page images.
+
+**Upload queue (`uploads/`).** `UploadQueue` (owned by `App`, started after sign-in, stopped at sign-out) sends one file at a time with XMLHttpRequest, for progress. A file over 50 MiB minus 64 KiB (`MAX_UPLOAD_BYTES`) fails at once, unsent. Transient failures (network, timeout, 408, 409, 429, 5xx, and a 2xx that isn't the server's answer, `bad_response`) retry after 5 s, 15 s, 60 s, then every 5 min, and nothing is sent while `navigator.onLine` is false; the `online` event makes everything queued due at once. Permanent ones (413, 400, a file that can't be read, checked by reading its first byte before each send) stop as `failed` and wait for the user. A 401 pauses the queue until the next `start()`, except a 401 for an upload begun in an earlier session, which is ignored and sent again. Scans enter as image-only PDFs named by the scan's own `createdAt` (deterministic bytes, so the server's duplicate check catches a double send); the local scan is deleted once the server accepts it, before the queue forgets the upload. A failed PDF build is kept on the queue (`buildErrorOf`), so the scan's row says why. After sign-in `App` also imports the PDF builder chunk so the service worker caches it, and a scan finished offline can still be built. On a device's first visit that import runs before the service worker controls the page, so `sw-warm.ts` fetches the hashed chunks already loaded again on the first `controllerchange`, for the worker to cache. In the inbox, the **Add** button and drops anywhere on the window (a window-level listener, so the browser never opens a dropped file) feed the queue, an **Uploading** section shows progress, and **Scans on this device** offers finished scans not sent yet (saved before on-device OCR was retired, or left by a failed PDF build), each with Send to inbox or Delete. Nothing uploads without the user choosing it. Queued files stay in IndexedDB, unencrypted, after sign-out, and the next sign-in on the device sends them (acceptable for a single-user app).
+
+**Preact 11 effect timing.** `useEffect` cleanups run after paint. A mounted guard or a listener that must stop at unmount uses `useLayoutEffect`.
 
 ## Drive SDK version gate (read before bumping)
 

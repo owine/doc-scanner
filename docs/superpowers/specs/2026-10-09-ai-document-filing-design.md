@@ -128,7 +128,7 @@ The system prompt asks for the user's naming conventions, an existing folder unl
 
 **PWA:**
 
-- **Add** screen: multi-file picker (any type) and desktop drag-and-drop; per-file upload progress; the document then appears in the inbox.
+- **Add** screen (slice 4 built Add into the inbox instead, with no separate screen, and offered scans saved before it once, under "Scans on this device"): multi-file picker (any type) and desktop drag-and-drop; per-file upload progress; the document then appears in the inbox.
 - **Scanner**: capture, crop and page review are unchanged. On *Done* the phone builds a plain **image-only PDF** (`pdf/build.ts` without the OCR layer) and posts it with `source: scanner`.
 - **Offline**: because the server owns the durable queue, the PWA only needs to get bytes there once. A small IndexedDB queue holds uploads that haven't reached the server and retries them when back online. This replaces the branch's outbox / background-sync machinery, which existed only because classification used to happen inside the request.
 
@@ -240,9 +240,9 @@ Carried over from `feat/phase-5-ai-organize` in implementation: the history migr
 The plan should ship this in independently useful slices:
 
 1. **Server pipeline** (merged, #261) — `documents` table, inbox store, worker, intake endpoint, analyzer wired in, filing with auto-file, `awaiting_login`, settings. Usable through the API and a minimal list. Includes the **calibration check**: the Haiku eval re-run with the prompt stating 0.80 (done: 41% coverage, 94% precision). It missed the 95% bar, so slice 1 ships with auto-filing off and everything goes to review until real-use audit data supports switching it on.
-2. **Review UI** (plan: `docs/superpowers/plans/2026-10-10-review-ui.md`) — the inbox screen, review card, folder picker, discard/restore, activity log, settings screen.
+2. **Review UI** (merged, #263; plan: `docs/superpowers/plans/2026-10-10-review-ui.md`) — the inbox screen, review card, folder picker, discard/restore, activity log, settings screen.
 3. **Preparing** — `ocrmypdf`, `img2pdf`, thumbnails, the Docker image.
-4. **Entrypoints** — Add screen and offline upload queue; the scanner posting image-only PDFs.
+4. **Entrypoints** (plan: `docs/superpowers/plans/2026-10-12-entrypoints.md`) — Add screen and offline upload queue; the scanner posting image-only PDFs.
 
 ## Open items for the plan
 

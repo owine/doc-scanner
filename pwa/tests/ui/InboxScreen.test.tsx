@@ -1,11 +1,70 @@
-import { describe, it, expect, vi } from 'vitest';
-import { act, render, screen, fireEvent, waitFor, within } from '@testing-library/preact';
+import { describe, it, expect, vi, afterEach, beforeAll } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { act, createEvent, render, screen, fireEvent, waitFor, within } from '@testing-library/preact';
 import { InboxScreen } from '../../src/ui/inbox/InboxScreen.js';
 import { DocumentSync } from '../../src/documents/sync.js';
 import type { DocumentsApi } from '../../src/documents/api.js';
 import type { DocumentView } from '../../src/documents/types.js';
 import { ApiError } from '../../src/api.js';
 import { FOLDERS, makeDoc } from '../documents/fixtures.js';
+import { UploadQueue, type UploadQueueOptions } from '../../src/uploads/queue.js';
+import { UploadError } from '../../src/uploads/send.js';
+import type { UploadStorage } from '../../src/uploads/upload-store.js';
+import type { UploadItem } from '../../src/uploads/types.js';
+import { ScansStore } from '../../src/scanner/scans-store.js';
+
+class MemoryStore implements UploadStorage {
+  items = new Map<string, UploadItem>();
+  async all() { return [...this.items.values()]; }
+  async put(i: UploadItem) { this.items.set(i.id, i); }
+  async remove(id: string) { this.items.delete(id); }
+}
+
+type Send = NonNullable<UploadQueueOptions['send']>;
+
+const queues: UploadQueue[] = [];
+/** An upload queue over memory whose sends never finish, unless the test passes `send`. Stopped after each test. */
+function makeQueue(send: Send = () => new Promise(() => {})): UploadQueue {
+  const q = new UploadQueue({ store: new MemoryStore(), send });
+  queues.push(q);
+  return q;
+}
+
+afterEach(() => {
+  for (const q of queues.splice(0)) q.stop();
+  Reflect.deleteProperty(navigator, 'onLine');
+});
+
+const JPEG = resolve(__dirname, '../../src/pdf/fixtures/2x1-red.jpg');
+const QUAD = { tl: { x: 0, y: 0 }, tr: { x: 2, y: 0 }, bl: { x: 0, y: 1 }, br: { x: 2, y: 1 } };
+
+/** A one-page scan finished before this slice, saved through a store of its own. */
+async function savedScan(): Promise<string> {
+  const store = new ScansStore();
+  await store.open();
+  const id = await store.createInProgress();
+  await store.appendPage(id, new Blob([readFileSync(JPEG)], { type: 'image/jpeg' }), QUAD);
+  await store.finish(id);
+  return id;
+}
+
+const pdf = (name: string) => new File(['%PDF'], name, { type: 'application/pdf' });
+
+/**
+ * Dispatches a real drag event ("dragover", not "DragOver"). happy-dom's
+ * elements have no ondrag* properties, so Preact's fireEvent falls back to the
+ * capitalised name, which the inbox's window listeners never hear.
+ * Returns false when the inbox prevented the default.
+ */
+function drag(target: Element | Window, type: 'dragEnter' | 'dragOver' | 'dragLeave' | 'drop', files?: File[]): boolean {
+  let notPrevented = true;
+  act(() => {
+    notPrevented = target.dispatchEvent(createEvent[type](target, { dataTransfer: { types: ['Files'], files: files ?? [] } }));
+  });
+  return notPrevented;
+}
+const fileInput = () => document.querySelector<HTMLInputElement>('input[type="file"][multiple]')!;
 
 const NOW = new Date('2026-10-10T12:00:00.000Z');
 
@@ -18,7 +77,7 @@ async function folderLoad(api: DocumentsApi) {
   });
 }
 
-function setup(docs: DocumentView[], over: Partial<DocumentsApi> = {}) {
+function setup(docs: DocumentView[], over: Partial<DocumentsApi> = {}, send?: Send) {
   const sync = new DocumentSync({ list: vi.fn().mockResolvedValue({ documents: [], cursor: 0 }) });
   sync.loaded = true;
   for (const d of docs) sync.upsert(d);
@@ -32,9 +91,12 @@ function setup(docs: DocumentView[], over: Partial<DocumentsApi> = {}) {
     retry: vi.fn(async (id: string) => ({ ...docs.find((d) => d.id === id)!, state: 'received' as const, seq: 999 })),
     ...over,
   } as unknown as DocumentsApi;
-  const props = { onScan: vi.fn(), onSavedScans: vi.fn(), onSettings: vi.fn(), onSignInAgain: vi.fn() };
-  render(<InboxScreen sync={sync} documents={api} now={() => NOW} {...props} />);
-  return { sync, api, props };
+  const uploads = makeQueue(send);
+  uploads.start();
+  const scans = new ScansStore();
+  const props = { onScan: vi.fn(), onSettings: vi.fn(), onSignInAgain: vi.fn() };
+  const { unmount } = render(<InboxScreen sync={sync} documents={api} now={() => NOW} uploads={uploads} scans={scans} {...props} />);
+  return { sync, api, props, uploads, scans, unmount };
 }
 
 describe('InboxScreen', () => {
@@ -178,7 +240,7 @@ describe('InboxScreen', () => {
       sync.loaded = true;
       sync.upsert(makeDoc({ state: 'discarded', discardedAt: '2026-10-04T12:00:00.000Z' }));
       const api = { folders: vi.fn().mockResolvedValue({ walkedAt: NOW.toISOString(), folders: FOLDERS }), refreshFolders: vi.fn() } as unknown as DocumentsApi;
-      render(<InboxScreen sync={sync} documents={api} now={() => new Date(clock)} onScan={vi.fn()} onSavedScans={vi.fn()} onSettings={vi.fn()} onSignInAgain={vi.fn()} />);
+      render(<InboxScreen sync={sync} documents={api} now={() => new Date(clock)} onScan={vi.fn()} uploads={makeQueue()} scans={new ScansStore()} onSettings={vi.fn()} onSignInAgain={vi.fn()} />);
       expect(screen.getByRole('region', { name: 'Discarded' })).toBeInTheDocument();
       // Let the mount's own re-renders and the folder load settle first.
       await folderLoad(api);
@@ -200,7 +262,7 @@ describe('InboxScreen', () => {
     sync.loaded = true;
     sync.error = new Error('offline');
     const api = { folders: vi.fn().mockResolvedValue({ walkedAt: NOW.toISOString(), folders: FOLDERS }), refreshFolders: vi.fn() } as unknown as DocumentsApi;
-    render(<InboxScreen sync={sync} documents={api} now={() => NOW} onScan={vi.fn()} onSavedScans={vi.fn()} onSettings={vi.fn()} onSignInAgain={vi.fn()} />);
+    render(<InboxScreen sync={sync} documents={api} now={() => NOW} onScan={vi.fn()} uploads={makeQueue()} scans={new ScansStore()} onSettings={vi.fn()} onSignInAgain={vi.fn()} />);
     expect(screen.getByRole('status')).toHaveTextContent("Can't reach the server.");
     expect(screen.queryByText(/nothing to review/i)).toBeNull();
     expect(screen.queryByText(/showing what was last loaded/i)).toBeNull();
@@ -213,7 +275,7 @@ describe('InboxScreen', () => {
     sync.upsert(makeDoc());
     sync.error = new Error('offline');
     const api = { folders: vi.fn().mockResolvedValue({ walkedAt: NOW.toISOString(), folders: FOLDERS }), refreshFolders: vi.fn() } as unknown as DocumentsApi;
-    render(<InboxScreen sync={sync} documents={api} now={() => NOW} onScan={vi.fn()} onSavedScans={vi.fn()} onSettings={vi.fn()} onSignInAgain={vi.fn()} />);
+    render(<InboxScreen sync={sync} documents={api} now={() => NOW} onScan={vi.fn()} uploads={makeQueue()} scans={new ScansStore()} onSettings={vi.fn()} onSignInAgain={vi.fn()} />);
     expect(screen.getByText(/showing what was last loaded/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument();
     await folderLoad(api);
@@ -329,14 +391,204 @@ describe('InboxScreen', () => {
     expect(screen.getByRole('status')).toBe(status);
   });
 
-  it('opens the scanner, settings and saved scans', async () => {
+  it('opens the scanner and settings, and has no saved scans any more', async () => {
     const { props } = setup([]);
     fireEvent.click(screen.getByRole('button', { name: 'Scan' }));
     fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
-    fireEvent.click(screen.getByRole('button', { name: /saved scans/i }));
     expect(props.onScan).toHaveBeenCalled();
     expect(props.onSettings).toHaveBeenCalled();
-    expect(props.onSavedScans).toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: /saved scans/i })).toBeNull();
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Inbox' })).toBeInTheDocument());
+  });
+});
+
+describe('InboxScreen uploads', () => {
+  it('adds the files chosen with Add, and clears the picker for the next choice', async () => {
+    const { uploads } = setup([]);
+    const input = fileInput();
+    const click = vi.spyOn(input, 'click');
+    const cleared = vi.spyOn(input, 'value', 'set');
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    expect(click).toHaveBeenCalled();
+    fireEvent.change(input, { target: { files: [pdf('a.pdf'), pdf('b.pdf')] } });
+    const region = await screen.findByRole('region', { name: 'Uploading' });
+    await waitFor(() => expect(within(region).getAllByRole('listitem')).toHaveLength(2));
+    expect(uploads.list().map((i) => i.source)).toEqual(['picker', 'picker']);
+    expect(cleared).toHaveBeenCalledWith('');
+  });
+
+  it('adds files dropped on the inbox, with a hint while dragging', async () => {
+    const { uploads } = setup([]);
+    const main = screen.getByRole('main');
+    drag(main, 'dragEnter');
+    expect(drag(main, 'dragOver')).toBe(false); // prevented: allows the drop
+    expect(await screen.findByText('Drop files to add them')).toBeInTheDocument();
+    expect(drag(main, 'drop', [pdf('a.pdf')])).toBe(false);
+    await waitFor(() => expect(uploads.list()).toHaveLength(1));
+    await waitFor(() => expect(screen.queryByText('Drop files to add them')).toBeNull());
+  });
+
+  it('takes a drop anywhere in the window, so a stray one never opens the file', async () => {
+    const { uploads } = setup([]);
+    drag(window, 'dragEnter');
+    expect(await screen.findByText('Drop files to add them')).toBeInTheDocument();
+    expect(drag(window, 'dragOver')).toBe(false); // prevented: allows the drop
+    expect(drag(window, 'drop', [pdf('a.pdf')])).toBe(false);
+    await waitFor(() => expect(uploads.list()).toHaveLength(1));
+    await waitFor(() => expect(screen.queryByText('Drop files to add them')).toBeNull());
+  });
+
+  it('keeps the drop hint while the drag moves between elements, even with no relatedTarget (WebKit)', async () => {
+    setup([]);
+    const main = screen.getByRole('main');
+    const header = screen.getByRole('heading', { name: 'Inbox' });
+    drag(main, 'dragEnter');
+    drag(header, 'dragEnter');
+    drag(main, 'dragLeave'); // no relatedTarget, as WebKit sends it
+    expect(await screen.findByText('Drop files to add them')).toBeInTheDocument();
+    drag(header, 'dragLeave');
+    await waitFor(() => expect(screen.queryByText('Drop files to add them')).toBeNull());
+  });
+
+  it('stops taking drops on the window once the inbox is gone', async () => {
+    const { uploads, unmount } = setup([]);
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Inbox' })).toBeInTheDocument());
+    unmount();
+    expect(drag(window, 'dragOver')).toBe(true);
+    expect(drag(window, 'drop', [pdf('a.pdf')])).toBe(true);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(uploads.list()).toEqual([]);
+  });
+
+  it('shows the progress of the file being sent', async () => {
+    let report!: (fraction: number) => void;
+    setup([], {}, (_input, onProgress) => {
+      report = onProgress;
+      return new Promise(() => {});
+    });
+    fireEvent.change(fileInput(), { target: { files: [pdf('a.pdf')] } });
+    await waitFor(() => expect(report).toBeDefined());
+    act(() => report(0.5));
+    expect(await screen.findByText('50%')).toBeInTheDocument();
+    expect(within(screen.getByRole('region', { name: 'Uploading' })).getByRole('status')).toHaveTextContent(/^Uploading…$/);
+  });
+
+  it('explains a refused file and offers Retry and Remove', async () => {
+    const { uploads } = setup([], {}, vi.fn().mockRejectedValue(new UploadError(413, 'payload_too_large')));
+    const retry = vi.spyOn(uploads, 'retry');
+    fireEvent.change(fileInput(), { target: { files: [pdf('big.pdf')] } });
+    const region = await screen.findByRole('region', { name: 'Uploading' });
+    expect(await within(region).findByText(/50 MB/)).toBeInTheDocument();
+    fireEvent.click(within(region).getByRole('button', { name: 'Retry' }));
+    expect(retry).toHaveBeenCalled();
+    // Refused again; then Remove takes the row away.
+    fireEvent.click(await within(region).findByRole('button', { name: 'Remove' }));
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Uploading' })).toBeNull());
+  });
+
+  it('says which files wait, and which wait for a connection, as it comes and goes', async () => {
+    setup([]);
+    fireEvent.change(fileInput(), { target: { files: [pdf('a.pdf'), pdf('b.pdf')] } });
+    expect(await screen.findByText('Waiting to upload')).toBeInTheDocument();
+    expect(screen.getByText('Uploading…')).toBeInTheDocument();
+    expect(screen.getByText('0%')).toBeInTheDocument();
+    Object.defineProperty(navigator, 'onLine', { value: false, configurable: true });
+    act(() => {
+      window.dispatchEvent(new Event('offline'));
+    });
+    expect(await screen.findByText('Waiting for a connection')).toBeInTheDocument();
+    Reflect.deleteProperty(navigator, 'onLine');
+    act(() => {
+      window.dispatchEvent(new Event('online'));
+    });
+    expect(await screen.findByText('Waiting to upload')).toBeInTheDocument();
+  });
+
+  it('says so when the files cannot be kept for upload, until the queue next changes', async () => {
+    const { uploads } = setup([]);
+    const add = vi.spyOn(uploads, 'add').mockRejectedValueOnce(new Error('quota'));
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      fireEvent.change(fileInput(), { target: { files: [pdf('a.pdf')] } });
+      expect(await screen.findByText("Some files couldn't be added.")).toBeInTheDocument();
+      add.mockRestore();
+      await act(() => uploads.add([{ blob: pdf('b.pdf'), name: 'b.pdf', source: 'picker' }]));
+      await waitFor(() => expect(screen.queryByText("Some files couldn't be added.")).toBeNull());
+    } finally {
+      logged.mockRestore();
+    }
+  });
+});
+
+describe('InboxScreen scans on this device', () => {
+  beforeAll(async () => {
+    await import('../../src/pdf/build.js');
+  });
+
+  it('lists a scan saved on the device', async () => {
+    await savedScan();
+    setup([]);
+    const region = await screen.findByRole('region', { name: 'Scans on this device' });
+    expect(within(region).getByText('Scan · 1 page')).toBeInTheDocument();
+    expect(within(region).getByText('Scans not sent yet. Send them or delete them.')).toBeInTheDocument();
+  });
+
+  it('sends a scan to the inbox', async () => {
+    const id = await savedScan();
+    const { uploads } = setup([]);
+    const region = await screen.findByRole('region', { name: 'Scans on this device' });
+    fireEvent.click(within(region).getByRole('button', { name: 'Send to inbox' }));
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Scans on this device' })).toBeNull());
+    expect(await screen.findByRole('region', { name: 'Uploading' })).toBeInTheDocument();
+    expect(uploads.list()).toMatchObject([{ source: 'scanner', scanId: id }]);
+  });
+
+  it('says why a scan could not be sent when its row comes back, logging only the error name', async () => {
+    await savedScan();
+    const { scans } = setup([]);
+    vi.spyOn(scans, 'getPages').mockRejectedValue(new Error('northwind pages gone'));
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      fireEvent.click(within(await screen.findByRole('region', { name: 'Scans on this device' })).getByRole('button', { name: 'Send to inbox' }));
+      const region = await screen.findByRole('region', { name: 'Scans on this device' });
+      expect(await within(region).findByText('Could not send this scan. Try again.')).toBeInTheDocument();
+      expect(logged).toHaveBeenCalledWith('could not send scan', 'Error');
+      expect(JSON.stringify(logged.mock.calls)).not.toContain('northwind');
+    } finally {
+      logged.mockRestore();
+    }
+  });
+
+  it('deletes a scan once the user confirms, and keeps it otherwise', async () => {
+    const nativeConfirm = window.confirm;
+    window.confirm = vi.fn().mockReturnValueOnce(false).mockReturnValueOnce(true);
+    try {
+      await savedScan();
+      setup([]);
+      const region = await screen.findByRole('region', { name: 'Scans on this device' });
+      fireEvent.click(within(region).getByRole('button', { name: 'Delete' }));
+      expect(window.confirm).toHaveBeenCalledTimes(1);
+      expect(within(region).getByText('Scan · 1 page')).toBeInTheDocument();
+      fireEvent.click(within(region).getByRole('button', { name: 'Delete' }));
+      await waitFor(() => expect(screen.queryByRole('region', { name: 'Scans on this device' })).toBeNull());
+    } finally {
+      window.confirm = nativeConfirm;
+    }
+  });
+
+  it('has no device section without saved scans', async () => {
+    const listed = vi.spyOn(ScansStore.prototype, 'listCompleted');
+    try {
+      setup([]);
+      // After the list has been read and its result rendered, not before.
+      await waitFor(() => expect(listed).toHaveBeenCalled());
+      await act(async () => {
+        await listed.mock.results[0]!.value;
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      expect(screen.queryByRole('region', { name: 'Scans on this device' })).toBeNull();
+    } finally {
+      listed.mockRestore();
+    }
   });
 });

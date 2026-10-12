@@ -1,6 +1,6 @@
 import { openDB, type IDBPDatabase, type DBSchema } from 'idb';
 import { ulid } from 'ulid';
-import type { OcrWord, Page, PdfArtifact, PdfStatus, Quad, Scan, Thumbnail } from './types.js';
+import type { Page, PdfArtifact, Quad, Scan, Thumbnail } from './types.js';
 
 interface DocScannerSchema extends DBSchema {
   scans: {
@@ -33,7 +33,20 @@ function uuid(): string {
 export class ScansStore {
   private db: IDBPDatabase<DocScannerSchema> | null = null;
 
-  async open(): Promise<void> {
+  private opening: Promise<void> | null = null;
+
+  /**
+   * Idempotent: every caller shares one open (App's at start, and the inbox's
+   * device-scan list). A failed open is forgotten, so the next call tries again.
+   */
+  open(): Promise<void> {
+    return (this.opening ??= this.connect().catch((e: unknown) => {
+      this.opening = null;
+      throw e;
+    }));
+  }
+
+  private async connect(): Promise<void> {
     this.db = await openDB<DocScannerSchema>(DB_NAME, DB_VERSION, {
       upgrade(db, oldVersion) {
         if (oldVersion < 1) {
@@ -98,6 +111,10 @@ export class ScansStore {
     }
   }
 
+  async get(scanId: string): Promise<Scan | null> {
+    return (await this.d.get('scans', scanId)) ?? null;
+  }
+
   async getPages(scanId: string): Promise<Page[]> {
     const all = await this.d.getAllFromIndex('pages', 'by_scan', scanId);
     return all.sort((a, b) => a.ordinal - b.ordinal);
@@ -127,57 +144,6 @@ export class ScansStore {
     for (const k of pageKeys) await tx.objectStore('pages').delete(k);
     await tx.objectStore('scans').delete(scanId);
     await tx.done;
-  }
-
-  async setPdfStatus(scanId: string, status: PdfStatus, error?: string): Promise<void> {
-    const scan = await this.d.get('scans', scanId);
-    if (!scan) throw new Error(`scan not found: ${scanId}`);
-    scan.pdfStatus = status;
-    scan.ocrError = status === 'failed' ? (error ?? 'Unknown error') : null;
-    scan.updatedAt = Date.now();
-    await this.d.put('scans', scan);
-  }
-
-  async setPdfBlob(scanId: string, blob: Blob): Promise<string> {
-    const id = uuid();
-    await this.d.put('pdfs', { id, blob, bytes: blob.size });
-    const scan = await this.d.get('scans', scanId);
-    if (!scan) throw new Error(`scan not found: ${scanId}`);
-    // Drop any prior pdf row this scan referenced
-    if (scan.pdfKey) await this.d.delete('pdfs', scan.pdfKey);
-    scan.pdfKey = id;
-    scan.updatedAt = Date.now();
-    await this.d.put('scans', scan);
-    return id;
-  }
-
-  async getPdf(pdfKey: string): Promise<Blob | null> {
-    const row = await this.d.get('pdfs', pdfKey);
-    return row?.blob ?? null;
-  }
-
-  async setPageOcr(scanId: string, ordinal: number, text: string, words: OcrWord[]): Promise<void> {
-    const existing = await this.d.get('pages', [scanId, ordinal]);
-    if (!existing) throw new Error(`page not found: ${scanId}/${ordinal}`);
-    existing.ocrText = text;
-    existing.ocrWords = words;
-    await this.d.put('pages', existing);
-  }
-
-  async clearScanOcr(scanId: string): Promise<void> {
-    const pages = await this.getPages(scanId);
-    for (const p of pages) {
-      p.ocrText = null;
-      p.ocrWords = null;
-      await this.d.put('pages', p);
-    }
-  }
-
-  async findPendingPdf(): Promise<Scan[]> {
-    const all = await this.d.getAllFromIndex('scans', 'by_updatedAt');
-    return all
-      .filter((s) => s.status === 'completed')
-      .filter((s) => s.pdfStatus !== 'done' && s.pdfStatus !== 'partial' && s.pdfStatus !== 'failed');
   }
 
   async listCompleted(): Promise<Scan[]> {

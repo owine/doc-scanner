@@ -5,7 +5,6 @@ import type { StabilityState } from '../scanner/stability.js';
 import type { Quad } from '../scanner/types.js';
 import { CameraError } from '../scanner/camera.js';
 import { EditCornersScreen } from './EditCornersScreen.js';
-import { OcrQueue } from '../ocr/queue.js';
 
 // Diagnostic flag: shows scanner pipeline state in the viewfinder.
 // Flip to true when debugging real-device detection issues.
@@ -15,10 +14,9 @@ const AUTO_CAPTURE_KEY = 'auto_capture_enabled';
 
 export interface ScannerScreenProps {
   store: ScansStore;
-  queue: OcrQueue;
   resumeScanId?: string;
   onBack: () => void;
-  onDone: () => void;
+  onDone: (scanId: string) => void;
 }
 
 interface PendingEdit {
@@ -26,7 +24,7 @@ interface PendingEdit {
   initialQuad: Quad;
 }
 
-export function ScannerScreen({ store, queue, resumeScanId, onBack, onDone }: ScannerScreenProps) {
+export function ScannerScreen({ store, resumeScanId, onBack, onDone }: ScannerScreenProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const sessionRef = useRef<ScannerSession | null>(null);
   const [pageCount, setPageCount] = useState(0);
@@ -119,8 +117,7 @@ export function ScannerScreen({ store, queue, resumeScanId, onBack, onDone }: Sc
     if (!session) return;
     const scanId = session.scanId;
     await session.finish();
-    queue.enqueueAfterFinish(scanId);
-    onDone();
+    onDone(scanId);
   }
 
   async function cancel() {

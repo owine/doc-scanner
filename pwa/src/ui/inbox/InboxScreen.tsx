@@ -1,5 +1,5 @@
 import type { ComponentChildren } from 'preact';
-import { useEffect, useState } from 'preact/hooks';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { ApiError } from '../../api.js';
 import { documentsApi, type DocumentsApi } from '../../documents/api.js';
 import { groupDocuments } from '../../documents/group.js';
@@ -9,6 +9,10 @@ import { useFolders } from '../../documents/use-folders.js';
 import { DiscardedRow, FailedRow, FiledRow, WaitingRow } from './DocumentRows.js';
 import { confirmDiscard } from './labels.js';
 import { ReviewCard } from './ReviewCard.js';
+import type { ScansStore } from '../../scanner/scans-store.js';
+import { useUploads, type UploadQueue } from '../../uploads/queue.js';
+import { sendScanToInbox, useDeviceScans } from '../../uploads/scans.js';
+import { DeviceScanRow, UploadRow } from './UploadRows.js';
 
 export interface InboxScreenProps {
   sync: DocumentSync;
@@ -16,9 +20,12 @@ export interface InboxScreenProps {
   documents?: DocumentsApi;
   now?: () => Date;
   onScan: () => void;
-  onSavedScans: () => void;
   onSettings: () => void;
   onSignInAgain: () => void;
+  /** Must be stable across renders, like `documents`. */
+  uploads: UploadQueue;
+  /** Must be stable. Task 6 lists its finished scans; the inbox shares App's open. */
+  scans: ScansStore;
 }
 
 function Section({ id, title, children }: { id: string; title: string; children: ComponentChildren }) {
@@ -35,11 +42,90 @@ export function InboxScreen({
   documents = documentsApi,
   now = () => new Date(),
   onScan,
-  onSavedScans,
   onSettings,
   onSignInAgain,
+  uploads,
+  scans,
 }: InboxScreenProps) {
   const { docs, loaded, error } = useDocuments(sync);
+  const pending = useUploads(uploads);
+  const device = useDeviceScans(scans, uploads);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [dragging, setDragging] = useState(false);
+  const [addError, setAddError] = useState<string | null>(null);
+  // The queue keeps why a send failed (uploads.buildErrorOf): the row
+  // unmounts while its scan is claimed, and Done in App sends scans too.
+  const sendScan = async (id: string) => {
+    try {
+      await sendScanToInbox(scans, uploads, id);
+    } catch (e) {
+      console.error('could not send scan', (e as Error)?.name);
+    }
+  };
+  const addFiles = useCallback(
+    (files: ArrayLike<File> | null | undefined) => {
+      const chosen = Array.from(files ?? []);
+      if (chosen.length === 0) return;
+      setAddError(null);
+      uploads.add(chosen.map((f) => ({ blob: f, name: f.name, source: 'picker' as const }))).catch((e: unknown) => {
+        // The error's name only: the files' names stay on this device.
+        console.error('could not add files', (e as Error)?.name);
+        setAddError("Some files couldn't be added.");
+      });
+    },
+    [uploads],
+  );
+  // The add error stays until the queue next changes: a later add, or an upload finishing.
+  useEffect(() => {
+    let seen = uploads.list();
+    return uploads.subscribe(() => {
+      if (uploads.list() === seen) return; // a progress tick, or the connection
+      seen = uploads.list();
+      setAddError(null);
+    });
+  }, [uploads]);
+  // The whole window takes dropped files while the inbox shows, margins
+  // included: a drop the page doesn't take makes the browser open the file.
+  // A layout effect: Preact 11 runs useEffect cleanups after paint, so the
+  // listeners would outlive the inbox and take a drop meant for another screen.
+  useLayoutEffect(() => {
+    const carriesFiles = (e: DragEvent) => Boolean(e.dataTransfer?.types.includes('Files'));
+    // dragenter and dragleave fire for every element crossed. Counting them
+    // tells when the drag has left the window: WebKit's relatedTarget is null.
+    let depth = 0;
+    const onEnter = (e: DragEvent) => {
+      if (!carriesFiles(e)) return;
+      depth += 1;
+      setDragging(true);
+    };
+    const onLeave = (e: DragEvent) => {
+      if (!carriesFiles(e)) return;
+      depth = Math.max(0, depth - 1);
+      if (depth === 0) setDragging(false);
+    };
+    const onOver = (e: DragEvent) => {
+      if (!carriesFiles(e)) return; // text dragged into a field keeps its default
+      e.preventDefault(); // allows the drop
+      setDragging(true);
+    };
+    const onDrop = (e: DragEvent) => {
+      if (!carriesFiles(e)) return;
+      e.preventDefault();
+      depth = 0;
+      setDragging(false);
+      addFiles(e.dataTransfer?.files);
+    };
+    window.addEventListener('dragenter', onEnter);
+    window.addEventListener('dragleave', onLeave);
+    window.addEventListener('dragover', onOver);
+    window.addEventListener('drop', onDrop);
+    return () => {
+      window.removeEventListener('dragenter', onEnter);
+      window.removeEventListener('dragleave', onLeave);
+      window.removeEventListener('dragover', onOver);
+      window.removeEventListener('drop', onDrop);
+    };
+  }, [addFiles]);
   // A coarse clock. The server purges discarded documents without bumping their
   // seq, so the change feed never removes them; the day counts need it too.
   const [, setTick] = useState(0);
@@ -111,9 +197,30 @@ export function InboxScreen({
 
   return (
     <main class="inbox">
+      {dragging && (
+        <div class="drop-overlay" aria-hidden="true">
+          Drop files to add them
+        </div>
+      )}
+      <input
+        type="file"
+        multiple
+        ref={fileInput}
+        class="visually-hidden"
+        tabIndex={-1}
+        aria-hidden="true"
+        onChange={(e) => {
+          const input = e.currentTarget;
+          addFiles(input.files);
+          input.value = ''; // so choosing the same file again still fires change
+        }}
+      />
       <header class="inbox-header">
         <h1>Inbox</h1>
         <div class="actions">
+          <button class="btn btn-secondary" onClick={() => fileInput.current?.click()}>
+            Add
+          </button>
           <button class="btn" onClick={onScan}>
             Scan
           </button>
@@ -125,6 +232,7 @@ export function InboxScreen({
 
       {/* Always rendered: a live region added together with its text is often not announced. */}
       <div role="status">
+        {addError && <p class="warn">{addError}</p>}
         {Boolean(error) && loaded && (
           <p class="warn">
             {docs.length > 0 ? "Can't reach the server. Showing what was last loaded." : "Can't reach the server."}
@@ -140,6 +248,33 @@ export function InboxScreen({
           </div>
         )}
       </div>
+
+      {pending.length > 0 && (
+        <Section id="uploading" title="Uploading">
+          {pending.map((item) => <UploadRow key={item.id} item={item} queue={uploads} />)}
+        </Section>
+      )}
+
+      {device.scans.length > 0 && (
+        <section aria-labelledby="h-device">
+          <h2 id="h-device">Scans on this device</h2>
+          <p class="muted">Scans not sent yet. Send them or delete them.</p>
+          <ul class="doc-list" role="list">
+            {device.scans.map((s) => (
+              <DeviceScanRow
+                key={s.id}
+                scan={s}
+                onSend={() => sendScan(s.id)}
+                error={uploads.buildErrorOf(s.id)}
+                onDelete={async () => {
+                  await scans.delete(s.id);
+                  await device.reload();
+                }}
+              />
+            ))}
+          </ul>
+        </section>
+      )}
 
       <section aria-labelledby="h-review">
         <h2 id="h-review">Needs review{g.review.length ? ` (${g.review.length})` : ''}</h2>
@@ -179,12 +314,6 @@ export function InboxScreen({
           {g.discarded.map((d) => <DiscardedRow key={d.id} doc={d} now={now()} onRestore={() => restore(d.id)} />)}
         </Section>
       )}
-
-      <footer class="inbox-footer">
-        <button class="btn btn-secondary" onClick={onSavedScans}>
-          Saved scans
-        </button>
-      </footer>
     </main>
   );
 }

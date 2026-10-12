@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useLayoutEffect, useState } from 'preact/hooks';
 import { api, ApiError } from '../api.js';
 import { documentsApi } from '../documents/api.js';
 import { DocumentSync } from '../documents/sync.js';
@@ -6,55 +6,92 @@ import { LoginScreen } from './LoginScreen.js';
 import { InboxScreen } from './inbox/InboxScreen.js';
 import { SettingsScreen } from './SettingsScreen.js';
 import { ScannerScreen } from './ScannerScreen.js';
-import { SavedScansScreen } from './SavedScansScreen.js';
-import { ScanViewerScreen } from './ScanViewerScreen.js';
 import { ResumePrompt } from './ResumePrompt.js';
 import { ScansStore } from '../scanner/scans-store.js';
 import type { Scan } from '../scanner/types.js';
-import { OcrQueue } from '../ocr/queue.js';
-import { WorkerClient } from '../ocr/worker-client.js';
-import { buildSearchablePdf } from '../pdf/build.js';
+import { sendScanToInbox } from '../uploads/scans.js';
+import { UploadQueue } from '../uploads/queue.js';
+import { captureRequestFailure } from '../observability/sentry.js';
 
 type Route =
   | { kind: 'inbox' }
   | { kind: 'settings' }
-  | { kind: 'scanner'; resumeScanId?: string }
-  | { kind: 'saved' }
-  | { kind: 'viewer'; scanId: string };
+  | { kind: 'scanner'; resumeScanId?: string };
 
 export function App() {
   const [email, setEmail] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [route, setRoute] = useState<Route>({ kind: 'inbox' });
   const [store] = useState(() => new ScansStore());
-  const [queue] = useState(() => new OcrQueue(store, new WorkerClient(), buildSearchablePdf));
   const [resume, setResume] = useState<Scan | null>(null);
   const [sync] = useState(
     () => new DocumentSync({ list: documentsApi.list, onUnauthorized: () => { setEmail(null); setRoute({ kind: 'inbox' }); } }),
   );
-  // One open, shared: the in-progress lookup below must not run before it finishes.
-  const [storeOpen] = useState(() => store.open());
+  const [uploads] = useState(
+    () =>
+      new UploadQueue({
+        onUploaded: async ({ scanId }) => {
+          try {
+            // The server has the scan; its copy on this device can go.
+            // store.open(), not a saved first open: a failed open is tried again.
+            if (scanId) await store.open().then(() => store.delete(scanId));
+          } catch (e) {
+            // The queue keeps it off the device list for this session. Never the scan's name.
+            console.error('could not delete the sent scan', (e as Error)?.name);
+          } finally {
+            // The new document shows either way.
+            void sync.poll();
+          }
+        },
+        onUnauthorized: () => {
+          setEmail(null);
+          setRoute({ kind: 'inbox' });
+        },
+        // Status and error code only (the code is the error's message); never the file's name.
+        report: (err) =>
+          captureRequestFailure(err, {
+            operation: 'document-upload',
+            path: '/api/documents',
+            failure: err.status > 0 ? 'http' : 'network',
+            ...(err.status > 0 ? { status: err.status } : {}),
+          }),
+      }),
+  );
 
   useEffect(() => {
     api.status().then((s) => setEmail(s.email))
       .catch((e) => { if (!(e instanceof ApiError && e.status === 401)) console.error(e); })
       .finally(() => setLoaded(true));
-    storeOpen
-      .then(() => queue.start())
-      .catch((e) => console.error('open store', e));
+    // Opened once at start and shared; a failed open is tried again by the next caller.
+    store.open().catch((e: unknown) => console.error('open store', (e as Error)?.name));
   }, []);
 
-  useEffect(() => {
+  // A layout effect: Preact 11 runs useEffect cleanups after paint, so at
+  // sign-out the queue and the poll would run on for a frame, and at unmount
+  // they'd touch window after it is gone (as in a test's teardown).
+  useLayoutEffect(() => {
     if (!email) return;
-    storeOpen
-      .then(() => store.findInProgress())
-      .then((s) => setResume(s))
-      .catch((e) => console.error('find in-progress scan', e));
     sync.start();
+    uploads.start();
     return () => {
+      uploads.stop();
       sync.stop();
       sync.reset();
     };
+  }, [email]);
+
+  useEffect(() => {
+    if (!email) return;
+    store
+      .open()
+      .then(() => store.findInProgress())
+      .then((s) => setResume(s))
+      .catch((e: unknown) => console.error('find in-progress scan', (e as Error)?.name));
+    // Load the PDF builder now, while online: the service worker caches its
+    // chunk (sw.js), so a scan finished offline later can still be built.
+    // Otherwise the first scan after a deploy or a fresh install would fetch it
+    // only when finished, and offline that fails. A failure here costs nothing.
+    void import('../pdf/build.js').catch(() => {});
   }, [email]);
 
   function signedOut() {
@@ -94,7 +131,8 @@ export function App() {
       return <InboxScreen
         sync={sync}
         onScan={() => setRoute({ kind: 'scanner' })}
-        onSavedScans={() => setRoute({ kind: 'saved' })}
+        uploads={uploads}
+        scans={store}
         onSettings={() => setRoute({ kind: 'settings' })}
         onSignInAgain={() => void signInAgain()}
       />;
@@ -103,25 +141,14 @@ export function App() {
     case 'scanner':
       return <ScannerScreen
         store={store}
-        queue={queue}
         {...(route.resumeScanId !== undefined ? { resumeScanId: route.resumeScanId } : {})}
         onBack={() => setRoute({ kind: 'inbox' })}
-        onDone={() => setRoute({ kind: 'saved' })}
-      />;
-    case 'saved':
-      return <SavedScansScreen
-        store={store}
-        queue={queue}
-        onBack={() => setRoute({ kind: 'inbox' })}
-        onNewScan={() => setRoute({ kind: 'scanner' })}
-        onView={(scanId) => setRoute({ kind: 'viewer', scanId })}
-      />;
-    case 'viewer':
-      return <ScanViewerScreen
-        store={store}
-        queue={queue}
-        scanId={route.scanId}
-        onBack={() => setRoute({ kind: 'saved' })}
+        onDone={(scanId) => {
+          setRoute({ kind: 'inbox' });
+          // A scan whose PDF can't be built stays on the device and shows under
+          // "Scans on this device", with the reason the queue keeps for it.
+          sendScanToInbox(store, uploads, scanId).catch((e: unknown) => console.error('could not queue scan', (e as Error)?.name));
+        }}
       />;
   }
 }

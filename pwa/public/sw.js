@@ -1,15 +1,37 @@
 // doc-scanner Service Worker.
-// Caches the scanner chunk (split out by Vite as a dynamic-import chunk) and
-// the jscanify wasm so subsequent opens work fully offline.
+// Caches the scanner chunk and the PDF builder chunk (both split out by Vite as
+// dynamic-import chunks) and the jscanify wasm, so subsequent opens work fully
+// offline and a scan finished offline can still be built into a PDF. App
+// loads the PDF builder after sign-in so it is cached before it's needed.
 
-const CACHE_NAME = 'docscanner-scanner-v4';
+const CACHE_NAME = 'docscanner-scanner-v5';
 const RUNTIME_CACHE_PATTERNS = [
   /\/assets\/scanner-core-.*\.js$/,
-  /\/assets\/ocr-core-.*\.js$/,
+  /\/assets\/pdf-.*\.js$/,
   /\/scanner\//,
   /\/opencv\//,
-  /\/ocr\//,
 ];
+
+// Chunks named by their content hash: each deploy brings a new name, and the
+// old one is never asked for again. Caching one deletes the older copies, so
+// they don't pile up. Matched exactly (an 8-character hash), so a chunk that
+// merely starts with the same name can't be taken for an older copy. The
+// /scanner/ and /opencv/ files keep their names, and are left alone.
+// src/sw-warm.ts matches the same names to warm this cache on a first visit:
+// keep the two in step.
+const HASHED_CHUNKS = [
+  /^\/assets\/scanner-core-[\w-]{8}\.js$/,
+  /^\/assets\/pdf-[\w-]{8}\.js$/,
+];
+
+async function pruneOlderCopies(cache, keptPath) {
+  const chunk = HASHED_CHUNKS.find((re) => re.test(keptPath));
+  if (!chunk) return;
+  for (const request of await cache.keys()) {
+    const path = new URL(request.url).pathname;
+    if (path !== keptPath && chunk.test(path)) await cache.delete(request);
+  }
+}
 
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (e) => {
@@ -32,7 +54,9 @@ self.addEventListener('fetch', (event) => {
     if (cached) return cached;
     try {
       const response = await fetch(event.request);
-      if (response.ok) cache.put(event.request, response.clone());
+      if (response.ok) {
+        event.waitUntil(cache.put(event.request, response.clone()).then(() => pruneOlderCopies(cache, url.pathname)));
+      }
       return response;
     } catch (err) {
       return cached ?? Response.error();
