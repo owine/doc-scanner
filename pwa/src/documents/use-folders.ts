@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
+import { useCallback, useEffect, useRef, useState, useLayoutEffect } from 'preact/hooks';
 import { ApiError } from '../api.js';
 import type { DocumentsApi } from './api.js';
 import type { FolderEntry } from './types.js';
@@ -21,7 +21,8 @@ export function useFolders(api: Pick<DocumentsApi, 'folders' | 'refreshFolders'>
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const mounted = useRef(false);
-  useEffect(() => {
+  // A layout effect: Preact 11 runs useEffect cleanups after paint, too late for this guard.
+  useLayoutEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
