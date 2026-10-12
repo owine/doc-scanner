@@ -47,6 +47,22 @@ check('thumbnails a JPEG', (await tools.thumbnail(page!, 'image/jpeg')) !== null
 
 const dir = await mkdtemp(join(tmpdir(), 'smoke-'));
 try {
+  // A PostScript program with a PDF header later on. Run directly, this
+  // Ghostscript executes it: it prints the marker and renders a page. Through
+  // the tools, the content check must stop it before Ghostscript starts, so
+  // there is no thumbnail (the page it would render) and no OCR.
+  const MARKER = 'SMOKE-PS-RAN';
+  const polyglot = new TextEncoder().encode(`%!PS-Adobe-3.0\n(${MARKER}\\n) print flush\nshowpage\n%PDF-1.4\n`);
+  await writeFile(join(dir, 'poly.pdf'), polyglot);
+  const direct = await runTool('gs', ['-dSAFER', '-dBATCH', '-dNOPAUSE', '-dQUIET', '-sDEVICE=jpeg', '-sOutputFile=poly.jpg', 'poly.pdf'], {
+    timeoutMs: 30_000,
+    cwd: dir,
+  });
+  const rendered = (await readdir(dir)).includes('poly.jpg');
+  check('Ghostscript runs the PostScript polyglot when handed it directly', direct.stdout.includes(MARKER) && rendered);
+  check('the polyglot gets no thumbnail: Ghostscript never sees it', (await tools.thumbnail(polyglot, 'application/pdf')) === null);
+  check('the polyglot is not OCRed', await tools.ocrPdf(polyglot).then(() => false, (err: unknown) => err instanceof Error && err.message === 'not a PDF'));
+
   await writeFile(join(dir, 'in.pdf'), born);
   const enc = await runTool('qpdf', ['--encrypt', 'u', 'o', '256', '--', 'in.pdf', 'enc.pdf'], { timeoutMs: 30_000, cwd: dir });
   check('qpdf encrypts a copy', enc.code === 0);

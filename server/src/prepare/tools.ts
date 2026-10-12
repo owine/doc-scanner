@@ -26,12 +26,17 @@ export class ToolFailedError extends Error {
  * program in gs, and sharp would render an SVG. So the bytes are checked first.
  */
 
-/** Readers accept leading junk before the header; Acrobat looks in the first 1024 bytes. */
-const PDF_HEADER_WINDOW = 1024;
+const PDF_HEADER = [...new TextEncoder().encode('%PDF-')];
 
-/** `%PDF-` within the first 1024 bytes. */
+/**
+ * `%PDF-` at the very first byte. Readers tolerate junk before the header,
+ * but Ghostscript 10.07 then runs the file as PostScript whenever `%!` comes
+ * before `%PDF-`, even after junk, a BOM or a NUL (measured in the image), and
+ * ocrmypdf may hand its input to Ghostscript too. A real PDF starts with its
+ * header; one that doesn't is filed as it is.
+ */
 function looksLikePdf(bytes: Uint8Array): boolean {
-  return Buffer.from(bytes.buffer, bytes.byteOffset, Math.min(bytes.length, PDF_HEADER_WINDOW)).includes('%PDF-');
+  return startsWith(bytes, PDF_HEADER);
 }
 
 function startsWith(bytes: Uint8Array, sig: readonly number[]): boolean {
