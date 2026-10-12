@@ -145,4 +145,14 @@ describe('ScansStore', () => {
     expect(fresh.open()).toBe(first);
     await first;
   });
+
+  it('opens again after a failed open', async () => {
+    const fresh = new ScansStore();
+    const connect = vi.spyOn(fresh as unknown as { connect: () => Promise<void> }, 'connect');
+    connect.mockRejectedValueOnce(new Error('blocked'));
+    await expect(fresh.open()).rejects.toThrow('blocked');
+    await expect(fresh.open()).resolves.toBeUndefined();
+    expect(connect).toHaveBeenCalledTimes(2);
+    expect(await fresh.listCompleted()).toEqual([]);
+  });
 });

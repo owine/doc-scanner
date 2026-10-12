@@ -35,9 +35,15 @@ export class ScansStore {
 
   private opening: Promise<void> | null = null;
 
-  /** Idempotent: every caller shares one open (App's at start, and the inbox's device-scan list). */
+  /**
+   * Idempotent: every caller shares one open (App's at start, and the inbox's
+   * device-scan list). A failed open is forgotten, so the next call tries again.
+   */
   open(): Promise<void> {
-    return (this.opening ??= this.connect());
+    return (this.opening ??= this.connect().catch((e: unknown) => {
+      this.opening = null;
+      throw e;
+    }));
   }
 
   private async connect(): Promise<void> {
