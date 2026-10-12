@@ -139,6 +139,15 @@ describe('SettingsScreen', () => {
     expect(await screen.findByText('Sign in again to read your Drive folders.')).toBeInTheDocument();
   });
 
+  it('keeps the controls below the form when the settings load', async () => {
+    setup();
+    // Found before the settings arrive, as a quick tap would.
+    const dark = screen.getByRole('radio', { name: /dark/i });
+    await screen.findByRole('checkbox', { name: /file automatically/i });
+    expect(dark.isConnected).toBe(true);
+    expect(screen.getByRole('radio', { name: /dark/i })).toBe(dark);
+  });
+
   it('switches the theme', async () => {
     setup();
     const dark = await screen.findByRole('radio', { name: /dark/i });

@@ -140,12 +140,14 @@ export function SettingsScreen({ email, documents = documentsApi, onBack, onLogg
       </header>
 
       <h2>Filing</h2>
+      {/* Keyed: unkeyed, Preact 11 matches the form against the next section's
+          card when settings load and re-creates every control below it. */}
       {draft === null ? (
-        <p role="status" class="muted">
+        <p key="filing-status" role="status" class="muted">
           {status ?? 'Loading…'}
         </p>
       ) : (
-        <div class="card">
+        <div key="filing-form" class="card">
           <fieldset disabled={busy} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
           <label class="field">
             <input type="checkbox" checked={draft.autoFileEnabled} onChange={(e) => set('autoFileEnabled', (e.target as HTMLInputElement).checked)} />{' '}
