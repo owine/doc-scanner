@@ -12,6 +12,25 @@ const RUNTIME_CACHE_PATTERNS = [
   /\/opencv\//,
 ];
 
+// Chunks named by their content hash: each deploy brings a new name, and the
+// old one is never asked for again. Caching one deletes the older copies, so
+// they don't pile up. Matched exactly (an 8-character hash), so a chunk that
+// merely starts with the same name can't be taken for an older copy. The
+// /scanner/ and /opencv/ files keep their names, and are left alone.
+const HASHED_CHUNKS = [
+  /^\/assets\/scanner-core-[\w-]{8}\.js$/,
+  /^\/assets\/pdf-[\w-]{8}\.js$/,
+];
+
+async function pruneOlderCopies(cache, keptPath) {
+  const chunk = HASHED_CHUNKS.find((re) => re.test(keptPath));
+  if (!chunk) return;
+  for (const request of await cache.keys()) {
+    const path = new URL(request.url).pathname;
+    if (path !== keptPath && chunk.test(path)) await cache.delete(request);
+  }
+}
+
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (e) => {
   e.waitUntil((async () => {
@@ -33,7 +52,9 @@ self.addEventListener('fetch', (event) => {
     if (cached) return cached;
     try {
       const response = await fetch(event.request);
-      if (response.ok) cache.put(event.request, response.clone());
+      if (response.ok) {
+        event.waitUntil(cache.put(event.request, response.clone()).then(() => pruneOlderCopies(cache, url.pathname)));
+      }
       return response;
     } catch (err) {
       return cached ?? Response.error();
