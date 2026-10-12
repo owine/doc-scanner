@@ -229,6 +229,23 @@ describe('UploadQueue', () => {
     await vi.waitFor(() => expect(q.list()).toEqual([]));
   });
 
+  it('ignores a 401 from an upload started before the last sign-in, and sends the file again', async () => {
+    const onUnauthorized = vi.fn();
+    const first = deferred<SendResult>();
+    const send = vi.fn().mockReturnValueOnce(first.promise).mockResolvedValue({ id: 'd1', duplicate: false });
+    const q = make({ send, onUnauthorized });
+    q.start();
+    await q.add([file('a.pdf')]);
+    await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+    // Signed out and in again while it was on its way: the old session's answer arrives late.
+    q.stop();
+    q.start();
+    first.reject(new UploadError(401, 'not_authenticated'));
+    await vi.waitFor(() => expect(q.list()).toEqual([]));
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(onUnauthorized).not.toHaveBeenCalled();
+  });
+
   it('picks up items left from an earlier session', async () => {
     const store = new MemoryStore();
     await store.put({ id: 'old', name: 'a.pdf', size: 1, blob: new Blob(['x']), source: 'picker', scanId: null, createdAt: 1, attempts: 0, state: 'queued', error: null, nextAttemptAt: 0 });

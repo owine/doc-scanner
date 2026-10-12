@@ -79,6 +79,8 @@ export class UploadQueue {
   private active: string | null = null;
   private running = false;
   private paused = false;
+  /** Bumped by every start(), i.e. every sign-in, so a 401 can be traced to the session it came from. */
+  private session = 0;
   private timer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private readonly o: UploadQueueOptions = {}) {
@@ -188,6 +190,7 @@ export class UploadQueue {
   }
 
   start(): void {
+    this.session += 1;
     this.paused = false;
     if (!this.running) {
       this.running = true;
@@ -197,6 +200,11 @@ export class UploadQueue {
     this.load().then(this.kick, (e: unknown) => console.error('could not read the upload queue', (e as Error)?.name));
   }
 
+  /**
+   * Queued items survive sign-out, and are sent by the next sign-in on this
+   * device. Acceptable for a single-user app: whoever signs in next is the
+   * same person.
+   */
   stop(): void {
     this.running = false;
     window.removeEventListener('online', this.onConnection);
@@ -255,6 +263,7 @@ export class UploadQueue {
   };
 
   private async upload(item: UploadItem): Promise<void> {
+    const session = this.session;
     this.active = item.id;
     this.progress.set(item.id, 0);
     this.emit();
@@ -270,7 +279,7 @@ export class UploadQueue {
     }
     try {
       if (result) await this.accepted(item, result);
-      else if (failure) await this.refused(item, failure);
+      else if (failure) await this.refused(item, failure, session);
     } catch {
       // Storage failed while recording a refusal. The in-memory state is already right.
     } finally {
@@ -297,8 +306,11 @@ export class UploadQueue {
     this.items = this.items.filter((i) => i.id !== item.id);
   }
 
-  private async refused(item: UploadItem, e: UploadError): Promise<void> {
+  private async refused(item: UploadItem, e: UploadError, session: number): Promise<void> {
     if (e.status === 401) {
+      // Sent with a session since replaced by a new sign-in: the item stays
+      // queued as it is, and goes again with the new session.
+      if (session !== this.session) return;
       this.paused = true;
       this.o.onUnauthorized?.();
     } else if (e.transient) {
