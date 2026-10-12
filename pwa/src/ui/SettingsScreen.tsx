@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'preact/hooks';
+import { useEffect, useRef, useState, useLayoutEffect } from 'preact/hooks';
 import { api, ApiError } from '../api.js';
 import { documentsApi, type DocumentsApi } from '../documents/api.js';
 import type { Settings } from '../documents/types.js';
@@ -52,7 +52,8 @@ export function SettingsScreen({ email, documents = documentsApi, onBack, onLogg
 
   // Set false on unmount so nothing is set after an await resolves late.
   const mounted = useRef(true);
-  useEffect(() => {
+  // A layout effect: Preact 11 runs useEffect cleanups after paint, too late for this guard.
+  useLayoutEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
