@@ -1,5 +1,5 @@
 import type { ComponentChildren } from 'preact';
-import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { ApiError } from '../../api.js';
 import { documentsApi, type DocumentsApi } from '../../documents/api.js';
 import { groupDocuments } from '../../documents/group.js';
@@ -93,7 +93,9 @@ export function InboxScreen({
   }, [uploads]);
   // The whole window takes dropped files while the inbox shows, margins
   // included: a drop the page doesn't take makes the browser open the file.
-  useEffect(() => {
+  // A layout effect: Preact 11 runs useEffect cleanups after paint, so the
+  // listeners would outlive the inbox and take a drop meant for another screen.
+  useLayoutEffect(() => {
     const carriesFiles = (e: DragEvent) => Boolean(e.dataTransfer?.types.includes('Files'));
     // dragenter and dragleave fire for every element crossed. Counting them
     // tells when the drag has left the window: WebKit's relatedTarget is null.
