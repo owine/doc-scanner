@@ -35,13 +35,15 @@ describe('UploadRow', () => {
     expect(retry).toHaveBeenCalledWith('u1');
   });
 
-  it('announces its status, and labels its progress bar with the file name', async () => {
+  it('announces its state but not every percentage, and labels its progress bar with the file name', async () => {
     const queue = idle();
     vi.spyOn(queue, 'isSending').mockReturnValue(true);
     vi.spyOn(queue, 'progressOf').mockReturnValue(0.25);
     render(<ul><UploadRow item={item()} queue={queue} /></ul>);
-    expect(within(screen.getByRole('status')).getByText('Uploading… 25%')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent(/^Uploading…$/);
+    expect(screen.getByText('25%')).toBeInTheDocument(); // shown, outside the live region
     await waitFor(() => expect(screen.getByRole('progressbar', { name: 'northwind-bill.pdf' })).toBeInTheDocument());
+    expect((screen.getByRole('progressbar') as HTMLProgressElement).value).toBe(0.25);
   });
 
   it('logs only the name of an error from Retry or Remove', async () => {

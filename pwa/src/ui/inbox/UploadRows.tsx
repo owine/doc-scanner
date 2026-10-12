@@ -3,9 +3,10 @@ import { MAX_UPLOAD_BYTES, type UploadQueue } from '../../uploads/queue.js';
 import type { UploadItem } from '../../uploads/types.js';
 import type { Scan } from '../../scanner/types.js';
 
+/** The item's state, announced when it changes. Never the percentage: that would be read out on every step. */
 function status(item: UploadItem, queue: UploadQueue): string {
   if (item.state === 'failed') return item.error ?? 'The upload failed.';
-  if (queue.isSending(item.id)) return `Uploading… ${Math.round((queue.progressOf(item.id) ?? 0) * 100)}%`;
+  if (queue.isSending(item.id)) return 'Uploading…';
   if (navigator.onLine === false) return 'Waiting for a connection';
   return item.attempts > 0 ? 'Retrying soon' : 'Waiting to upload';
 }
@@ -13,16 +14,19 @@ function status(item: UploadItem, queue: UploadQueue): string {
 export function UploadRow({ item, queue }: { item: UploadItem; queue: UploadQueue }) {
   const nameId = `upload-name-${item.id}`;
   const sending = queue.isSending(item.id);
+  const progress = queue.progressOf(item.id) ?? 0;
   return (
     <li class="doc-row">
       <div class="doc-main">
         <div class="doc-name" id={nameId}>
           {item.name}
         </div>
-        <div class={item.state === 'failed' ? 'error-text' : 'muted'} role="status">
-          {status(item, queue)}
+        <div class={item.state === 'failed' ? 'error-text' : 'muted'}>
+          <span role="status">{status(item, queue)}</span>
+          {/* Outside the live region: shown, and on the progress bar, but not announced. */}
+          {sending && <span> {Math.round(progress * 100)}%</span>}
         </div>
-        {sending && <progress max={1} value={queue.progressOf(item.id) ?? 0} aria-labelledby={nameId} />}
+        {sending && <progress max={1} value={progress} aria-labelledby={nameId} />}
       </div>
       {item.state === 'failed' && item.size <= MAX_UPLOAD_BYTES && (
         <button

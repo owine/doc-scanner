@@ -469,7 +469,8 @@ describe('InboxScreen uploads', () => {
     fireEvent.change(fileInput(), { target: { files: [pdf('a.pdf')] } });
     await waitFor(() => expect(report).toBeDefined());
     act(() => report(0.5));
-    expect(await screen.findByText('Uploading… 50%')).toBeInTheDocument();
+    expect(await screen.findByText('50%')).toBeInTheDocument();
+    expect(within(screen.getByRole('region', { name: 'Uploading' })).getByRole('status')).toHaveTextContent(/^Uploading…$/);
   });
 
   it('explains a refused file and offers Retry and Remove', async () => {
@@ -489,7 +490,8 @@ describe('InboxScreen uploads', () => {
     setup([]);
     fireEvent.change(fileInput(), { target: { files: [pdf('a.pdf'), pdf('b.pdf')] } });
     expect(await screen.findByText('Waiting to upload')).toBeInTheDocument();
-    expect(screen.getByText('Uploading… 0%')).toBeInTheDocument();
+    expect(screen.getByText('Uploading…')).toBeInTheDocument();
+    expect(screen.getByText('0%')).toBeInTheDocument();
     Object.defineProperty(navigator, 'onLine', { value: false, configurable: true });
     act(() => {
       window.dispatchEvent(new Event('offline'));
