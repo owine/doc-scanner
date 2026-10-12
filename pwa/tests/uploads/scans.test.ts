@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { openDB } from 'idb';
 import { resolve } from 'node:path';
@@ -42,13 +42,21 @@ describe('scanFileName', () => {
 });
 
 describe('sendScanToInbox', () => {
-  it('queues the scan as one image-only PDF, tied to its scan id', async () => {
-    const id = await finishedScan(2);
-    const queue = idleQueue();
-    await sendScanToInbox(store, queue, id, new Date(2026, 9, 12, 9, 5));
-    const [item] = queue.list();
-    expect(item).toMatchObject({ source: 'scanner', scanId: id, name: 'Scan 2026-10-12 09.05.pdf' });
-    expect(item!.blob.type).toBe('application/pdf');
+  it('queues the scan as one image-only PDF, tied to its scan id and named by when it was scanned', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date(2026, 4, 3, 14, 20));
+      const id = await finishedScan(2);
+      // Sent months later: the analyzer reads the name, so it keeps the scan's own date.
+      vi.setSystemTime(new Date(2026, 9, 12, 9, 5));
+      const queue = idleQueue();
+      await sendScanToInbox(store, queue, id);
+      const [item] = queue.list();
+      expect(item).toMatchObject({ source: 'scanner', scanId: id, name: 'Scan 2026-05-03 14.20.pdf' });
+      expect(item!.blob.type).toBe('application/pdf');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('does not queue the same scan twice', async () => {
@@ -63,7 +71,8 @@ describe('sendScanToInbox', () => {
     // Shaped as the retired OCR queue left it: a finished PDF, text on every page.
     const raw = await openDB('docscanner', 2);
     await raw.put('scans', {
-      id: 'legacy-1', status: 'completed', pageCount: 2, createdAt: 1000, updatedAt: 2000,
+      id: 'legacy-1', status: 'completed', pageCount: 2,
+      createdAt: new Date(2026, 4, 3, 14, 20).getTime(), updatedAt: new Date(2026, 4, 3, 14, 25).getTime(),
       thumbnailKey: 'legacy-thumb', pdfKey: 'legacy-pdf', pdfStatus: 'done', ocrError: null,
     });
     for (const ordinal of [0, 1]) {
@@ -76,9 +85,9 @@ describe('sendScanToInbox', () => {
     await raw.put('pdfs', { id: 'legacy-pdf', blob: new Blob(['%PDF'], { type: 'application/pdf' }), bytes: 4 });
 
     const queue = idleQueue();
-    await sendScanToInbox(store, queue, 'legacy-1', new Date(2026, 9, 12, 9, 5));
+    await sendScanToInbox(store, queue, 'legacy-1');
     const [item] = queue.list();
-    expect(item).toMatchObject({ source: 'scanner', scanId: 'legacy-1', name: 'Scan 2026-10-12 09.05.pdf' });
+    expect(item).toMatchObject({ source: 'scanner', scanId: 'legacy-1', name: 'Scan 2026-05-03 14.20.pdf' });
     expect(item!.blob.type).toBe('application/pdf');
 
     await store.delete('legacy-1');

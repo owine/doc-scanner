@@ -11,17 +11,20 @@ export function scanFileName(at: Date): string {
 }
 
 /**
- * Queues a finished scan as one image-only PDF. Its local copy is deleted once
- * the server has it (App). If the PDF can't be built (say, its chunk can't load
- * while offline), the scan stays on the device and shows under "Scans on this
- * device".
+ * Queues a finished scan as one image-only PDF, named by when it was scanned:
+ * the analyzer reads the name, so a scan sent months later keeps its own date.
+ * Its local copy is deleted once the server has it (App). If the PDF can't be
+ * built (say, its chunk can't load while offline), the scan stays on the
+ * device and shows under "Scans on this device".
  */
-export async function sendScanToInbox(store: ScansStore, queue: UploadQueue, scanId: string, at = new Date()): Promise<void> {
+export async function sendScanToInbox(store: ScansStore, queue: UploadQueue, scanId: string): Promise<void> {
   await queue.addScan(scanId, async () => {
+    const scan = await store.get(scanId);
+    if (!scan) throw new Error('the scan is no longer on this device');
     // Loaded on demand: pdf-lib is most of the bundle, and only a finished scan needs it.
     const { buildImagePdf } = await import('../pdf/build.js');
     const pages = await store.getPages(scanId);
-    return { blob: await buildImagePdf(pages.map((p) => p.blob)), name: scanFileName(at), source: 'scanner' };
+    return { blob: await buildImagePdf(pages.map((p) => p.blob)), name: scanFileName(new Date(scan.createdAt)), source: 'scanner' };
   });
 }
 

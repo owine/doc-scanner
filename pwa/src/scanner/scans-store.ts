@@ -111,6 +111,10 @@ export class ScansStore {
     }
   }
 
+  async get(scanId: string): Promise<Scan | null> {
+    return (await this.d.get('scans', scanId)) ?? null;
+  }
+
   async getPages(scanId: string): Promise<Page[]> {
     const all = await this.d.getAllFromIndex('pages', 'by_scan', scanId);
     return all.sort((a, b) => a.ordinal - b.ordinal);
