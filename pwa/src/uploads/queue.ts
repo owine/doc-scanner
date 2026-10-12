@@ -297,6 +297,10 @@ export class UploadQueue {
     let result: SendResult | null = null;
     let failure: UploadError | null = null;
     try {
+      // A picked file can stop being readable (moved, deleted, or its
+      // permission dropped). Reading a byte finds out before any upload starts,
+      // and the throw below makes it a permanent, reported 'unreadable'.
+      await item.blob.slice(0, 1).arrayBuffer();
       result = await this.send({ blob: item.blob, name: item.name, source: item.source }, (fraction) =>
         this.setProgress(item.id, fraction),
       );

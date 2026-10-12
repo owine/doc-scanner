@@ -118,6 +118,21 @@ describe('UploadQueue', () => {
     expect(report).toHaveBeenCalledWith(expect.objectContaining({ status: 0, code: 'unreadable' }));
   });
 
+  it('fails, for good and without sending it, a file the browser can no longer read', async () => {
+    const report = vi.fn();
+    const send = vi.fn().mockResolvedValue({ id: 'd1', duplicate: false });
+    const q = make({ send, report });
+    q.start();
+    // A picked file deleted or moved since, or a permission the browser dropped.
+    const blob = new Blob(['x'], { type: 'application/pdf' });
+    blob.slice = () => ({ arrayBuffer: () => Promise.reject(new DOMException('gone', 'NotReadableError')) }) as unknown as Blob;
+    await q.add([{ blob, name: 'a.pdf', source: 'picker' }]);
+    await vi.waitFor(() => expect(q.list()[0]?.state).toBe('failed'));
+    expect(q.list()[0]!.error).toBe('The file could not be read.');
+    expect(send).not.toHaveBeenCalled();
+    expect(report).toHaveBeenCalledWith(expect.objectContaining({ status: 0, code: 'unreadable' }));
+  });
+
   it('fails a file over the size limit at once, without sending it, and Retry does not send it', async () => {
     const send = vi.fn();
     const q = make({ send, maxBytes: 2 });
