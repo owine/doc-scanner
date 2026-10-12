@@ -74,6 +74,11 @@ export function App() {
       .catch((e) => console.error('find in-progress scan', e));
     sync.start();
     uploads.start();
+    // Load the PDF builder now, while online: the service worker caches its
+    // chunk (sw.js), so a scan finished offline later can still be built.
+    // Otherwise the first scan after a deploy or a fresh install would fetch it
+    // only when finished, and offline that fails. A failure here costs nothing.
+    void import('../pdf/build.js').catch(() => {});
     return () => {
       uploads.stop();
       sync.stop();
