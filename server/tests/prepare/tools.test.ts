@@ -10,7 +10,7 @@ vi.mock('../../src/prepare/run.js', async (importOriginal) => ({
 }));
 
 import { runTool } from '../../src/prepare/run.js';
-import { ToolMissingError } from '../../src/prepare/run.js';
+import { ToolMissingError, ToolTimeoutError } from '../../src/prepare/run.js';
 import { createPrepareTools, sweepStaleTempDirs, TEMP_PREFIX, ToolFailedError } from '../../src/prepare/tools.js';
 
 const run = vi.mocked(runTool);
@@ -76,6 +76,25 @@ describe('PrepareTools (fake binaries)', () => {
   it('reports a missing dependency (exit 3, e.g. a language pack) as a missing tool', async () => {
     fakeTool({}, 3, 'MissingDependencyError: Could not find language data for eng');
     await expect(createPrepareTools().ocrPdf(PDF)).rejects.toBeInstanceOf(ToolMissingError);
+  });
+
+  it('removes the job directory after a non-zero exit and after a timeout', async () => {
+    fakeTool({}, 2, 'InputFileError: something else');
+    await expect(createPrepareTools().ocrPdf(PDF)).rejects.toBeInstanceOf(ToolFailedError);
+    expect(existsSync(calls[0]!.cwd!)).toBe(false);
+    run.mockImplementation(async (cmd, args, o) => {
+      calls.push({ cmd, args, cwd: o.cwd, tmp: o.env?.TMPDIR, mode: 0 });
+      throw new ToolTimeoutError('too slow');
+    });
+    await expect(createPrepareTools().ocrPdf(PDF)).rejects.toBeInstanceOf(ToolTimeoutError);
+    expect(existsSync(calls[1]!.cwd!)).toBe(false);
+  });
+
+  it('fails imageToPdf on a non-zero exit, and gives no thumbnail when Ghostscript fails', async () => {
+    fakeTool({}, 1);
+    const tools = createPrepareTools();
+    await expect(tools.imageToPdf(new Uint8Array([1, 2, 3]), 'image/png')).rejects.toBeInstanceOf(ToolFailedError);
+    expect(await tools.thumbnail(PDF, 'application/pdf')).toBeNull();
   });
 
   it('keeps a PDF whose pages all had text', async () => {

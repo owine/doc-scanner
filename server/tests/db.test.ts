@@ -49,18 +49,15 @@ describe('openDb', () => {
 
   it('migration 007 adds documents.prepare_note and has_thumbnail', () => {
     const { db, cleanup } = createTestDb();
-    try {
-      const cols = (db.prepare("SELECT name FROM pragma_table_info('documents')").all() as { name: string }[]).map((c) => c.name);
-      expect(cols).toEqual(expect.arrayContaining(['prepare_note', 'has_thumbnail']));
-      db.prepare(
-        `INSERT INTO documents (id, seq, created_at, updated_at, source, mime, size, sha256, state, next_attempt_at)
-         VALUES ('d1', 1, 't', 't', 'picker', 'application/pdf', 10, 'abc', 'received', 't')`,
-      ).run();
-      expect(() => db.prepare('UPDATE documents SET has_thumbnail = 2 WHERE id = ?').run('d1')).toThrow();
-      expect(() => db.prepare('UPDATE documents SET has_thumbnail = 1 WHERE id = ?').run('d1')).not.toThrow();
-    } finally {
-      cleanup();
-    }
+    cleanupFn = cleanup;
+    const cols = (db.prepare("SELECT name FROM pragma_table_info('documents')").all() as { name: string }[]).map((c) => c.name);
+    expect(cols).toEqual(expect.arrayContaining(['prepare_note', 'has_thumbnail']));
+    db.prepare(
+      `INSERT INTO documents (id, seq, created_at, updated_at, source, mime, size, sha256, state, next_attempt_at)
+       VALUES ('d1', 1, 't', 't', 'picker', 'application/pdf', 10, 'abc', 'received', 't')`,
+    ).run();
+    expect(() => db.prepare('UPDATE documents SET has_thumbnail = 2 WHERE id = ?').run('d1')).toThrow();
+    expect(() => db.prepare('UPDATE documents SET has_thumbnail = 1 WHERE id = ?').run('d1')).not.toThrow();
   });
 
   it('migration 003 keys event cursors by scope and adds app_settings', () => {
