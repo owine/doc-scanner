@@ -17,6 +17,8 @@ const RUNTIME_CACHE_PATTERNS = [
 // they don't pile up. Matched exactly (an 8-character hash), so a chunk that
 // merely starts with the same name can't be taken for an older copy. The
 // /scanner/ and /opencv/ files keep their names, and are left alone.
+// src/sw-warm.ts matches the same names to warm this cache on a first visit:
+// keep the two in step.
 const HASHED_CHUNKS = [
   /^\/assets\/scanner-core-[\w-]{8}\.js$/,
   /^\/assets\/pdf-[\w-]{8}\.js$/,
