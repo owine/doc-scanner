@@ -41,6 +41,8 @@ export function decideStage(doc: DocumentRow, ctx: StageContext): void {
           error: null,
         })
       : ctx.repo.transition(doc.id, 'ready', 'needs_review', { reviewReason: reason, attempts: 0, error: null });
-  if (moved) logger.info({ documentId: doc.id, outcome: reason === null ? 'auto-filed' : 'review', reason }, 'document decided');
+  // A fixed reason when there is no analysis: the recorded one can quote the
+  // model's answer (a schema error), and so the document.
+  if (moved) logger.info({ documentId: doc.id, outcome: reason === null ? 'auto-filed' : 'review', reason: a ? reason : 'analysis unusable' }, 'document decided');
   else ctx.repo.applyRequestedDiscard(doc.id);
 }

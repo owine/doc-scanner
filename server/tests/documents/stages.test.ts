@@ -1,11 +1,15 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { makeHarness, okOutcome, ANALYSIS, TREE } from './harness.js';
 import { analyzeStage } from '../../src/documents/stages/analyze.js';
 import { prepareStage } from '../../src/documents/stages/prepare.js';
 import { decideStage, reviewReason } from '../../src/documents/stages/decide.js';
+import { logger } from '../../src/logger.js';
 
 let h: ReturnType<typeof makeHarness>;
-afterEach(() => h.cleanup());
+afterEach(() => {
+  vi.restoreAllMocks();
+  h.cleanup();
+});
 
 describe('analyzeStage', () => {
   it('defers when there is no folder tree yet, without calling the model', async () => {
@@ -151,6 +155,19 @@ describe('decideStage', () => {
     h.repo.transition(doc.id, 'received', 'ready', { reviewReason: 'analysis refusal: declined' });
     decideStage(h.repo.get(doc.id)!, h.ctx);
     expect(h.repo.get(doc.id)).toMatchObject({ state: 'needs_review', reviewReason: 'analysis refusal: declined' });
+  });
+
+  it('never logs the analyzer\'s detail for an unusable analysis', () => {
+    h = makeHarness();
+    const info = vi.spyOn(logger, 'info');
+    const doc = h.add();
+    // The schema error can quote the model's output, which quotes the document.
+    const detail = 'analysis invalid: answer did not match the schema: name "Northwind Energy Sep 2026" too long';
+    h.repo.transition(doc.id, 'received', 'ready', { reviewReason: detail });
+    decideStage(h.repo.get(doc.id)!, h.ctx);
+    expect(h.repo.get(doc.id)).toMatchObject({ state: 'needs_review', reviewReason: detail });
+    expect(info).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'review', reason: 'analysis unusable' }), 'document decided');
+    expect(JSON.stringify(info.mock.calls)).not.toContain('Northwind');
   });
 
   it('sends everything to review while auto-filing is off', () => {
