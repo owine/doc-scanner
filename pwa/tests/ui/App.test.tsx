@@ -26,6 +26,33 @@ describe('App', () => {
     expect(await screen.findByRole('button', { name: /sign in/i })).toBeInTheDocument();
   });
 
+  it('finds an unfinished scan even when the first open of the scans database failed', async () => {
+    const seed = new ScansStore();
+    await seed.open();
+    const id = await seed.createInProgress();
+    await seed.appendPage(id, new Blob(['page'], { type: 'image/jpeg' }), { tl: { x: 0, y: 0 }, tr: { x: 1, y: 0 }, bl: { x: 0, y: 1 }, br: { x: 1, y: 1 } });
+    const connect = vi
+      .spyOn(ScansStore.prototype as unknown as { connect: () => Promise<void> }, 'connect')
+      .mockRejectedValueOnce(new Error('blocked'));
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      vi.stubGlobal(
+        'fetch',
+        route({
+          '/api/auth/status': { email: 'user@example.test' },
+          '/api/documents': { documents: [], cursor: 0 },
+          '/api/folders': new Response('{"error":"folders_not_loaded"}', { status: 503 }),
+        }),
+      );
+      render(<App />);
+      expect(await screen.findByRole('heading', { name: 'Unfinished scan' })).toBeInTheDocument();
+      expect(connect.mock.calls.length).toBeGreaterThan(1);
+    } finally {
+      connect.mockRestore();
+      logged.mockRestore();
+    }
+  });
+
   it('opens on the inbox and goes to settings and back', async () => {
     vi.stubGlobal(
       'fetch',

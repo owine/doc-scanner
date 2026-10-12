@@ -27,15 +27,14 @@ export function App() {
   const [sync] = useState(
     () => new DocumentSync({ list: documentsApi.list, onUnauthorized: () => { setEmail(null); setRoute({ kind: 'inbox' }); } }),
   );
-  // One open, shared: the in-progress lookup and the inbox's device scans wait on it.
-  const [storeOpen] = useState(() => store.open());
   const [uploads] = useState(
     () =>
       new UploadQueue({
         onUploaded: async ({ scanId }) => {
           try {
             // The server has the scan; its copy on this device can go.
-            if (scanId) await storeOpen.then(() => store.delete(scanId));
+            // store.open(), not a saved first open: a failed open is tried again.
+            if (scanId) await store.open().then(() => store.delete(scanId));
           } catch (e) {
             // The queue keeps it off the device list for this session. Never the scan's name.
             console.error('could not delete the sent scan', (e as Error)?.name);
@@ -63,15 +62,17 @@ export function App() {
     api.status().then((s) => setEmail(s.email))
       .catch((e) => { if (!(e instanceof ApiError && e.status === 401)) console.error(e); })
       .finally(() => setLoaded(true));
-    storeOpen.catch((e) => console.error('open store', e));
+    // Opened once at start and shared; a failed open is tried again by the next caller.
+    store.open().catch((e: unknown) => console.error('open store', (e as Error)?.name));
   }, []);
 
   useEffect(() => {
     if (!email) return;
-    storeOpen
+    store
+      .open()
       .then(() => store.findInProgress())
       .then((s) => setResume(s))
-      .catch((e) => console.error('find in-progress scan', e));
+      .catch((e: unknown) => console.error('find in-progress scan', (e as Error)?.name));
     sync.start();
     uploads.start();
     // Load the PDF builder now, while online: the service worker caches its
