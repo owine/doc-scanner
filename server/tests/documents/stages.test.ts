@@ -187,6 +187,14 @@ describe('decideStage', () => {
     expect(JSON.stringify(info.mock.calls)).not.toContain('Northwind');
   });
 
+  it('sends a document with a recorded reason to review even when it could auto-file', () => {
+    h = makeHarness();
+    const doc = h.add();
+    h.repo.transition(doc.id, 'received', 'ready', { analysis: ANALYSIS, reviewReason: 'restored after discard' });
+    decideStage(h.repo.get(doc.id)!, h.ctx);
+    expect(h.repo.get(doc.id)).toMatchObject({ state: 'needs_review', reviewReason: 'restored after discard', autoFiled: false });
+  });
+
   it('sends everything to review while auto-filing is off', () => {
     h = makeHarness({ settings: { autoFileEnabled: false } });
     const doc = readyDoc();

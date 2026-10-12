@@ -169,23 +169,24 @@ describe('document routes', () => {
   it('discards, restores and retries', async () => {
     const { app, cookie, pipeline } = await setup();
     const doc = pipeline.repo.insert({ source: 'picker', originalName: 'a.pdf', mime: 'application/pdf', size: 1, sha256: 'y', sourceContext: null });
-    pipeline.repo.transition(doc.id, 'received', 'needs_review', { analysis: ANALYSIS });
+    pipeline.repo.transition(doc.id, 'received', 'needs_review', { analysis: ANALYSIS, preparedMime: 'application/pdf' });
     const post = (path: string) => app.request(`/api/documents/${doc.id}/${path}`, { method: 'POST', headers: { cookie } });
     expect((await post('discard')).status).toBe(200);
     expect(pipeline.repo.get(doc.id)?.state).toBe('discarded');
     expect((await post('restore')).status).toBe(200);
     expect(pipeline.repo.get(doc.id)?.state).toBe('needs_review');
-    pipeline.repo.transition(doc.id, 'needs_review', 'failed', { error: 'x' });
+    // As a failure while preparing leaves it: the stage clears preparedMime first.
+    pipeline.repo.transition(doc.id, 'needs_review', 'failed', { error: 'x', preparedMime: null });
     pipeline.inbox.put(doc.id, 'original', new TextEncoder().encode('statement'));
     expect((await post('retry')).status).toBe(200);
     await pipeline.worker.wake(); // the prepare stage awaits its tools: let the drain finish
     // Retry resumes at `preparing` (the failure may have cost the text layer
     // or the thumbnail), so preparedMime is recorded; the worker then decides
-    // at once, and with auto-filing off that means review again.
+    // at once, keeping the restore's recorded reason: review again.
     expect(pipeline.repo.get(doc.id)).toMatchObject({
       state: 'needs_review',
       preparedMime: 'application/pdf',
-      reviewReason: 'auto-filing is off',
+      reviewReason: 'restored after discard',
       error: null,
       attempts: 0,
     });
@@ -229,7 +230,8 @@ type App = Awaited<ReturnType<typeof setup>>['app'];
 /** A document waiting in review with the harness's analysis. */
 function inReview(pipeline: Pipeline, sha256 = 'r') {
   const doc = pipeline.repo.insert({ source: 'picker', originalName: 'a.pdf', mime: 'application/pdf', size: 1, sha256, sourceContext: null });
-  pipeline.repo.transition(doc.id, 'received', 'needs_review', { analysis: ANALYSIS });
+  // Prepared, as every analysed document in review has been.
+  pipeline.repo.transition(doc.id, 'received', 'needs_review', { analysis: ANALYSIS, preparedMime: 'application/pdf' });
   return doc;
 }
 
@@ -571,6 +573,44 @@ describe('restore and retry', () => {
     expect((await post(app, cookie, doc.id, 'discard')).status).toBe(200);
     expect((await post(app, cookie, doc.id, 'restore')).status).toBe(200);
     expect(pipeline.repo.get(doc.id)).toMatchObject({ state: 'needs_review', reviewReason: 'restored after discard', error: null, attempts: 0 });
+  });
+
+  it('prepares a document restored after a discard won during preparing, then sends it to review', async () => {
+    const { app, cookie, pipeline } = await setup();
+    const doc = pipeline.repo.insert({ source: 'picker', originalName: 'a.pdf', mime: 'application/pdf', size: 9, sha256: 'p1', sourceContext: null });
+    pipeline.inbox.put(doc.id, 'original', new TextEncoder().encode('%PDF- scan'));
+    pipeline.repo.transition(doc.id, 'received', 'preparing', { analysis: ANALYSIS });
+    expect(pipeline.repo.requestDiscard(doc.id)).toBe('requested');
+    expect(pipeline.repo.applyRequestedDiscard(doc.id)).toBe(true); // the discard won: nothing prepared
+    expect(pipeline.repo.get(doc.id)).toMatchObject({ state: 'discarded', preparedMime: null });
+    const res = await post(app, cookie, doc.id, 'restore');
+    expect(res.status).toBe(200);
+    await pipeline.worker.wake(); // let the drain finish
+    expect(pipeline.repo.get(doc.id)).toMatchObject({
+      state: 'needs_review',
+      preparedMime: 'application/pdf',
+      reviewReason: 'restored after discard',
+    });
+  });
+
+  it('restores a document that was already prepared straight into review', async () => {
+    const { app, cookie, pipeline } = await setup();
+    const doc = inReview(pipeline, 'p2');
+    pipeline.repo.transition(doc.id, 'needs_review', 'needs_review', { preparedMime: 'application/pdf' });
+    expect((await post(app, cookie, doc.id, 'discard')).status).toBe(200);
+    const res = await post(app, cookie, doc.id, 'restore');
+    expect(((await res.json()) as { state: string }).state).toBe('needs_review');
+    expect(pipeline.repo.get(doc.id)).toMatchObject({ state: 'needs_review', reviewReason: 'restored after discard', preparedMime: 'application/pdf' });
+  });
+
+  it('restores a document that may already be in Drive into review, as it is', async () => {
+    const { app, cookie, pipeline } = await setup();
+    const doc = inReview(pipeline, 'p3');
+    const target = { folderLinkId: 'BILLS', name: 'Northwind Energy Sep 2026.pdf' };
+    pipeline.repo.transition(doc.id, 'needs_review', 'failed', { filingTarget: target, preparedMime: null, error: 'boom', attempts: 3 });
+    expect((await post(app, cookie, doc.id, 'discard')).status).toBe(200);
+    expect((await post(app, cookie, doc.id, 'restore')).status).toBe(200);
+    expect(pipeline.repo.get(doc.id)).toMatchObject({ state: 'needs_review', preparedMime: null, filingTarget: target });
   });
 
   it('restores an unanalysed document without a review reason', async () => {

@@ -255,10 +255,15 @@ export function documentRoutes(deps: { store: SessionStore; pipeline: Pipeline }
     const doc = repo.get(c.req.param('id'));
     if (!doc) return c.json({ error: 'not_found' }, 404);
     if (doc.state !== 'discarded') return c.json({ error: 'not_discarded' }, 409);
-    const to: DocumentState = doc.analysis ? 'needs_review' : 'received';
+    // An analysed document goes back to review, through preparing when a
+    // discard won while it was being prepared (no text layer or thumbnail
+    // yet). Not one that may already be in Drive: it keeps what was filed.
+    const unprepared = doc.preparedMime === null && !doc.filingTarget;
+    const to: DocumentState = !doc.analysis ? 'received' : unprepared ? 'preparing' : 'needs_review';
     const moved = repo.transition(doc.id, 'discarded', to, {
       discardedAt: null,
-      reviewReason: to === 'needs_review' ? 'restored after discard' : null,
+      // decideStage keeps a recorded reason, so a restored document is always reviewed.
+      reviewReason: doc.analysis ? 'restored after discard' : null,
       error: null,
       attempts: 0,
       nextAttemptAt: new Date(),
