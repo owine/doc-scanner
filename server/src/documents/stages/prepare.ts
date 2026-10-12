@@ -28,6 +28,14 @@ export async function prepareStage(doc: DocumentRow, ctx: StageContext): Promise
     if (!ctx.repo.transition(doc.id, 'preparing', 'ready', { attempts: 0, error: null })) ctx.repo.applyRequestedDiscard(doc.id);
     return;
   }
+  // Forget the last run's result before this one writes any blob: the row
+  // then describes a prepared blob or thumbnail only once the run that made
+  // it has finished. A run that dies part-way (crash, then discard and
+  // restore) leaves blobs that nothing will file or serve.
+  if (!ctx.repo.transition(doc.id, 'preparing', 'preparing', { preparedMime: null, prepareNote: null, hasThumbnail: false })) {
+    ctx.repo.applyRequestedDiscard(doc.id);
+    return;
+  }
   const original = ctx.inbox.get(doc.id, 'original'); // a missing original is a real failure: the worker retries it
   let prepared: { bytes: Uint8Array; mime: string } | null = null;
   let note: string | null = null;

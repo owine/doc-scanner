@@ -54,6 +54,15 @@ describe('analyzeStage', () => {
     expect(h.repo.get(doc.id)).toMatchObject({ state: 'preparing', analysis: null, reviewReason: 'analysis refusal: declined (cyber)' });
   });
 
+  it('drops an earlier analysis when the new answer is unusable', async () => {
+    h = makeHarness();
+    h.analyze.mockResolvedValue({ ...okOutcome(), status: 'truncated', detail: 'max_tokens' });
+    const doc = h.add();
+    h.repo.transition(doc.id, 'received', 'received', { analysis: ANALYSIS });
+    await analyzeStage(h.repo.get(doc.id)!, h.ctx);
+    expect(h.repo.get(doc.id)).toMatchObject({ state: 'preparing', analysis: null, reviewReason: 'analysis truncated: max_tokens' });
+  });
+
   it('honours a discard requested while the model was working', async () => {
     h = makeHarness();
     const doc = h.add();

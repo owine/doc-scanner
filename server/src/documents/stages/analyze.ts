@@ -68,7 +68,12 @@ export async function analyzeStage(doc: DocumentRow, ctx: StageContext): Promise
   } else {
     // Still prepared, so the review card gets a thumbnail and the file its
     // text layer; decideStage then sends it to review with this reason.
-    moved = ctx.repo.transition(doc.id, 'analyzing', 'preparing', { reviewReason: `analysis ${outcome.status}: ${outcome.detail}`, attempts: 0, error: null });
+    moved = ctx.repo.transition(doc.id, 'analyzing', 'preparing', {
+      analysis: null,
+      reviewReason: `analysis ${outcome.status}: ${outcome.detail}`,
+      attempts: 0,
+      error: null,
+    });
   }
   if (!moved) ctx.repo.applyRequestedDiscard(doc.id);
 }

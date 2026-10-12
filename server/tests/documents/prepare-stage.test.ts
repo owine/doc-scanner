@@ -1,12 +1,16 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { makeHarness, ANALYSIS } from './harness.js';
 import { prepareStage } from '../../src/documents/stages/prepare.js';
+import { fileStage } from '../../src/documents/stages/file.js';
 import { InboxBlobMissingError } from '../../src/documents/inbox-store.js';
 import { ToolMissingError, ToolTimeoutError } from '../../src/prepare/run.js';
 import { ToolFailedError } from '../../src/prepare/tools.js';
 
 let h: ReturnType<typeof makeHarness>;
-afterEach(() => h.cleanup());
+afterEach(() => {
+  vi.restoreAllMocks();
+  h.cleanup();
+});
 
 const enc = (s: string) => new TextEncoder().encode(s);
 const dec = (b: Uint8Array) => new TextDecoder().decode(b);
@@ -185,6 +189,43 @@ describe('prepareStage', () => {
     expect(dec(h.inbox.get(doc.id, 'prepared'))).toBe('UPLOADED');
     expect(dec(h.inbox.get(doc.id, 'thumbnail'))).toBe('thumb-jpeg');
     expect(h.repo.get(doc.id)).toMatchObject({ state: 'ready', preparedMime: 'application/pdf', prepareNote: null, hasThumbnail: true });
+  });
+
+  it('never files a prepared blob from a run that crashed, after a discard and a restore', async () => {
+    h = makeHarness();
+    // An earlier, completed run left the photo as it was.
+    const doc = preparing('image/jpeg', enc('photo bytes'));
+    h.inbox.put(doc.id, 'thumbnail', THUMB);
+    h.repo.transition(doc.id, 'preparing', 'preparing', { preparedMime: 'image/jpeg', hasThumbnail: true, prepareNote: 'Filed without a text layer: OCR failed.' });
+    // This run makes a PDF, then the process dies before the row records it.
+    h.prepare.imageToPdf.mockResolvedValue(enc('%PDF- fictional'));
+    const transition = h.repo.transition.bind(h.repo);
+    vi.spyOn(h.repo, 'transition').mockImplementation((id, from, to, ...rest) => {
+      if (to === 'ready') throw new Error('process died');
+      return transition(id, from, to, ...rest);
+    });
+    await expect(prepareStage(h.repo.get(doc.id)!, h.ctx)).rejects.toThrow('process died');
+    vi.mocked(h.repo.transition).mockRestore();
+    expect(h.inbox.has(doc.id, 'prepared')).toBe(true);
+    // Discarded before the worker re-ran it, then restored (as the route does) and approved.
+    expect(h.repo.requestDiscard(doc.id)).toBe('requested');
+    expect(h.repo.applyRequestedDiscard(doc.id)).toBe(true);
+    h.repo.transition(doc.id, 'discarded', 'needs_review', { discardedAt: null, reviewReason: 'restored after discard', attempts: 0, error: null });
+    expect(h.repo.get(doc.id)).toMatchObject({ preparedMime: null, hasThumbnail: false, prepareNote: null });
+    h.repo.transition(doc.id, 'needs_review', 'filing', { decision: { name: ANALYSIS.name, folder: ANALYSIS.folder! } });
+    await fileStage(h.repo.get(doc.id)!, h.ctx);
+    const [name, bytes, mime] = h.drive.uploadFile.mock.calls[0]!;
+    expect([name, dec(bytes), mime]).toEqual(['Northwind Energy Sep 2026.jpg', 'photo bytes', 'image/jpeg']);
+  });
+
+  it('applies a pending discard before running any tool', async () => {
+    h = makeHarness();
+    const doc = preparing('application/pdf');
+    h.repo.requestDiscard(doc.id);
+    await prepareStage(h.repo.get(doc.id)!, h.ctx);
+    expect(h.repo.get(doc.id)?.state).toBe('discarded');
+    expect(h.prepare.ocrPdf).not.toHaveBeenCalled();
+    expect(h.prepare.thumbnail).not.toHaveBeenCalled();
   });
 
   it('throws when the original is missing, so the worker fails it as before', async () => {
