@@ -166,6 +166,27 @@ describe('prepareStage', () => {
     expect(h.prepare.imageToPdf).not.toHaveBeenCalled(); // isDocument is unknown
   });
 
+  it('never re-prepares a document that may already be in Drive', async () => {
+    h = makeHarness();
+    const doc = preparing('image/jpeg');
+    // As after a filing that set its target, failed, and was discarded and restored.
+    h.inbox.put(doc.id, 'prepared', enc('UPLOADED'));
+    h.inbox.put(doc.id, 'thumbnail', THUMB);
+    h.repo.transition(doc.id, 'preparing', 'preparing', {
+      filingTarget: { folderLinkId: 'BILLS', name: 'Northwind Energy Sep 2026.pdf' },
+      preparedMime: 'application/pdf',
+      prepareNote: null,
+      hasThumbnail: true,
+    });
+    await prepareStage(h.repo.get(doc.id)!, h.ctx);
+    expect(h.prepare.ocrPdf).not.toHaveBeenCalled();
+    expect(h.prepare.imageToPdf).not.toHaveBeenCalled();
+    expect(h.prepare.thumbnail).not.toHaveBeenCalled();
+    expect(dec(h.inbox.get(doc.id, 'prepared'))).toBe('UPLOADED');
+    expect(dec(h.inbox.get(doc.id, 'thumbnail'))).toBe('thumb-jpeg');
+    expect(h.repo.get(doc.id)).toMatchObject({ state: 'ready', preparedMime: 'application/pdf', prepareNote: null, hasThumbnail: true });
+  });
+
   it('throws when the original is missing, so the worker fails it as before', async () => {
     h = makeHarness();
     const doc = preparing('application/pdf');

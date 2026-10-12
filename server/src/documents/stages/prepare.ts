@@ -20,6 +20,14 @@ function fallbackNote(err: unknown): string {
  * filed, with a note. Then a first-page thumbnail for the review card.
  */
 export async function prepareStage(doc: DocumentRow, ctx: StageContext): Promise<void> {
+  if (doc.filingTarget) {
+    // An upload may already have happened (a filing that set its target, then
+    // failed, and was discarded and restored). OCR and img2pdf don't produce
+    // the same bytes twice, so preparing again would make filing's SHA-1
+    // lookup miss that upload and file a duplicate. Keep what was prepared.
+    if (!ctx.repo.transition(doc.id, 'preparing', 'ready', { attempts: 0, error: null })) ctx.repo.applyRequestedDiscard(doc.id);
+    return;
+  }
   const original = ctx.inbox.get(doc.id, 'original'); // a missing original is a real failure: the worker retries it
   let prepared: { bytes: Uint8Array; mime: string } | null = null;
   let note: string | null = null;
