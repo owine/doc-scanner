@@ -10,6 +10,7 @@ vi.mock('../../src/prepare/run.js', async (importOriginal) => ({
 }));
 
 import { runTool } from '../../src/prepare/run.js';
+import { ToolMissingError } from '../../src/prepare/run.js';
 import { createPrepareTools, sweepStaleTempDirs, TEMP_PREFIX, ToolFailedError } from '../../src/prepare/tools.js';
 
 const run = vi.mocked(runTool);
@@ -63,6 +64,18 @@ describe('PrepareTools (fake binaries)', () => {
   it('fails on any other error exit', async () => {
     fakeTool({}, 2, 'InputFileError: something else');
     await expect(createPrepareTools().ocrPdf(PDF)).rejects.toBeInstanceOf(ToolFailedError);
+  });
+
+  it('does not treat other exits that mention a signature or XFA as protected', async () => {
+    fakeTool({}, 1, 'DigitalSignatureError: Input PDF has a digital signature');
+    await expect(createPrepareTools().ocrPdf(PDF)).rejects.toBeInstanceOf(ToolFailedError);
+    fakeTool({}, 2, 'InputFileError: the word XFA or signature in passing');
+    await expect(createPrepareTools().ocrPdf(PDF)).rejects.toBeInstanceOf(ToolFailedError);
+  });
+
+  it('reports a missing dependency (exit 3, e.g. a language pack) as a missing tool', async () => {
+    fakeTool({}, 3, 'MissingDependencyError: Could not find language data for eng');
+    await expect(createPrepareTools().ocrPdf(PDF)).rejects.toBeInstanceOf(ToolMissingError);
   });
 
   it('keeps a PDF whose pages all had text', async () => {

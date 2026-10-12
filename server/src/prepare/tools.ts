@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import sharp from 'sharp';
-import { runTool } from './run.js';
+import { runTool, ToolMissingError } from './run.js';
 import { ocrAddedText } from './sidecar.js';
 
 export const OCR_TIMEOUT_MS = 5 * 60_000;
@@ -94,8 +94,10 @@ export function createPrepareTools(): PrepareTools {
         );
         // 8: encrypted with a password. A digitally signed PDF is refused (unless
         // told to invalidate the signature, which we never do), and so is a
-        // dynamic XFA form; both are filed as they are.
-        if (r.code === 8 || (r.code !== 0 && /digital signature|XFA/i.test(r.stderr))) return { kind: 'protected' };
+        // dynamic XFA form (both exit 2); both are filed as they are.
+        if (r.code === 8 || (r.code === 2 && /DigitalSignatureError|dynamic XFA forms/.test(r.stderr))) return { kind: 'protected' };
+        // 3: a missing dependency, e.g. Tesseract or the language pack.
+        if (r.code === 3) throw new ToolMissingError('ocrmypdf is missing a dependency');
         if (r.code !== 0) throw new ToolFailedError(`ocrmypdf exited ${r.code}`);
         const sidecar = await readFile(join(dir, 'side.txt'), 'utf8');
         if (!ocrAddedText(sidecar)) return { kind: 'unchanged' };
