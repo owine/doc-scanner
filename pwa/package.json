@@ -13,7 +13,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "preact": "11.0.0",
+    "preact": "11.0.1",
     "idb": "8.0.4",
     "ulid": "3.0.2",
     "tesseract.js": "7.0.0",
