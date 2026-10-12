@@ -42,12 +42,12 @@ describe('analyzeStage', () => {
     expect(folders.map((f) => f.path)).toEqual(['/', '/Bills']);
   });
 
-  it('sends an unusable answer to review with the reason', async () => {
+  it('sends an unusable answer on to preparing, with the reason for review', async () => {
     h = makeHarness();
     h.analyze.mockResolvedValue({ ...okOutcome(), status: 'refusal', detail: 'declined (cyber)' });
     const doc = h.add();
     await analyzeStage(doc, h.ctx);
-    expect(h.repo.get(doc.id)).toMatchObject({ state: 'needs_review', reviewReason: 'analysis refusal: declined (cyber)' });
+    expect(h.repo.get(doc.id)).toMatchObject({ state: 'preparing', analysis: null, reviewReason: 'analysis refusal: declined (cyber)' });
   });
 
   it('honours a discard requested while the model was working', async () => {
@@ -63,13 +63,13 @@ describe('analyzeStage', () => {
 });
 
 describe('analyzeStage retry state and recovery', () => {
-  it('resets retry state when an unusable answer goes to review', async () => {
+  it('resets retry state when an unusable answer moves on', async () => {
     h = makeHarness();
     h.analyze.mockResolvedValue({ ...okOutcome(), status: 'refusal', detail: 'declined' });
     const doc = h.add();
     h.repo.transition(doc.id, 'received', 'received', { attempts: 2, error: 'x' });
     await analyzeStage(h.repo.get(doc.id)!, h.ctx);
-    expect(h.repo.get(doc.id)).toMatchObject({ state: 'needs_review', attempts: 0, error: null });
+    expect(h.repo.get(doc.id)).toMatchObject({ state: 'preparing', attempts: 0, error: null });
   });
 
   it('refreshes the folder cache when a session is live and there is no tree', async () => {
@@ -143,6 +143,14 @@ describe('decideStage', () => {
       autoFiled: true,
       decision: { name: ANALYSIS.name, folder: ANALYSIS.folder },
     });
+  });
+
+  it('sends a document whose analysis was unusable to review with the recorded reason', () => {
+    h = makeHarness();
+    const doc = h.add();
+    h.repo.transition(doc.id, 'received', 'ready', { reviewReason: 'analysis refusal: declined' });
+    decideStage(h.repo.get(doc.id)!, h.ctx);
+    expect(h.repo.get(doc.id)).toMatchObject({ state: 'needs_review', reviewReason: 'analysis refusal: declined' });
   });
 
   it('sends everything to review while auto-filing is off', () => {

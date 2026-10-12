@@ -29,7 +29,8 @@ export function reviewReason(a: StoredAnalysis | null, s: EffectiveSettings): st
 
 export function decideStage(doc: DocumentRow, ctx: StageContext): void {
   const a = doc.analysis;
-  const reason = reviewReason(a, ctx.settings.get());
+  // No analysis: the model's answer was unusable, and analyzeStage recorded why.
+  const reason = a ? reviewReason(a, ctx.settings.get()) : (doc.reviewReason ?? 'no analysis');
   const moved =
     reason === null && a && a.folder
       ? ctx.repo.transition(doc.id, 'ready', 'filing', {

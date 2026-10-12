@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { makeHarness, ANALYSIS } from './harness.js';
+import { makeHarness, ANALYSIS, okOutcome } from './harness.js';
 import { DocumentWorker, MAX_ATTEMPTS } from '../../src/documents/worker.js';
 import type { DocumentRow } from '../../src/documents/types.js';
 
@@ -15,6 +15,14 @@ function afterMicrotasks(depth: number, fn: () => void): void {
 }
 
 describe('DocumentWorker', () => {
+  it('prepares a document whose analysis was unusable, then sends it to review with the reason', async () => {
+    h = makeHarness();
+    h.analyze.mockResolvedValue({ ...okOutcome(), status: 'invalid', detail: 'schema mismatch' });
+    const doc = h.add();
+    await new DocumentWorker(h.ctx).wake();
+    expect(h.repo.get(doc.id)).toMatchObject({ state: 'needs_review', analysis: null, reviewReason: 'analysis invalid: schema mismatch' });
+  });
+
   it('takes a document from received to filed when it can auto-file', async () => {
     h = makeHarness();
     const doc = h.add();
