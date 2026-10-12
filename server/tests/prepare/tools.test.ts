@@ -216,26 +216,50 @@ describe('checking the bytes before a tool or sharp parses them', () => {
     expect(calls).toEqual([]);
   });
 
-  it('needs the PDF header at the very first byte', async () => {
-    fakeTool({ 'side.txt': '[OCR skipped on page(s) 1]' });
-    const tools = createPrepareTools();
-    expect(await tools.ocrPdf(PDF)).toEqual({ kind: 'unchanged' });
+  it('hands the tools a PDF from its header on, so nothing before it is ever read', async () => {
     // Ghostscript 10.07 runs a file as PostScript when `%!` comes before
     // `%PDF-`, whatever precedes it (measured: junk, a BOM or a NUL first all
-    // ran), so nothing may come before the header, not even whitespace.
-    const polyglots = {
-      'PostScript, then a PDF header': enc('%!PS-Adobe-3.0\n(PS-RAN\n) print flush\nshowpage\n%PDF-1.4\n'),
-      'DOS EPS magic': new Uint8Array([0xc5, 0xd0, 0xd3, 0xc6, 0x1e, 0, 0, 0, ...enc('%!PS-Adobe-3.0 EPSF-3.0\n%PDF-1.4\n')]),
-      'junk before %!': enc('xx\n%!PS\n(PS-RAN\n) print flush\n%PDF-1.4\n'),
-      'a BOM before %!': new Uint8Array([0xef, 0xbb, 0xbf, ...enc('%!PS\n%PDF-1.4\n')]),
-      'a NUL before %!': new Uint8Array([0, ...enc('%!PS\n%PDF-1.4\n')]),
-      'whitespace before the header': enc(' \n%PDF-1.4\n'),
-      'junk before the header': enc('(PS-RAN\n) print flush\n%PDF-1.4\n'),
+    // ran). Cut at the header, every one of these reaches the tools starting
+    // with `%PDF-`, which Ghostscript always reads as PDF.
+    const prefixed = {
+      'PostScript, then a PDF header': enc('%!PS-Adobe-3.0\n(PS-RAN\n) print flush\nshowpage\n'),
+      'DOS EPS magic': new Uint8Array([0xc5, 0xd0, 0xd3, 0xc6, 0x1e, 0, 0, 0, ...enc('%!PS-Adobe-3.0 EPSF-3.0\n')]),
+      'junk before %!': enc('xx\n%!PS\n(PS-RAN\n) print flush\n'),
+      'a BOM before %!': new Uint8Array([0xef, 0xbb, 0xbf, ...enc('%!PS\n')]),
+      'a NUL before %!': new Uint8Array([0, ...enc('%!PS\n')]),
+      'a BOM': new Uint8Array([0xef, 0xbb, 0xbf]),
+      'a newline': enc('\n'),
+      'junk before the header': enc('(PS-RAN\n) print flush\n'),
     };
-    for (const [what, bytes] of Object.entries(polyglots)) {
-      await expect(tools.ocrPdf(bytes), what).rejects.toThrow(new ToolFailedError('not a PDF'));
-      expect([what, await tools.thumbnail(bytes, 'application/pdf')]).toEqual([what, null]);
+    const page = await sharp({ create: { width: 800, height: 1200, channels: 3, background: '#ffffff' } }).jpeg().toBuffer();
+    const inputs: string[] = [];
+    run.mockImplementation(async (cmd, args, o) => {
+      calls.push({ cmd, args, cwd: o.cwd, tmp: o.env?.TMPDIR, mode: 0 });
+      inputs.push(readFileSync(join(o.cwd!, 'in.pdf'), 'latin1'));
+      // An image-only PDF: OCR adds text.
+      writeFileSync(join(o.cwd!, 'side.txt'), 'Northwind Energy');
+      writeFileSync(join(o.cwd!, 'out.pdf'), '%PDF- ocred');
+      writeFileSync(join(o.cwd!, 'page.jpg'), page);
+      return { code: 0, stdout: '', stderr: '' };
+    });
+    const tools = createPrepareTools();
+    for (const [what, prefix] of Object.entries(prefixed)) {
+      const bytes = new Uint8Array([...prefix, ...PDF]);
+      inputs.length = 0;
+      const r = await tools.ocrPdf(bytes);
+      expect([what, r.kind === 'ocred' && new TextDecoder().decode(r.pdf)]).toEqual([what, '%PDF- ocred']);
+      expect([what, await tools.thumbnail(bytes, 'application/pdf')]).not.toEqual([what, null]);
+      expect([what, inputs]).toEqual([what, [new TextDecoder('latin1').decode(PDF), new TextDecoder('latin1').decode(PDF)]]);
     }
+  });
+
+  it('needs the PDF header within the first 1024 bytes', async () => {
+    fakeTool({ 'side.txt': '[OCR skipped on page(s) 1]' });
+    const tools = createPrepareTools();
+    const at = (n: number) => new Uint8Array([...new Uint8Array(n).fill(0x20), ...PDF]);
+    expect(await tools.ocrPdf(at(1019))).toEqual({ kind: 'unchanged' });
+    await expect(tools.ocrPdf(at(1020))).rejects.toThrow(new ToolFailedError('not a PDF'));
+    expect(await tools.thumbnail(at(1020), 'application/pdf')).toBeNull();
     expect(calls).toHaveLength(1);
   });
 

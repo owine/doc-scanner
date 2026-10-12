@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { PDFDocument, StandardFonts } from '@cantoo/pdf-lib';
 import sharp from 'sharp';
 import { runTool, ToolTimeoutError } from '../src/prepare/run.js';
-import { createPrepareTools } from '../src/prepare/tools.js';
+import { createPrepareTools, pdfFromHeader } from '../src/prepare/tools.js';
 
 let failures = 0;
 function check(name: string, ok: boolean): void {
@@ -43,6 +43,7 @@ const imageOnly = await tools.imageToPdf(page!, 'image/jpeg');
 check('img2pdf makes a PDF from a JPEG', Buffer.from(imageOnly.subarray(0, 5)).toString() === '%PDF-');
 check('a born-digital PDF is left unchanged', (await tools.ocrPdf(born)).kind === 'unchanged');
 check('an image-only PDF gains a text layer', (await tools.ocrPdf(imageOnly)).kind === 'ocred');
+check('an image-only PDF with a BOM before its header gains a text layer', (await tools.ocrPdf(new Uint8Array([0xef, 0xbb, 0xbf, ...imageOnly]))).kind === 'ocred');
 check('thumbnails a PDF', (await tools.thumbnail(born, 'application/pdf')) !== null);
 check('thumbnails a JPEG', (await tools.thumbnail(page!, 'image/jpeg')) !== null);
 // 16 bits with transparency: img2pdf 0.6 refuses it (a Pillow limit), so this goes through the JPEG retry.
@@ -51,21 +52,26 @@ check('a 16-bit PNG with transparency becomes a PDF', Buffer.from((await tools.i
 
 const dir = await mkdtemp(join(tmpdir(), 'smoke-'));
 try {
-  // A PostScript program with a PDF header later on. Run directly, this
-  // Ghostscript executes it: it prints the marker and renders a page. Through
-  // the tools, the content check must stop it before Ghostscript starts, so
-  // there is no thumbnail (the page it would render) and no OCR.
+  // A PostScript program in front of a real PDF. Handed to this Ghostscript
+  // whole, it runs as PostScript: it prints the marker and renders its own
+  // page. The tools cut it at the PDF header, so Ghostscript and ocrmypdf
+  // only ever read the PDF: no marker, and the PDF's own page.
   const MARKER = 'SMOKE-PS-RAN';
-  const polyglot = new TextEncoder().encode(`%!PS-Adobe-3.0\n(${MARKER}\\n) print flush\nshowpage\n%PDF-1.4\n`);
+  const polyglot = new Uint8Array([...new TextEncoder().encode(`%!PS-Adobe-3.0\n(${MARKER}\\n) print flush\nshowpage\n`), ...born]);
+  const gs = (input: string, output: string) =>
+    runTool('gs', ['-dSAFER', '-dBATCH', '-dNOPAUSE', '-dQUIET', '-sDEVICE=jpeg', `-sOutputFile=${output}`, input], { timeoutMs: 30_000, cwd: dir });
   await writeFile(join(dir, 'poly.pdf'), polyglot);
-  const direct = await runTool('gs', ['-dSAFER', '-dBATCH', '-dNOPAUSE', '-dQUIET', '-sDEVICE=jpeg', '-sOutputFile=poly.jpg', 'poly.pdf'], {
-    timeoutMs: 30_000,
-    cwd: dir,
-  });
-  const rendered = (await readdir(dir)).includes('poly.jpg');
-  check('Ghostscript runs the PostScript polyglot when handed it directly', direct.stdout.includes(MARKER) && rendered);
-  check('the polyglot gets no thumbnail: Ghostscript never sees it', (await tools.thumbnail(polyglot, 'application/pdf')) === null);
-  check('the polyglot is not OCRed', await tools.ocrPdf(polyglot).then(() => false, (err: unknown) => err instanceof Error && err.message === 'not a PDF'));
+  const whole = await gs('poly.pdf', 'poly.jpg');
+  check('Ghostscript runs the PostScript polyglot when handed it whole', whole.stdout.includes(MARKER) && (await readdir(dir)).includes('poly.jpg'));
+  const cut = pdfFromHeader(polyglot);
+  check('the tools get the polyglot from its PDF header on', cut !== null && Buffer.from(cut).equals(Buffer.from(born)));
+  await writeFile(join(dir, 'cut.pdf'), cut!);
+  const asPdf = await gs('cut.pdf', 'cut.jpg');
+  check('Ghostscript reads that part as PDF: no marker', asPdf.code === 0 && !asPdf.stdout.includes(MARKER) && (await readdir(dir)).includes('cut.jpg'));
+  const polyThumb = await tools.thumbnail(polyglot, 'application/pdf');
+  const bornThumb = await tools.thumbnail(born, 'application/pdf');
+  check('the polyglot\'s thumbnail is the PDF\'s page', polyThumb !== null && bornThumb !== null && Buffer.from(polyThumb).equals(Buffer.from(bornThumb)));
+  check('ocrmypdf reads the polyglot as the born-digital PDF', (await tools.ocrPdf(polyglot)).kind === 'unchanged');
 
   await writeFile(join(dir, 'in.pdf'), born);
   const enc = await runTool('qpdf', ['--encrypt', 'u', 'o', '256', '--', 'in.pdf', 'enc.pdf'], { timeoutMs: 30_000, cwd: dir });

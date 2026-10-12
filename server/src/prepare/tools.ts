@@ -26,17 +26,20 @@ export class ToolFailedError extends Error {
  * program in gs, and sharp would render an SVG. So the bytes are checked first.
  */
 
-const PDF_HEADER = [...new TextEncoder().encode('%PDF-')];
+/** Readers accept a little junk (a BOM, a newline) before the header; Acrobat looks in the first 1024 bytes. */
+const PDF_HEADER_WINDOW = 1024;
 
 /**
- * `%PDF-` at the very first byte. Readers tolerate junk before the header,
- * but Ghostscript 10.07 then runs the file as PostScript whenever `%!` comes
- * before `%PDF-`, even after junk, a BOM or a NUL (measured in the image), and
- * ocrmypdf may hand its input to Ghostscript too. A real PDF starts with its
- * header; one that doesn't is filed as it is.
+ * The PDF from its `%PDF-` header on, which must lie in the first 1024 bytes;
+ * null when it doesn't. The tools only ever get this: Ghostscript 10.07 runs
+ * a file as PostScript whenever `%!` comes before `%PDF-`, even after junk, a
+ * BOM or a NUL (measured in the image), and ocrmypdf may hand its input to
+ * Ghostscript too. Starting at the header, nothing can come before it, so
+ * every such polyglot is read as the PDF it claims to be.
  */
-function looksLikePdf(bytes: Uint8Array): boolean {
-  return startsWith(bytes, PDF_HEADER);
+export function pdfFromHeader(bytes: Uint8Array): Uint8Array | null {
+  const at = Buffer.from(bytes.buffer, bytes.byteOffset, Math.min(bytes.length, PDF_HEADER_WINDOW)).indexOf('%PDF-');
+  return at === -1 ? null : bytes.subarray(at);
 }
 
 function startsWith(bytes: Uint8Array, sig: readonly number[]): boolean {
@@ -144,9 +147,11 @@ export function createPrepareTools(o: { atStartup?: boolean } = {}): PrepareTool
   sweepStaleTempDirs({ all: o.atStartup === true });
   return {
     async ocrPdf(pdf) {
-      if (!looksLikePdf(pdf)) throw new ToolFailedError('not a PDF');
+      const fromHeader = pdfFromHeader(pdf);
+      if (!fromHeader) throw new ToolFailedError('not a PDF');
       return inTempDir(async (dir) => {
-        await writeFile(join(dir, 'in.pdf'), pdf);
+        // 'unchanged' files the caller's untouched original; 'ocred' is built from this.
+        await writeFile(join(dir, 'in.pdf'), fromHeader);
         const r = await runTool(
           'ocrmypdf',
           ['--skip-text', '--output-type', 'pdf', '--jobs', '2', '-l', 'eng', '--sidecar', 'side.txt', 'in.pdf', 'out.pdf'],
@@ -204,9 +209,10 @@ export function createPrepareTools(o: { atStartup?: boolean } = {}): PrepareTool
           return null; // HEIC, BMP and anything else sharp can't decode
         }
       }
-      if (mime !== 'application/pdf' || !looksLikePdf(bytes)) return null;
+      const fromHeader = mime === 'application/pdf' ? pdfFromHeader(bytes) : null;
+      if (!fromHeader) return null;
       return inTempDir(async (dir) => {
-        await writeFile(join(dir, 'in.pdf'), bytes);
+        await writeFile(join(dir, 'in.pdf'), fromHeader);
         // Render into a fixed box, so a page that claims a huge size can't make
         // a huge bitmap: twice the wanted width (a sharper downscale), 3:2 tall
         // (holds Letter and A4 portrait, which fit by width and leave white at
