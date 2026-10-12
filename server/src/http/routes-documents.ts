@@ -5,6 +5,7 @@ import { z, ZodError } from 'zod';
 import type { SessionStore } from '../auth/session-store.js';
 import { sanitiseName } from '../analyze/resolve.js';
 import type { Pipeline } from '../documents/pipeline.js';
+import { InboxBlobMissingError } from '../documents/inbox-store.js';
 import type { Decision, DocumentRow, DocumentState } from '../documents/types.js';
 import { intakeMime } from '../documents/extension.js';
 import { toView } from '../documents/view.js';
@@ -94,7 +95,8 @@ function folderPath(folder: Decision['folder']): string {
 
 /** Where a failed document picks up on retry: as late as what it already has allows. */
 function restartState(d: DocumentRow): DocumentState {
-  return d.decision ? 'filing' : d.analysis ? 'ready' : 'received';
+  // An analysed document is prepared again: a failure there may have cost its text layer or thumbnail.
+  return d.decision ? 'filing' : d.analysis ? 'preparing' : 'received';
 }
 
 export function documentRoutes(deps: { store: SessionStore; pipeline: Pipeline }) {
@@ -162,6 +164,25 @@ export function documentRoutes(deps: { store: SessionStore; pipeline: Pipeline }
     if (!Number.isInteger(since) || since < 0) return c.json({ error: 'invalid_cursor' }, 400);
     const { rows, cursor } = repo.listChangedSince(since);
     return c.json({ documents: rows.map(toView), cursor });
+  });
+
+  r.get('/:id/thumbnail', (c) => {
+    const doc = repo.get(c.req.param('id'));
+    if (!doc || !doc.hasThumbnail || doc.state === 'filed' || !inbox.has(doc.id, 'thumbnail')) {
+      return c.json({ error: 'not_found' }, 404);
+    }
+    let jpeg: Uint8Array<ArrayBuffer>;
+    try {
+      // Copied into a plain Uint8Array<ArrayBuffer>: a Buffer is not a BodyInit to the type checker.
+      jpeg = new Uint8Array(inbox.get(doc.id, 'thumbnail'));
+    } catch (err) {
+      // Filing deletes the inbox blobs, and may have done so since has().
+      if (err instanceof InboxBlobMissingError) return c.json({ error: 'not_found' }, 404);
+      throw err;
+    }
+    return new Response(jpeg, {
+      headers: { 'content-type': 'image/jpeg', 'cache-control': 'private, max-age=300', 'x-content-type-options': 'nosniff' },
+    });
   });
 
   r.get('/:id', (c) => {

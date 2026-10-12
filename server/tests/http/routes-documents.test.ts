@@ -83,6 +83,7 @@ describe('document routes', () => {
       ['GET', '/api/documents'],
       ['POST', '/api/documents'],
       ['GET', '/api/documents/some-id'],
+      ['GET', '/api/documents/some-id/thumbnail'],
       ['POST', '/api/documents/some-id/approve'],
       ['POST', '/api/documents/some-id/discard'],
       ['POST', '/api/documents/some-id/restore'],
@@ -175,10 +176,19 @@ describe('document routes', () => {
     expect((await post('restore')).status).toBe(200);
     expect(pipeline.repo.get(doc.id)?.state).toBe('needs_review');
     pipeline.repo.transition(doc.id, 'needs_review', 'failed', { error: 'x' });
+    pipeline.inbox.put(doc.id, 'original', new TextEncoder().encode('statement'));
     expect((await post('retry')).status).toBe(200);
-    // Retry resumes at `ready`; the worker then decides at once, and with
-    // auto-filing off that means review again.
-    expect(pipeline.repo.get(doc.id)).toMatchObject({ state: 'needs_review', reviewReason: 'auto-filing is off', error: null, attempts: 0 });
+    await pipeline.worker.wake(); // the prepare stage awaits its tools: let the drain finish
+    // Retry resumes at `preparing` (the failure may have cost the text layer
+    // or the thumbnail), so preparedMime is recorded; the worker then decides
+    // at once, and with auto-filing off that means review again.
+    expect(pipeline.repo.get(doc.id)).toMatchObject({
+      state: 'needs_review',
+      preparedMime: 'application/pdf',
+      reviewReason: 'auto-filing is off',
+      error: null,
+      attempts: 0,
+    });
   });
 
   it('serves folders (minus never-file-here) and settings', async () => {
@@ -642,5 +652,37 @@ describe('document route edges', () => {
     expect(res.status).toBe(413);
     expect(await res.json()).toEqual({ error: 'payload_too_large' });
     expect(pipeline.repo.listChangedSince(0).rows).toHaveLength(0);
+  });
+});
+
+describe('thumbnail', () => {
+  it('serves the thumbnail blob', async () => {
+    const { app, cookie, pipeline } = await setup();
+    const doc = pipeline.repo.insert({ source: 'picker', originalName: 'a.pdf', mime: 'application/pdf', size: 1, sha256: 't1', sourceContext: null });
+    pipeline.repo.transition(doc.id, 'received', 'needs_review', { hasThumbnail: true });
+    pipeline.inbox.put(doc.id, 'thumbnail', new Uint8Array([0xff, 0xd8, 1, 2]));
+    const res = await app.request(`/api/documents/${doc.id}/thumbnail`, { headers: { cookie } });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toBe('image/jpeg');
+    expect(res.headers.get('cache-control')).toBe('private, max-age=300');
+    expect(res.headers.get('x-content-type-options')).toBe('nosniff');
+    expect([...new Uint8Array(await res.arrayBuffer())]).toEqual([0xff, 0xd8, 1, 2]);
+  });
+
+  it('is not found for an unknown id, no thumbnail, a filed document or a missing blob', async () => {
+    const { app, cookie, pipeline } = await setup();
+    const add = (sha256: string) =>
+      pipeline.repo.insert({ source: 'picker', originalName: 'a.pdf', mime: 'application/pdf', size: 1, sha256, sourceContext: null });
+    const none = add('n1');
+    const filed = add('n2');
+    pipeline.repo.transition(filed.id, 'received', 'filed', { hasThumbnail: true });
+    pipeline.inbox.put(filed.id, 'thumbnail', new Uint8Array([1]));
+    const blobless = add('n3');
+    pipeline.repo.transition(blobless.id, 'received', 'needs_review', { hasThumbnail: true });
+    for (const id of ['nope', none.id, filed.id, blobless.id]) {
+      const res = await app.request(`/api/documents/${id}/thumbnail`, { headers: { cookie } });
+      expect([id, res.status]).toEqual([id, 404]);
+      expect(await res.json()).toEqual({ error: 'not_found' });
+    }
   });
 });
