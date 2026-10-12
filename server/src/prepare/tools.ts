@@ -187,7 +187,9 @@ export function createPrepareTools(o: { atStartup?: boolean } = {}): PrepareTool
       } else if (!(await sharpMayDecode(image))) {
         throw new ToolFailedError('not the image type it was declared as');
       }
-      return img2pdf(new Uint8Array(await sharp(image).rotate().jpeg({ quality: 90 }).toBuffer()), 'in.jpeg');
+      // JPEG has no transparency: put it on white (paper), not sharp's default black.
+      const jpeg = await sharp(image).rotate().flatten({ background: '#ffffff' }).jpeg({ quality: 90 }).toBuffer();
+      return img2pdf(new Uint8Array(jpeg), 'in.jpeg');
     },
 
     async thumbnail(bytes, mime, o = {}) {

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { existsSync, lstatSync, lutimesSync, mkdtempSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, lutimesSync, readFileSync, mkdtempSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import sharp from 'sharp';
@@ -141,6 +141,27 @@ describe('PrepareTools (fake binaries)', () => {
     const pdf = await createPrepareTools().imageToPdf(new Uint8Array(png16), 'image/png');
     expect(new TextDecoder().decode(pdf)).toBe('%PDF- from jpeg');
     expect(calls.map((c) => c.args.at(-1))).toEqual(['in.png', 'in.jpeg']);
+  });
+
+  it('puts a transparent image on white, not black, when it goes through JPEG', async () => {
+    const seen: Buffer[] = [];
+    run.mockImplementation(async (cmd, args, o) => {
+      calls.push({ cmd, args, cwd: o.cwd, tmp: o.env?.TMPDIR, mode: 0 });
+      seen.push(readFileSync(join(o.cwd!, args.at(-1)!)));
+      if (args.at(-1) !== 'in.jpeg') return { code: 1, stdout: '', stderr: '' }; // as img2pdf refuses a 16-bit PNG with alpha
+      writeFileSync(join(o.cwd!, 'out.pdf'), '%PDF-');
+      return { code: 0, stdout: '', stderr: '' };
+    });
+    const clear = { width: 4, height: 4, channels: 4 as const, background: { r: 255, g: 255, b: 255, alpha: 0 } };
+    const tools = createPrepareTools();
+    await tools.imageToPdf(new Uint8Array(await sharp({ create: clear }).webp({ lossless: true }).toBuffer()), 'image/webp');
+    await tools.imageToPdf(new Uint8Array(await sharp({ create: clear }).png().toColourspace('rgb16').toBuffer()), 'image/png');
+    const jpegs = seen.filter((b) => b[0] === 0xff && b[1] === 0xd8);
+    expect(jpegs).toHaveLength(2);
+    for (const jpeg of jpegs) {
+      const { data } = await sharp(jpeg).raw().toBuffer({ resolveWithObject: true });
+      expect([...data.subarray(0, 3)]).toEqual([255, 255, 255]);
+    }
   });
 
   it('does not retry what sharp cannot read, or a missing or timed-out img2pdf', async () => {
