@@ -35,6 +35,8 @@ export function makeDoc(over: Partial<DocumentView> = {}): DocumentView {
     discardedAt: null,
     prepareNote: null,
     hasThumbnail: false,
+    combinedInto: null,
+    anchorName: null,
     ...over,
   };
 }

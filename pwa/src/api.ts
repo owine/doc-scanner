@@ -5,7 +5,13 @@ export interface LoginResponse { ok: true; email: string }
 export interface StatusResponse { email: string }
 
 class ApiError extends Error {
-  constructor(message: string, public readonly status: number, public readonly code?: string) {
+  constructor(
+    message: string,
+    public readonly status: number,
+    public readonly code?: string,
+    /** The error response's JSON object, for fields beyond `error` (empty if it wasn't one). */
+    public readonly body: Record<string, unknown> = {},
+  ) {
     super(message);
   }
 }
@@ -38,8 +44,9 @@ export async function request<T>(path: string, init: RequestInit = {}, options: 
   if (!res.ok) {
     // An error body may not be JSON: with the server down, the reverse proxy
     // answers with an HTML 502/503. Classify on the status, not the body.
-    const code = errorCode(text);
-    const error = new ApiError(code ?? 'request_failed', res.status, code);
+    const body = errorBody(text);
+    const code = typeof body.error === 'string' ? body.error : undefined;
+    const error = new ApiError(code ?? 'request_failed', res.status, code, body);
     if (options.reportAs && res.status >= 500) {
       captureRequestFailure(error, { operation: options.reportAs, path, failure: 'http', status: res.status });
     }
@@ -48,12 +55,12 @@ export async function request<T>(path: string, init: RequestInit = {}, options: 
   return (text ? JSON.parse(text) : {}) as T;
 }
 
-function errorCode(text: string): string | undefined {
+function errorBody(text: string): Record<string, unknown> {
   try {
-    const code = (JSON.parse(text) as { error?: unknown }).error;
-    return typeof code === 'string' ? code : undefined;
+    const v = JSON.parse(text) as unknown;
+    return v !== null && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
   } catch {
-    return undefined;
+    return {};
   }
 }
 
