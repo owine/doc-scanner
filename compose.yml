@@ -5,6 +5,8 @@
 services:
   app:
     # `latest` follows main; pin a `sha-<short>` tag to hold a known-good build.
+    # `up` reuses a cached `latest`, so update with:
+    #   docker compose pull && docker compose up -d
     image: ghcr.io/owine/doc-scanner:${DOC_SCANNER_TAG:-latest}
     # Loopback only: the app needs HTTPS (Secure cookie, camera, service
     # worker), so a reverse proxy on this host terminates TLS and forwards here.
@@ -12,7 +14,9 @@ services:
     # in Docker, drop `ports` and put both on a shared network instead.
     ports: ["127.0.0.1:3000:3000"]
     # app.db and the encrypted inbox. Back it up together with
-    # SESSION_ENCRYPTION_KEY: without the key, nothing in it can be read.
+    # SESSION_ENCRYPTION_KEY: without the key, the queued files, sessions and
+    # documents' names, paths and analyses can't be read. Some metadata, such
+    # as sizes, hashes, MIME types, states and timestamps, is plain text.
     volumes: ["./data:/data"]
     environment:
       SESSION_ENCRYPTION_KEY: ${SESSION_ENCRYPTION_KEY:?required}
