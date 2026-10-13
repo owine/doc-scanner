@@ -65,6 +65,28 @@ describe('loadConfig', () => {
     expect(autoFileThresholdSchema.safeParse(0.8).success).toBe(true);
   });
 
+  it('treats blank proxy settings as unset (Compose passes unset variables as empty)', () => {
+    const cfg = loadConfig({ ...base, AUTH_PROXY_USER: '', AUTH_PROXY_SECRET: '  ' });
+    expect(cfg.AUTH_PROXY_USER).toBeUndefined();
+    expect(cfg.AUTH_PROXY_SECRET).toBeUndefined();
+  });
+
+  it('reads the proxy user and a long enough secret', () => {
+    const cfg = loadConfig({ ...base, AUTH_PROXY_USER: 'owine', AUTH_PROXY_SECRET: 's'.repeat(32) });
+    expect(cfg.AUTH_PROXY_USER).toBe('owine');
+    expect(cfg.AUTH_PROXY_SECRET).toBe('s'.repeat(32));
+  });
+
+  it('rejects a proxy secret shorter than 32 characters', () => {
+    expect(() => loadConfig({ ...base, AUTH_PROXY_USER: 'owine', AUTH_PROXY_SECRET: 'short' })).toThrow(
+      /AUTH_PROXY_SECRET: must be at least 32 characters/,
+    );
+  });
+
+  it('rejects a proxy secret without a proxy user, which would do nothing', () => {
+    expect(() => loadConfig({ ...base, AUTH_PROXY_SECRET: 's'.repeat(32) })).toThrow(/AUTH_PROXY_SECRET: needs AUTH_PROXY_USER/);
+  });
+
   it('rejects a threshold with more than two decimals', () => {
     expect(() => loadConfig({ ...base, AUTO_FILE_THRESHOLD: '0.875' })).toThrow(/AUTO_FILE_THRESHOLD/);
     expect(loadConfig({ ...base, AUTO_FILE_THRESHOLD: '0.85' }).AUTO_FILE_THRESHOLD).toBe(0.85);
