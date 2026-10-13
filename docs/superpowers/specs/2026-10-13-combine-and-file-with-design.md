@@ -32,6 +32,7 @@ These are separate actions. Neither touches a file already in Drive.
 | Combined document's `source` | The first part's source; "combined from N documents" goes in `source_context` | `documents.source` has a `CHECK` constraint; a new value would need a table rebuild, and the model reads `source_context` in `<arrival>` anyway. |
 | How "File with" works | A re-analysis with an **anchor** (another document) in the prompt; the folder is **pinned in code** to the anchor's folder; the model only writes a paired name | One mechanism covers in-review and filed anchors; the folder can't drift. |
 | Anchor lifetime | Snapshotted (name + folder) when requested, sealed on the row | The worker stays free of cross-row reads. A stale snapshot is harmless: the result is always reviewed. |
+| Documents that may already be in Drive | Combine, File with and Re-analyze are all refused (`409 possibly_in_drive`) for a row with a filing target or an unverified upload (the view's `possiblyInDrive`); the menu hides them | Such a row can sit in `needs_review` (restored from `awaiting_login`, or sent back by `FolderNameTakenError`). `prepareStage` skips a row with a target, so re-analysing it would file the original with no text layer, and the file stage's SHA-1 check would miss an earlier upload of the prepared bytes, making a duplicate. Combining it could put its pages in Drive twice. |
 | Review | A re-analysed document (anchored or not) always goes to review | The user asked for it from review; nothing should auto-file behind their back. |
 | Re-preparing | Re-analysis goes back through `received`, so preparing (OCR) re-runs | Keeps the "every prepare run starts by clearing prepared state" rule. Costs seconds for a typical one- or two-page document. |
 | Prompt for ordinary documents | Unchanged, byte for byte | The eval baseline and the prompt cache stay valid; the `<related>` block exists only when an anchor is set. |
@@ -61,6 +62,8 @@ interface Anchor {
 ```
 
 - `DocumentView` gains `combinedInto` and `anchorName` (the anchor's name only).
+- Repo: `anchor` joins `COLUMN`, `JSON_FIELDS` and `SEALED_COLUMNS`, so `quarantine()` clears it like the others. `combinedInto` joins `COLUMN` as plaintext.
+- The `document_filed` audit entry (`file.ts`) gains `anchored: boolean`. An anchored filing approved unedited reports `userEdited: false` for a folder that code chose, not the model, so calibrating auto-filing must be able to leave these out.
 - Parts discarded by a combine are purged with every other discarded row after 7 days, so the undo window is the discard retention.
 
 ### 2. Combine (server)
@@ -81,18 +84,24 @@ interface Anchor {
   - `unsupported_type`: text, Office and other non-page types.
   - `too_large`: the result is over the server's intake limit (`MAX_UPLOAD_BYTES` in `routes-documents.ts`, 50 MiB).
 
+**Before building:** refuse with `409 possibly_in_drive` if any part has `possiblyInDrive`. Refuse with `too_large` if the parts' input sizes (the prepared blob where it will be used, else `size`) already exceed the limit, so ten large parts are never loaded into memory together.
+- The prepared blob's size needs a new `InboxStore.size(id, kind)`, read from the file's stat. The ciphertext's fixed overhead is close enough for this check.
+- The check after building stays, because a photo re-encoded as JPEG can grow.
+
 **Writing:**
 
 1. Build the PDF in memory; compute its SHA-256.
-2. Put the blob in the inbox under the new row's id.
-3. In one SQLite transaction:
-   - Insert the new row in `received`. It takes the first part's `source`, `originalName` null, `mime: 'application/pdf'`, and `sourceContext: "combined from N documents"`.
-   - Transition each part `needs_review → discarded` with `combinedInto` and `discardedAt` (compare-and-set).
+2. Generate the new row's id with a helper exported from the repo (today's generator, `randomBytes(12).toString('base64url')`, is private inside `insert()`), and put the blob in the inbox under it. If the server crashes before the commit, the blob has no row, and the hourly orphan sweep deletes it.
+3. Call a new repo method, `insertCombined(id, newDoc, partIds)`. The repo has no transaction helper today and `insert()` makes its own id. The new method takes the pre-made id and wraps steps (a) and (b) in `BEGIN`/`COMMIT`/`ROLLBACK`. Every step is synchronous, so nothing can interleave.
+   - (a) Insert the new row in `received`. It takes the first part's `source`, `originalName` null, `mime: 'application/pdf'`, and `sourceContext: "combined from N documents"`.
+   - (b) Transition each part `needs_review → discarded` with `combinedInto` and `discardedAt` (compare-and-set).
 4. If any compare-and-set fails, roll back, delete the blob and return `409 conflict`. Otherwise wake the worker and return the new document's view.
 
 The combined document then takes the normal path: analyse → prepare (OCR skips the pages that already have text) → decide → review.
 
-**Restore:** `/restore` of a part already works, since the part is plainly discarded with its blobs and analysis kept. It also clears `combinedInto`.
+**Restore:** `/restore` of a part already works, since the part is plainly discarded with its blobs and analysis kept; its patch also clears `combinedInto`.
+
+Restoring a part while the combined document still exists is allowed: the same pages are then in two documents. The activity row's "Combined into another document" label is the warning, and undo means discard the combined document and restore its parts.
 
 ### 3. Re-analyze and File with (server)
 
@@ -105,11 +114,14 @@ The combined document then takes the normal path: analyse → prepare (OCR skips
 | `filed` | `filedName` without extension | existing `{ linkId: filingTarget.folderLinkId, path: filedFolderPath }` |
 | `needs_review` | `decision.name ?? analysis.name` | `decision.folder ?? analysis.folder` (a proposed new folder is kept as the same `new` choice) |
 
+Refused with `409 possibly_in_drive` when the document itself has `possiblyInDrive`.
+
 Rejected with `409 invalid_anchor`:
 
 - the document itself
 - any other state
-- an anchor with no usable folder (`analysis.folder` null, or a filed row missing its target)
+- an in-review anchor with neither a decision nor an analysis (an unusable outcome), or whose `decision.folder ?? analysis.folder` is null
+- a filed anchor missing its filing target
 
 Two documents that both carry the same new-folder proposal still end in one folder: when filing, `file.ts` reuses a folder that already exists by that name.
 
@@ -123,7 +135,10 @@ Then wake the worker.
 
 **Analyzer:**
 
-- `AnalyzeInput` gains `anchor?: { name: string; folderPath: string }`. For a `new` folder the path is `parentPath/name`.
+- `AnalyzeInput` gains `anchor?: { name: string; folderPath: string }`.
+  - The path is resolved by `analyzeStage` from the folder cache at analysis time, so a renamed folder shows its current path.
+  - An existing folder is looked up by `linkId`. A `new` folder is joined to its parent's current path the way `folderPath()` in `routes-documents.ts` does it (no `//` under the root).
+  - If the folder (or a new folder's parent) is gone from the cache, the prompt falls back to the snapshot's path. The pairing name is still useful, and the folder is nulled after the call anyway (below).
 - `formatArrival` adds a block before `File this document.`, only when the anchor is set:
 
 ```
@@ -139,14 +154,16 @@ the same conventions, saying what this document is.
 
 **`analyzeStage`, after an `ok` outcome with an anchor:**
 
-- Overwrite `analysis.folder` with the anchor's folder. If the anchor's folder is an existing one that is no longer in the folder cache, or is now under an excluded path, set it to `null`: the card asks for a folder, with reason "the related document's folder is no longer available".
-- Record `reviewReason: 'filed with "{name}"'`. With no anchor, record `'re-analyzed'`.
+- Overwrite `analysis.folder` with the anchor's folder, refreshed from the cache.
+- If that folder (for a `new` folder, its parent) is no longer in the cache, or is now under an excluded path, set it to `null`. The card asks for a folder, and the reason is `'the related document's folder is no longer available'`.
+- Otherwise record `reviewReason: 'filed with another document'`. With no anchor, record `'re-analyzed'`.
+- Reasons are fixed text: `decideStage` logs the recorded reason verbatim (`decide.ts:45`), and reasons never carry names. The card shows the anchor's name from `anchorName`.
 - `decideStage` already keeps a recorded reason, so the document always goes to review.
 - An unusable outcome keeps today's behaviour: no analysis, and the analyzer's reason.
 
 ### 4. PWA
 
-- **`ReviewCard.tsx`:** a **⋯ More** button next to Approve/Discard opens a menu:
+- **`ReviewCard.tsx`:** a **⋯ More** button next to Approve/Discard opens a menu. The menu is not shown at all for a card with `possiblyInDrive`:
   - **Combine with…**: shown when another review card exists.
   - **File with…**: shown when another review card or a recently filed document exists.
   - **Re-analyze**: always shown. It calls `reanalyze(id)` straight away, with no sheet.
@@ -161,7 +178,7 @@ the same conventions, saying what this document is.
     - Each row shows the name and folder path. Choosing one calls `reanalyze(id, anchorId)`.
 - **`documents/api.ts`:** `combine(ids)` and `reanalyze(id, anchorId?)`.
 - **Activity (`DocumentRows.tsx`, `labels.ts`):** a discarded document with `combinedInto` reads "Combined into another document" and keeps its Restore button.
-- **The card** shows "Filed with …" (from `anchorName`) while waiting and in review.
+- **"Filed with …"** (from `anchorName`) shows on the waiting row (`DocumentRows.tsx`) and on the review card (`ReviewCard.tsx`).
 - After either action, `DocumentSync`'s next poll moves the card(s) out of review. Re-analysed cards come back when analysis finishes.
 
 ### 5. Errors
@@ -169,6 +186,7 @@ the same conventions, saying what this document is.
 | Case | Response | PWA shows |
 |---|---|---|
 | A listed document moved on, or a discard raced the request | `409 conflict` / `not_in_review` / `invalid_anchor` | "Something changed; the list has been refreshed." The sheet stays open on a fresh list |
+| A part or the document may already be in Drive | `409 possibly_in_drive` | "This document may already be in Drive, so it can't be changed." (The menu hides the actions, so this happens only in a race) |
 | A part can't be combined | `422 cannot_combine` + `documentId`, `reason` | "‹name› can't be combined (password-protected / unreadable / not a PDF or photo / too large together)." |
 | Network failure | — | An error in the sheet with Retry; nothing is queued |
 
@@ -187,25 +205,31 @@ Logs carry document ids, counts and reasons, never names or paths. That is the s
 - Combine route:
   - happy path
   - transaction rollback, with the blob deleted, when one part's compare-and-set fails
-  - `409` for parts not in review
+  - `409` for parts not in review, and `possibly_in_drive` for a part with a filing target
+  - the size check before building
   - restore clears `combinedInto`
 - Re-analyze route:
   - each anchor source: filed; in review with a decision; in review with only an analysis; a new-folder proposal
-  - each `invalid_anchor` case
+  - each `invalid_anchor` case, and `possibly_in_drive`
   - fields cleared on the transition
 - `analyzeStage`:
-  - folder override for an anchor
-  - a missing or excluded anchor folder gives `null` plus the reason
+  - folder override for an anchor, with the path refreshed from the cache
+  - a missing or excluded anchor folder (or new-folder parent) gives `null` plus the reason
+  - no document name in any review reason
   - review reasons
   - an unusable outcome with an anchor
 - Prompt:
   - `<related>` appears only with an anchor
   - a snapshot guard that the no-anchor prompt is unchanged
-- Repo: migration `008` applies; `anchor` seal/unseal round trip; a tampered `anchor` quarantines the row.
+- Repo:
+  - migration `008` applies
+  - `anchor` seal/unseal round trip; a tampered `anchor` quarantines the row
+  - `insertCombined` rolls back the insert when a part's compare-and-set fails
+- File stage: the audit entry records `anchored`.
 
 **PWA (happy-dom):**
 
-- When each menu item is shown.
+- When each menu item is shown, and no menu for `possiblyInDrive`.
 - `DocumentChooser`:
   - both modes
   - pinned first item and reordering
