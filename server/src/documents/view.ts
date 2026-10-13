@@ -1,11 +1,11 @@
 import type { DocumentRow } from './types.js';
 
-/** What the API returns for a document: no blobs, no history text. */
 /** An upload was started: the document may already be in Drive (it can't be filed, combined or re-analysed safely). */
 export function possiblyInDrive(d: DocumentRow): boolean {
   return d.state !== 'filed' && (d.filingTarget !== null || d.uploadUnverified);
 }
 
+/** What the API returns for a document: no blobs, no history text. */
 export function toView(d: DocumentRow) {
   return {
     id: d.id,
