@@ -42,11 +42,20 @@ describe('fileStage', () => {
     });
     expect(h.inbox.has(doc.id, 'original')).toBe(false);
     const audit = h.db.prepare(`SELECT detail FROM audit_log WHERE event = 'document_filed'`).get() as { detail: string };
-    expect(JSON.parse(audit.detail)).toMatchObject({ documentId: doc.id, driveNodeUid: 'NODE1', autoFiled: true, confidence: 0.92 });
+    expect(JSON.parse(audit.detail)).toMatchObject({ documentId: doc.id, driveNodeUid: 'NODE1', autoFiled: true, confidence: 0.92, anchored: false });
     // v1 records no filing history (it would be plaintext outside the encrypted stores).
     expect((h.db.prepare('SELECT COUNT(*) AS n FROM classification_history').get() as { n: number }).n).toBe(0);
     const bills = h.ctx.folderCache.load()!.tree.find((f) => f.linkId === 'BILLS')!;
     expect(bills.files[0]!.name).toBe('Northwind Energy Sep 2026.pdf');
+  });
+
+  it('marks a filing whose folder came from a related document, so calibration can leave it out', async () => {
+    h = makeHarness();
+    const doc = filingDoc(EXISTING, { anchor: { documentId: 'letter', name: 'Letter', folder: { kind: 'existing', linkId: 'BILLS', path: '/Bills' } } });
+    await fileStage(doc, h.ctx);
+    const audit = h.db.prepare(`SELECT detail FROM audit_log WHERE event = 'document_filed'`).get() as { detail: string };
+    expect(JSON.parse(audit.detail)).toMatchObject({ anchored: true });
+    expect(audit.detail).not.toContain('Letter');
   });
 
   it('clears the thumbnail flag and deletes the thumbnail blob when filed', async () => {
