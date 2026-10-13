@@ -24,6 +24,15 @@ describe('FolderCacheStore', () => {
     expect(Object.keys(kept[0]).sort()).toEqual(['modified', 'name', 'uid']);
   });
 
+  it('forgets the tree on clear', () => {
+    const t = createTestDb();
+    cleanup = t.cleanup;
+    const s = new FolderCacheStore(t.db, new AtRestCipher(Buffer.alloc(32, 4).toString('base64'), 'folder-cache'));
+    s.save([{ linkId: 'L', path: '/Bills', files: [] }], new Date());
+    s.clear();
+    expect(s.load()).toBeNull();
+  });
+
   it('records a filing in the cached folder, so the next document sees the name', () => {
     const t = createTestDb();
     cleanup = t.cleanup;

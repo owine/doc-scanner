@@ -58,7 +58,17 @@ export function createApp(deps: AppDeps): Hono {
     return c.json({ error: 'internal' }, 500);
   });
   app.get('/api/health', (c) => c.json({ ok: true }));
-  app.route('/api/auth', authRoutes({ store, protonAuth, db: deps.db, encryptionKey: deps.encryptionKey, passkeys, authMode, appVersion: deps.appVersion, secureCookie: deps.secureCookie }));
+  app.route('/api/auth', authRoutes({
+    store,
+    protonAuth,
+    db: deps.db,
+    encryptionKey: deps.encryptionKey,
+    passkeys,
+    authMode,
+    clearAccountData: () => deps.pipeline?.clearAccountData(),
+    appVersion: deps.appVersion,
+    secureCookie: deps.secureCookie,
+  }));
   app.route('/api/drive', driveRoutes({ db: deps.db, store, authMode }));
   if (deps.pipeline) {
     const pipelineDeps = { store, pipeline: deps.pipeline, authMode };
