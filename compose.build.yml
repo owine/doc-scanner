@@ -1,0 +1,16 @@
+# Overlay for building the image from this checkout instead of pulling it:
+#   GIT_SHA=$(git rev-parse HEAD) docker compose -f compose.yml -f compose.build.yml up --build
+services:
+  app:
+    # A local name, so a source build never shadows the pulled GHCR tag.
+    image: doc-scanner:local
+    pull_policy: build
+    build:
+      context: .
+      args:
+        # Release tag for error reports.
+        GIT_SHA: ${GIT_SHA:-dev}
+        # Compiled into the PWA bundle; empty disables browser error reporting.
+        # (The published image is built without one.)
+        SENTRY_BROWSER_DSN: ${SENTRY_BROWSER_DSN:-}
+        SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-}
