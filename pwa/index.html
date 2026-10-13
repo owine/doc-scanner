@@ -4,7 +4,9 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="theme-color" content="#ffffff">
-  <link rel="manifest" href="/manifest.webmanifest" />
+  <!-- use-credentials: the manifest fetch omits cookies by default, so behind
+       forward-auth (Authelia) it would be redirected to the login page. -->
+  <link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials" />
   <title>doc-scanner</title>
 </head>
 <body>
