@@ -34,6 +34,41 @@ export function keySaltFingerprint(keySalt: string): string {
   return createHash('sha256').update(keySalt, 'utf8').digest('hex');
 }
 
+/**
+ * What an unlock (spec §2) gets back: the keys open again, maybe with
+ * refreshed tokens. No key-salt fingerprint: the passphrase from the passkey
+ * opened the keys, so the salt is the one recorded at enrolment.
+ */
+export interface ResumeResult {
+  /** The tokens in use: refreshed if the stored access token had expired. */
+  session: ProtonSession;
+  decryptedKeys: DecryptedUserKey;
+  userId: string;
+}
+
+/** Proton refused the refresh token (400, 401 or 422): only a password login helps now. */
+export class SessionEndedError extends Error {
+  constructor(cause: ProtonApiError) {
+    super('Proton ended the session', { cause });
+    this.name = 'SessionEndedError';
+  }
+}
+
+const SESSION_ENDED = new Set([400, 401, 422]);
+
+/**
+ * Worth trying again in a moment: rate limiting, a server error, no answer
+ * at all, or no answer in time (ProtonApi's timeout). No answer is undici's
+ * TypeError('fetch failed'), or a TypeError carrying the socket error as its
+ * cause; any other TypeError is a bug and must be reported.
+ */
+export function isTransientProtonError(error: unknown): boolean {
+  if (error instanceof ProtonApiError) return error.status === 429 || error.status >= 500;
+  if (error instanceof TypeError) return error.message === 'fetch failed' || 'cause' in error;
+  const name = typeof error === 'object' && error !== null && 'name' in error ? error.name : undefined;
+  return name === 'TimeoutError' || name === 'AbortError';
+}
+
 /** Where a login got to; reported with failures to show which step broke. */
 export type LoginStage = 'info' | 'srp' | '2fa' | 'keys';
 
@@ -142,6 +177,48 @@ export class ProtonAuth {
       userId,
       keySaltFingerprint: keySaltFingerprint(saltEntry.KeySalt),
     };
+  }
+
+  /**
+   * Opens the keys again with stored tokens and a passphrase from a passkey
+   * wrap: no password, no 2FA. An expired access token is refreshed once,
+   * and `onRefreshed` hears of the new tokens the moment Proton issues them,
+   * before the retry: Proton has already invalidated the old refresh token,
+   * so they must be saved even if the retry then fails.
+   *
+   * Throws SessionEndedError when Proton refuses the refresh,
+   * KeyDecryptError when the passphrase doesn't open the keys, and anything
+   * else as it came (see isTransientProtonError).
+   */
+  async resume(
+    session: ProtonSession,
+    passphraseBytes: Uint8Array,
+    opts: { onRefreshed: (session: ProtonSession) => void },
+  ): Promise<ResumeResult> {
+    try {
+      return await this.openKeys(session, passphraseBytes);
+    } catch (error) {
+      if (!(error instanceof ProtonApiError && error.status === 401)) throw error;
+    }
+    let refreshed: ProtonSession;
+    try {
+      refreshed = await this.refresh(session);
+    } catch (error) {
+      if (error instanceof ProtonApiError && SESSION_ENDED.has(error.status)) throw new SessionEndedError(error);
+      throw error;
+    }
+    opts.onRefreshed(refreshed);
+    return this.openKeys(refreshed, passphraseBytes);
+  }
+
+  private async openKeys(session: ProtonSession, passphraseBytes: Uint8Array): Promise<ResumeResult> {
+    const { decryptedKeys, userId } = await fetchAndDecryptUserKey({
+      api: this.api,
+      uid: session.uid,
+      accessToken: session.accessToken,
+      mailboxPasswordBytes: passphraseBytes,
+    });
+    return { session, decryptedKeys, userId };
   }
 
   async refresh(session: ProtonSession): Promise<ProtonSession> {

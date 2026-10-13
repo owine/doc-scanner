@@ -66,6 +66,13 @@ export interface ProtonAddress {
   Keys: ProtonAddressKey[];
 }
 
+/**
+ * How long one Proton request may take. Login, unlock and logout hold the
+ * auth mutex while they wait, so a hung request must not hold it for the
+ * minutes a socket can stall. A timeout rejects with a TimeoutError.
+ */
+const REQUEST_TIMEOUT_MS = 30_000;
+
 export class ProtonApi {
   constructor(private readonly baseUrl: string, private readonly appVersion: string) {}
 
@@ -130,6 +137,7 @@ export class ProtonApi {
         'x-pm-appversion': this.appVersion,
         ...extraHeaders,
       },
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     };
     if (body !== undefined) {
       init.body = JSON.stringify(body);
