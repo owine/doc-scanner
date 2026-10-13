@@ -58,6 +58,8 @@ async function setup(opts: { liveSession?: () => LiveSession | undefined } = {})
       session: { uid: 'u', accessToken: 'a', refreshToken: 'r', email: 'e@x.test' },
       mailboxSecret: new MailboxSecret(new Uint8Array([0])),
       decryptedKeys: keys,
+      userId: 'user-1',
+      keySaltFingerprint: 'fp-1',
     }),
     refresh: vi.fn(),
   } as unknown as ProtonAuth;
@@ -678,6 +680,8 @@ describe('pipeline', () => {
       mailboxSecret: new MailboxSecret(new Uint8Array([0])),
       decryptedKeys: keys,
       driveClient: {} as DriveClient,
+      userId: 'user-1',
+      keySaltFingerprint: 'fp-1',
     });
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(onLogin).not.toHaveBeenCalled();

@@ -35,6 +35,8 @@ function makeLoginSuccess() {
     session: { uid: 'u', accessToken: 'a', refreshToken: 'r', email: 'e@x.test' },
     mailboxSecret: new MailboxSecret(new Uint8Array([0])),
     decryptedKeys: testDecryptedKeys,
+    userId: 'user-1',
+    keySaltFingerprint: 'fp-1',
   };
 }
 

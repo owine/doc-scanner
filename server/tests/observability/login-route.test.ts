@@ -25,6 +25,8 @@ async function loginSuccess() {
       primaryKey: key,
       addresses: [{ email: 'e@x.test', addressId: 'a1', keys: [{ id: 'k1', key }], primaryKeyIndex: 0 }],
     },
+    userId: 'user-1',
+    keySaltFingerprint: 'fp-1',
   };
 }
 

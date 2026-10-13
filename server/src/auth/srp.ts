@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { getSrp } from '../vendor/proton-srp/srp.js';
 import { AUTH_VERSION } from '../vendor/proton-srp/constants.js';
 import { computeKeyPassword } from '../vendor/proton-srp/keys.js';
@@ -18,6 +19,19 @@ export interface LoginResult {
   session: ProtonSession;
   mailboxSecret: MailboxSecret;
   decryptedKeys: DecryptedUserKey;
+  /** Proton's `User.ID`. */
+  userId: string;
+  /** See keySaltFingerprint(). */
+  keySaltFingerprint: string;
+}
+
+/**
+ * SHA-256 (hex) of the primary user key's KeySalt. Not secret (the salt is
+ * public to the account); it changes with the password, so a login can tell
+ * that every passkey wrap holds an old passphrase (passkey-unlock spec §1).
+ */
+export function keySaltFingerprint(keySalt: string): string {
+  return createHash('sha256').update(keySalt, 'utf8').digest('hex');
 }
 
 /** Where a login got to; reported with failures to show which step broke. */
@@ -109,7 +123,7 @@ export class ProtonAuth {
     const mailboxPasswordBytes = new TextEncoder().encode(mailboxPassphrase);
     const mailboxSecret = new MailboxSecret(mailboxPasswordBytes);
 
-    const decryptedKeys = await fetchAndDecryptUserKey({
+    const { decryptedKeys, userId } = await fetchAndDecryptUserKey({
       api: this.api,
       uid: auth.UID,
       accessToken: auth.AccessToken,
@@ -125,6 +139,8 @@ export class ProtonAuth {
       },
       mailboxSecret,
       decryptedKeys,
+      userId,
+      keySaltFingerprint: keySaltFingerprint(saltEntry.KeySalt),
     };
   }
 

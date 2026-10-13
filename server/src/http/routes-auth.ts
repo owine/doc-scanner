@@ -66,6 +66,8 @@ export function authRoutes(deps: {
         mailboxSecret: result.mailboxSecret,
         decryptedKeys: result.decryptedKeys,
         driveClient,
+        userId: result.userId,
+        keySaltFingerprint: result.keySaltFingerprint,
       });
 
       logger.info({ email, remoteUser }, 'login succeeded');
