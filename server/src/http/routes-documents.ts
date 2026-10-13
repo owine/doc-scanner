@@ -177,20 +177,38 @@ export function documentRoutes(deps: { store: SessionStore; pipeline: Pipeline }
     // A prepared PDF already has its text layer, so OCR skips those pages later.
     const usePrepared = (p: DocumentRow) => p.preparedMime === 'application/pdf' && inbox.has(p.id, 'prepared');
     // Checked before any blob is loaded, so ten large parts are never in memory together.
-    const inputBytes = parts.reduce((n, p) => n + (usePrepared(p) ? inbox.size(p.id, 'prepared') : p.size), 0);
+    const refuseUnreadable = (documentId: string) => {
+      logger.info({ documentId, reason: 'unreadable' }, 'combine refused');
+      return c.json({ error: 'cannot_combine', documentId, reason: 'unreadable' }, 422);
+    };
+    let inputBytes = 0;
+    for (const p of parts) {
+      try {
+        inputBytes += usePrepared(p) ? inbox.size(p.id, 'prepared') : p.size;
+      } catch (err) {
+        if (err instanceof InboxBlobMissingError) return refuseUnreadable(p.id);
+        throw err;
+      }
+    }
     if (inputBytes > MAX_UPLOAD_BYTES) {
       logger.info({ parts: parts.length, reason: 'too_large' }, 'combine refused');
       return c.json({ error: 'cannot_combine', reason: 'too_large' }, 422);
     }
 
-    const result = await combineParts(
-      parts.map((p) =>
-        usePrepared(p)
-          ? { id: p.id, bytes: inbox.get(p.id, 'prepared'), mime: 'application/pdf' }
-          : { id: p.id, bytes: inbox.get(p.id, 'original'), mime: p.mime },
-      ),
-      MAX_UPLOAD_BYTES,
-    );
+    const inputs: { id: string; bytes: Uint8Array; mime: string }[] = [];
+    for (const p of parts) {
+      try {
+        inputs.push(
+          usePrepared(p)
+            ? { id: p.id, bytes: inbox.get(p.id, 'prepared'), mime: 'application/pdf' }
+            : { id: p.id, bytes: inbox.get(p.id, 'original'), mime: p.mime },
+        );
+      } catch (err) {
+        if (err instanceof InboxBlobMissingError) return refuseUnreadable(p.id);
+        throw err;
+      }
+    }
+    const result = await combineParts(inputs, MAX_UPLOAD_BYTES);
     if (result.kind === 'too_large') {
       logger.info({ parts: parts.length, reason: 'too_large' }, 'combine refused');
       return c.json({ error: 'cannot_combine', reason: 'too_large' }, 422);
