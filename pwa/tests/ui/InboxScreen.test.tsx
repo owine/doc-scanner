@@ -592,7 +592,6 @@ describe('InboxScreen scans on this device', () => {
       listed.mockRestore();
     }
   });
-
 });
 
 describe('InboxScreen more menu', () => {
@@ -610,6 +609,10 @@ describe('InboxScreen more menu', () => {
     // The parts are read back (now discarded) and leave review.
     await waitFor(() => expect(api.get).toHaveBeenCalledWith(b.id));
     await waitFor(() => expect(screen.queryByRole('article', { name: 'Review Return receipt' })).toBeNull());
+    // The combined document is in progress, and the other part left review too.
+    const progress = screen.getByRole('region', { name: 'In progress' });
+    expect(within(progress).getAllByRole('listitem')).toHaveLength(1);
+    expect(screen.queryByRole('article', { name: 'Review Certified letter' })).toBeNull();
   });
 
   it('files a card with a recently filed document', async () => {
@@ -636,6 +639,6 @@ describe('InboxScreen more menu', () => {
     fireEvent.click(within(card).getByRole('button', { name: 'Combine 2' }));
     await waitFor(() => expect(api.combine).toHaveBeenCalled());
     await waitFor(() => expect(poll).toHaveBeenCalled());
-    expect(await within(card).findByText('Something changed; the list has been refreshed.')).toBeInTheDocument();
+    expect(await within(card).findByText('Something changed; the list is being updated.')).toBeInTheDocument();
   });
 });

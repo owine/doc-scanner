@@ -263,4 +263,36 @@ describe('ReviewCard more menu', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(more).toHaveFocus();
   });
+
+  it('disables the whole card while a combine is pending', async () => {
+    const doc = makeDoc();
+    let finish!: () => void;
+    const onCombine = vi.fn(() => new Promise<void>((r) => { finish = r; }));
+    render(
+      <ReviewCard doc={doc} folders={folders} onApprove={vi.fn()} onDiscard={vi.fn()} review={[doc, makeDoc()]} filed={[]} onCombine={onCombine} onReanalyze={vi.fn(async () => {})} />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'More' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Combine with…' }));
+    fireEvent.click(screen.getAllByRole('checkbox')[0]!);
+    fireEvent.click(screen.getByRole('button', { name: 'Combine 2' }));
+    await waitFor(() => expect(onCombine).toHaveBeenCalled());
+    expect(screen.getByRole('button', { name: 'Approve' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Discard' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Change' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'More' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+    finish();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Approve' })).toBeEnabled());
+  });
+
+  it('explains a refused re-analyse, with a fallback', async () => {
+    const doc = makeDoc();
+    const onReanalyze = vi.fn().mockRejectedValueOnce(new ApiError('not_in_review', 409, 'not_in_review')).mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    render(<ReviewCard doc={doc} folders={folders} onApprove={vi.fn()} onDiscard={vi.fn()} review={[doc]} filed={[]} onReanalyze={onReanalyze} />);
+    fireEvent.click(screen.getByRole('button', { name: 'More' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Re-analyse' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('This document has already moved on.');
+    fireEvent.click(screen.getByRole('button', { name: 'Re-analyse' }));
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Could not re-analyse. Try again.'));
+  });
 });

@@ -2,10 +2,9 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { ApiError } from '../../api.js';
 import type { ApproveBody, DocumentView, FolderRef } from '../../documents/types.js';
 import type { FoldersState } from '../../documents/use-folders.js';
-import { anchorCandidates, combineCandidates } from './choose.js';
-import { DocumentChooser, type ChooserMode } from './DocumentChooser.js';
 import { FolderPicker } from './FolderPicker.js';
 import { SOURCE_LABEL, confirmDiscard, folderLabel } from './labels.js';
+import { MoreActions } from './MoreActions.js';
 
 export interface ReviewCardProps {
   doc: DocumentView;
@@ -60,19 +59,6 @@ export function ReviewCard({ doc, folders, onApprove, onDiscard, review = [], fi
   const [error, setError] = useState<string | null>(null);
   const changeRef = useRef<HTMLButtonElement>(null);
   const wasPicking = useRef(false);
-  const [menu, setMenu] = useState(false);
-  const [choosing, setChoosing] = useState<ChooserMode | null>(null);
-  const canCombine = !!onCombine && combineCandidates(doc, review).length > 0;
-  const anchors = anchorCandidates(doc, review, filed);
-  const canFileWith = anchors.review.length + anchors.filed.length > 0;
-
-  const moreRef = useRef<HTMLButtonElement>(null);
-  const wasChoosing = useRef(false);
-  // Hand focus back to More when the chooser closes.
-  useEffect(() => {
-    if (wasChoosing.current && !choosing) moreRef.current?.focus();
-    wasChoosing.current = !!choosing;
-  }, [choosing]);
 
   // Hand focus back to Change when the picker closes, not to <body>.
   useEffect(() => {
@@ -110,18 +96,30 @@ export function ReviewCard({ doc, folders, onApprove, onDiscard, review = [], fi
     }
   }
 
-  async function reanalyze() {
-    if (!onReanalyze) return;
+  // One busy state for everything on the card: a request from the chooser or Re-analyse disables it all.
+  async function run(fn: () => Promise<void>): Promise<{ error: unknown } | null> {
     setBusy(true);
     setError(null);
     try {
-      await onReanalyze();
-    } catch {
-      setError('Could not re-analyse. Try again.');
+      await fn();
+      return null;
+    } catch (error) {
+      return { error };
     } finally {
       setBusy(false);
     }
   }
+
+  const actions = (
+    <>
+      <button class="btn" disabled={busy || !name.trim() || !folder} onClick={() => void approve()}>
+        Approve
+      </button>
+      <button class="btn btn-secondary" disabled={busy} onClick={() => void discard()}>
+        Discard
+      </button>
+    </>
+  );
 
   return (
     <article class="card review-card" aria-label={`Review ${suggested?.name ?? doc.originalName ?? 'document'}`}>
@@ -188,61 +186,23 @@ export function ReviewCard({ doc, folders, onApprove, onDiscard, review = [], fi
           {error}
         </p>
       )}
-      <div class="actions">
-        <button class="btn" disabled={busy || !name.trim() || !folder} onClick={() => void approve()}>
-          Approve
-        </button>
-        <button class="btn btn-secondary" disabled={busy} onClick={() => void discard()}>
-          Discard
-        </button>
-        {onReanalyze && !doc.possiblyInDrive && (
-          <button
-            ref={moreRef}
-            class="btn btn-secondary"
-            aria-expanded={menu && !choosing}
-            aria-controls={menu && !choosing ? `more-${doc.id}` : undefined}
-            disabled={busy}
-            onClick={() => {
-              setMenu((m) => !m);
-              setChoosing(null);
-            }}
-          >
-            <span aria-hidden="true">⋯ </span>More
-          </button>
-        )}
-      </div>
-      {menu && !choosing && onReanalyze && (
-        <div class="actions" id={`more-${doc.id}`}>
-          {canCombine && (
-            <button class="btn btn-secondary btn-small" disabled={busy} onClick={() => setChoosing('combine')}>
-              Combine with…
-            </button>
-          )}
-          {canFileWith && (
-            <button class="btn btn-secondary btn-small" disabled={busy} onClick={() => setChoosing('file-with')}>
-              File with…
-            </button>
-          )}
-          <button class="btn btn-secondary btn-small" disabled={busy} onClick={() => void reanalyze()}>
-            Re-analyse
-          </button>
-        </div>
-      )}
-      {choosing && onReanalyze && (
-        <DocumentChooser
-          mode={choosing}
-          current={doc}
+      {onReanalyze ? (
+        <MoreActions
+          doc={doc}
           review={review}
           filed={filed}
-          onCombine={async (ids) => {
-            await onCombine?.(ids);
-          }}
-          onFileWith={(anchorId) => onReanalyze(anchorId)}
-          onCancel={() => {
-            setChoosing(null);
-            setMenu(false);
-          }}
-        />
+          busy={busy}
+          run={run}
+          onCombine={onCombine}
+          onReanalyze={onReanalyze}
+          onReanalyzeError={(err) =>
+            setError((err instanceof ApiError && err.code && APPROVE_ERRORS[err.code]) || 'Could not re-analyse. Try again.')
+          }
+        >
+          {actions}
+        </MoreActions>
+      ) : (
+        <div class="actions">{actions}</div>
       )}
     </article>
   );
