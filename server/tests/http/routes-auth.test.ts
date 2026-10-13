@@ -8,6 +8,8 @@ import { _resetLiveSessions, getAnyLiveSession } from '../../src/auth/live-sessi
 import { DriveClient } from '../../src/drive/client.js';
 import { MailboxSecret } from '../../src/auth/secrets/mailbox-password.js';
 import type { DecryptedUserKey } from '../../src/auth/keys.js';
+import { PasskeyStore } from '../../src/auth/passkey-store.js';
+import { AtRestCipher } from '../../src/crypto/at-rest.js';
 
 let cleanupFn: (() => void) | null = null;
 beforeEach(() => { _resetSids(); _resetLiveSessions(); });
@@ -47,7 +49,7 @@ function setup() {
     refresh: vi.fn(),
   } as unknown as ProtonAuth;
   const app = createApp({ db, encryptionKey: KEY, protonAuth: fakeAuth });
-  return { app, fakeAuth };
+  return { app, fakeAuth, db };
 }
 
 describe('POST /api/auth/login', () => {
@@ -138,7 +140,8 @@ describe('GET /api/auth/status', () => {
     const cookie = login.headers.get('set-cookie')!.split(';')[0]!;
     const res = await app.request('/api/auth/status', { headers: { cookie } });
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ email: 'e@x.test' });
+    // Cookie mode only signs in sids that logged in during this process: always live, never passkeys.
+    expect(await res.json()).toEqual({ email: 'e@x.test', proton: 'live', passkeys: 0, unlockAvailable: false });
   });
 });
 
@@ -181,6 +184,21 @@ describe('POST /api/auth/logout', () => {
       expect(status.status).toBe(401);
     }
     expect(getAnyLiveSession()).toBeUndefined();
+  });
+
+  it('removes every passkey unlock', async () => {
+    const { app, fakeAuth, db } = setup();
+    (fakeAuth.login as any).mockResolvedValue(makeLoginSuccess());
+    const login = await app.request('/api/auth/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: 'e@x.test', password: 'p' }),
+    });
+    const cookie = login.headers.get('set-cookie')!.split(';')[0]!;
+    const passkeys = new PasskeyStore(db, new AtRestCipher(KEY, 'passkeys'));
+    passkeys.add({ credentialId: 'cred-AAAAAAAAAAAAAAAA', label: 'x', salt: new Uint8Array(32), prf: new Uint8Array(32), passphrase: new Uint8Array([1]) });
+    await app.request('/api/auth/logout', { method: 'POST', headers: { cookie } });
+    expect(passkeys.count()).toBe(0);
   });
 
   it('still clears Drive caches when the logout request has no cookie', async () => {

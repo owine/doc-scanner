@@ -7,6 +7,8 @@ import type { DB } from '../db.js';
 import { SessionStore } from '../auth/session-store.js';
 import { ProtonAuth } from '../auth/srp.js';
 import { ProtonApi } from '../auth/proton-api.js';
+import { PasskeyStore } from '../auth/passkey-store.js';
+import { AtRestCipher } from '../crypto/at-rest.js';
 import { authRoutes } from './routes-auth.js';
 import { driveRoutes } from './routes-drive.js';
 import { documentRoutes, folderRoutes, settingsRoutes } from './routes-documents.js';
@@ -31,6 +33,7 @@ export interface AppDeps {
 export function createApp(deps: AppDeps): Hono {
   const store = new SessionStore(deps.db, deps.encryptionKey);
   const authMode = deps.authMode ?? COOKIE_MODE;
+  const passkeys = new PasskeyStore(deps.db, new AtRestCipher(deps.encryptionKey, 'passkeys'));
   const protonAuth = deps.protonAuth ?? new ProtonAuth(
     new ProtonApi(deps.protonApiBaseUrl ?? 'https://mail.proton.me/api', deps.appVersion ?? 'external-drive-docscanner@0.1.0'),
   );
@@ -55,7 +58,7 @@ export function createApp(deps: AppDeps): Hono {
     return c.json({ error: 'internal' }, 500);
   });
   app.get('/api/health', (c) => c.json({ ok: true }));
-  app.route('/api/auth', authRoutes({ store, protonAuth, db: deps.db, encryptionKey: deps.encryptionKey, authMode, appVersion: deps.appVersion, secureCookie: deps.secureCookie }));
+  app.route('/api/auth', authRoutes({ store, protonAuth, db: deps.db, encryptionKey: deps.encryptionKey, passkeys, authMode, appVersion: deps.appVersion, secureCookie: deps.secureCookie }));
   app.route('/api/drive', driveRoutes({ db: deps.db, store, authMode }));
   if (deps.pipeline) {
     const pipelineDeps = { store, pipeline: deps.pipeline, authMode };
