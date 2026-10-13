@@ -79,7 +79,9 @@ interface Anchor {
     - JPEG/PNG/WebP/TIFF/GIF/HEIF (sniffed, as in `prepare/`) → `sharp` rotates per EXIF and writes JPEG → embedded as one page sized to the image.
     - Anything else → refused.
 - Refused, as `422 { error: 'cannot_combine', documentId, reason }`, where `reason` is one of:
-  - `encrypted`: pdf-lib can't copy the pages of an encrypted PDF.
+  - `encrypted`: any encrypted PDF, including one locked only by an owner password. pdf-lib could decrypt that kind, but combining is refused so a locked document is never altered (user decision, 2026-10-13).
+  - `signed`: a digitally signed PDF (`/AcroForm /SigFlags` bit 1). Copying its pages would break the signature.
+  - `dynamic_form`: a dynamic XFA form (`/XFA` with `/NeedsRendering true`). Copying its pages would copy only the "Please wait…" placeholder.
   - `unreadable`: a corrupt PDF or undecodable image.
   - `unsupported_type`: text, Office and other non-page types.
   - `too_large`: the result is over the server's intake limit (`MAX_UPLOAD_BYTES` in `routes-documents.ts`, 50 MiB).
@@ -187,7 +189,7 @@ the same conventions, saying what this document is.
 |---|---|---|
 | A listed document moved on, or a discard raced the request | `409 conflict` / `not_in_review` / `invalid_anchor` | "Something changed; the list has been refreshed." The sheet stays open on a fresh list |
 | A part or the document may already be in Drive | `409 possibly_in_drive` | "This document may already be in Drive, so it can't be changed." (The menu hides the actions, so this happens only in a race) |
-| A part can't be combined | `422 cannot_combine` + `documentId`, `reason` | "‹name› can't be combined (password-protected / unreadable / not a PDF or photo / too large together)." |
+| A part can't be combined | `422 cannot_combine` + `documentId`, `reason` | "‹name› can't be combined (password-protected / digitally signed / a dynamic form / unreadable / not a PDF or photo / too large together)." |
 | Network failure | — | An error in the sheet with Retry; nothing is queued |
 
 Logs carry document ids, counts and reasons, never names or paths. That is the same rule as the rest of the pipeline.

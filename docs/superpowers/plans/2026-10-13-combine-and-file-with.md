@@ -2171,6 +2171,8 @@ export interface DocumentChooserProps {
 
 const REFUSAL: Record<string, string> = {
   encrypted: 'it is password-protected',
+  signed: 'it is digitally signed',
+  dynamic_form: 'it is a dynamic form that can’t be copied',
   unreadable: 'it could not be read',
   unsupported_type: 'it is not a PDF or photo',
 };
