@@ -72,11 +72,6 @@ jobs:
           - runner: ubuntu-26.04-arm
             platform: linux/arm64
     runs-on: ${{ matrix.runner }}
-    # packages: write is used on main only (the push steps are gated); PR runs
-    # build and smoke-test without touching GHCR.
-    permissions:
-      contents: read
-      packages: write
 
     steps:
       - name: Checkout
@@ -89,12 +84,17 @@ jobs:
 
       - name: Compute image metadata
         id: meta
+        # Keep identical to push-image's copy: these are build args, part of
+        # the cache key that job's rebuild must hit. The commit date (not the
+        # clock) makes BUILD_DATE the same in both jobs.
         run: |
           {
             echo "git_sha=${GITHUB_SHA}"
-            echo "build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "build_date=$(git log -1 --format=%cd --date=format-local:%Y-%m-%dT%H:%M:%SZ)"
             echo "version=$(git describe --tags --always --dirty)"
           } >> "$GITHUB_OUTPUT"
+        env:
+          TZ: UTC
 
       - name: Build ${{ matrix.platform }}
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc  # v7.4.0
@@ -122,11 +122,53 @@ jobs:
             --entrypoint sh doc-scanner:ci \
             -c "cd server && node --import tsx scripts/smoke-prepare.ts"
 
-      # Main only, and only after the smoke test: an image that fails it never
-      # reaches GHCR. Each platform pushes untagged, by digest; publish-image
-      # below joins the two into one multi-arch manifest and tags it.
+  push-image:
+    name: push image (${{ matrix.platform }})
+    # A job of its own because `permissions` can't be conditional: docker-build
+    # runs PR code, so it must never hold a token that can write packages.
+    # Runs on main only, after that platform's smoke test passed (needs
+    # docker-build). Each platform pushes untagged, by digest; publish-image
+    # joins the two into one multi-arch manifest and tags it.
+    needs: docker-build
+    if: github.ref == 'refs/heads/main'
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        # Same shape as docker-build's matrix, so Renovate's `github-runners`
+        # customManager tracks these too (see the comment there).
+        include:
+          - runner: ubuntu-26.04
+            platform: linux/amd64
+          - runner: ubuntu-26.04-arm
+            platform: linux/arm64
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0  # need tags + history for `git describe`
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069  # v4.4.1
+
+      - name: Compute image metadata
+        id: meta
+        # Keep identical to docker-build's copy (see there).
+        run: |
+          {
+            echo "git_sha=${GITHUB_SHA}"
+            echo "build_date=$(git log -1 --format=%cd --date=format-local:%Y-%m-%dT%H:%M:%SZ)"
+            echo "version=$(git describe --tags --always --dirty)"
+          } >> "$GITHUB_OUTPUT"
+        env:
+          TZ: UTC
+
       - name: Log in to GHCR
-        if: github.ref == 'refs/heads/main'
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f  # v4.6.0
         with:
           registry: ghcr.io
@@ -134,15 +176,14 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Push ${{ matrix.platform }} by digest
-        if: github.ref == 'refs/heads/main'
         id: push
-        # Same builder, context and build-args as the build above, so every
-        # layer comes from buildkit's local cache and this step only uploads.
-        # Keep the build-args identical: ARG values are part of the cache key.
+        # docker-build just exported every layer to this cache scope with the
+        # same build args, so this is cache hits plus an upload, not a rebuild.
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc  # v7.4.0
         with:
           context: .
           platforms: ${{ matrix.platform }}
+          cache-from: type=gha,scope=docker-${{ matrix.platform }}
           build-args: |
             GIT_SHA=${{ steps.meta.outputs.git_sha }}
             BUILD_DATE=${{ steps.meta.outputs.build_date }}
@@ -150,34 +191,36 @@ jobs:
           outputs: type=image,name=ghcr.io/${{ github.repository }},push-by-digest=true,name-canonical=true,push=true
 
       - name: Export digest
-        if: github.ref == 'refs/heads/main'
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
         run: |
           mkdir -p /tmp/digests
-          digest="${{ steps.push.outputs.digest }}"
-          touch "/tmp/digests/${digest#sha256:}"
+          touch "/tmp/digests/${DIGEST#sha256:}"
 
       - name: Upload digest
-        if: github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: digest-${{ strategy.job-index }}
           path: /tmp/digests/*
           if-no-files-found: error
           retention-days: 1
+          # A re-run of this job uploads the same name again; artifacts are
+          # immutable unless replaced, and the re-run's digest is the one to use.
+          overwrite: true
 
   publish-image:
     name: publish image
     # Needs `test` too: the image builds in parallel with the tests, but is
     # only tagged once they pass. A failed run leaves untagged digests, no tag.
-    needs: [test, docker-build]
+    needs: [test, push-image]
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
       contents: read
       packages: write
-    # Two quick pushes to main must not finish out of order and move `latest`
-    # back to the older commit: queue instead of running side by side.
+    # One publish at a time, so the head check below and the tagging it guards
+    # can't interleave with another run's.
     concurrency:
       group: publish-image
       cancel-in-progress: false
@@ -200,6 +243,25 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Check this commit is still main's head
+        id: head
+        # Runs finish out of order: an older commit's run that ends after a
+        # newer one has published must not move `latest` back. It still gets
+        # its sha tag.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          head=$(curl -fsSL \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github.sha" \
+            "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/commits/main")
+          if [ "$head" = "$GITHUB_SHA" ]; then
+            echo "latest=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::main is now at ${head}; tagging sha only, not latest"
+            echo "latest=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Compute tags
         id: tags
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302  # v6.2.0
@@ -208,22 +270,24 @@ jobs:
           # sha-<short> for pinning a deploy, latest for following main.
           tags: |
             type=sha
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=latest,enable=${{ steps.head.outputs.latest == 'true' }}
 
       - name: Create manifest list and push
         working-directory: /tmp/digests
+        env:
+          METADATA_JSON: ${{ steps.tags.outputs.json }}
         run: |
           tags=()
           while IFS= read -r tag; do
             tags+=(-t "$tag")
-          done < <(jq -r '.tags[]' <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          done < <(jq -r '.tags[]' <<< "$METADATA_JSON")
           images=()
           for digest in *; do
-            images+=("ghcr.io/${{ github.repository }}@sha256:$digest")
+            images+=("ghcr.io/${GITHUB_REPOSITORY}@sha256:$digest")
           done
           docker buildx imagetools create "${tags[@]}" "${images[@]}"
 
       - name: Inspect image
-        run: |
-          docker buildx imagetools inspect \
-            ghcr.io/${{ github.repository }}:${{ steps.tags.outputs.version }}
+        env:
+          VERSION: ${{ steps.tags.outputs.version }}
+        run: docker buildx imagetools inspect "ghcr.io/${GITHUB_REPOSITORY}:${VERSION}"
