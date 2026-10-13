@@ -140,6 +140,11 @@ function fromRow(r: Raw, unseal: Unseal): DocumentRow {
 
 const placeholders = (n: number) => Array(n).fill('?').join(', ');
 
+/** A new document id: 12 random bytes as 16 URL-safe characters (the inbox store's ID pattern). */
+export function newDocumentId(): string {
+  return randomBytes(12).toString('base64url');
+}
+
 /**
  * All SQL for `documents`. Every state change is a compare-and-set on the
  * current state, and a working document whose discard was requested can't
@@ -249,7 +254,37 @@ export class DocumentRepo {
   }
 
   insert(d: NewDocument): DocumentRow {
-    const id = randomBytes(12).toString('base64url');
+    const id = newDocumentId();
+    this.insertRow(id, d);
+    return this.get(id)!;
+  }
+
+  /**
+   * Combine (spec §2): inserts the combined document under a pre-made id (its
+   * blob is already in the inbox) and discards every part into it, all or
+   * nothing. Null, with nothing changed, when a part has left review since
+   * the caller read it. Every step is synchronous, so nothing interleaves.
+   */
+  insertCombined(id: string, d: NewDocument, partIds: readonly string[]): DocumentRow | null {
+    this.db.exec('BEGIN');
+    try {
+      this.insertRow(id, d);
+      const discardedAt = this.now();
+      for (const partId of partIds) {
+        if (!this.transition(partId, 'needs_review', 'discarded', { combinedInto: id, discardedAt })) {
+          this.db.exec('ROLLBACK');
+          return null;
+        }
+      }
+      this.db.exec('COMMIT');
+    } catch (err) {
+      if (this.db.isTransaction) this.db.exec('ROLLBACK');
+      throw err;
+    }
+    return this.get(id);
+  }
+
+  private insertRow(id: string, d: NewDocument): void {
     const t = iso(this.now());
     this.db
       .prepare(
@@ -270,7 +305,6 @@ export class DocumentRepo {
         this.seal(id, 'source_context', d.sourceContext),
         t,
       );
-    return this.get(id)!;
   }
 
   get(id: string): DocumentRow | null {
