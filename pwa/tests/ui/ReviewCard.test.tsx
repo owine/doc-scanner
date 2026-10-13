@@ -200,3 +200,52 @@ describe('ReviewCard', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Change' })).toHaveFocus());
   });
 });
+
+describe('ReviewCard more menu', () => {
+  function renderWithMenu(doc = makeDoc(), review = [doc, makeDoc()], filed: ReturnType<typeof makeDoc>[] = []) {
+    const onCombine = vi.fn(async () => {});
+    const onReanalyze = vi.fn(async () => {});
+    render(
+      <ReviewCard doc={doc} folders={folders} onApprove={vi.fn()} onDiscard={vi.fn()} review={review} filed={filed} onCombine={onCombine} onReanalyze={onReanalyze} />,
+    );
+    return { onCombine, onReanalyze };
+  }
+
+  it('offers Combine with…, File with… and Re-analyse', async () => {
+    const { onReanalyze } = renderWithMenu();
+    fireEvent.click(screen.getByRole('button', { name: 'More' }));
+    expect(screen.getByRole('button', { name: 'Combine with…' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'File with…' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Re-analyse' }));
+    await waitFor(() => expect(onReanalyze).toHaveBeenCalledWith());
+  });
+
+  it('hides Combine with… and File with… when there is nothing to pick', () => {
+    const doc = makeDoc();
+    renderWithMenu(doc, [doc]);
+    fireEvent.click(screen.getByRole('button', { name: 'More' }));
+    expect(screen.queryByRole('button', { name: 'Combine with…' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'File with…' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Re-analyse' })).toBeInTheDocument();
+  });
+
+  it('has no menu for a document that may already be in Drive', () => {
+    renderWithMenu(makeDoc({ possiblyInDrive: true }));
+    expect(screen.queryByRole('button', { name: 'More' })).toBeNull();
+  });
+
+  it('opens the chooser and files with the document picked', async () => {
+    const doc = makeDoc();
+    const other = makeDoc({ analysis: { ...makeDoc().analysis!, name: 'Certified letter' } });
+    const { onReanalyze } = renderWithMenu(doc, [doc, other]);
+    fireEvent.click(screen.getByRole('button', { name: 'More' }));
+    fireEvent.click(screen.getByRole('button', { name: 'File with…' }));
+    fireEvent.click(screen.getByRole('button', { name: /Certified letter/ }));
+    await waitFor(() => expect(onReanalyze).toHaveBeenCalledWith(other.id));
+  });
+
+  it('says what the document is being filed with', () => {
+    renderWithMenu(makeDoc({ anchorName: 'Certified letter' }));
+    expect(screen.getByText('Filed with “Certified letter”')).toBeInTheDocument();
+  });
+});

@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { ApiError } from '../../api.js';
 import type { ApproveBody, DocumentView, FolderRef } from '../../documents/types.js';
 import type { FoldersState } from '../../documents/use-folders.js';
+import { anchorCandidates, combineCandidates } from './choose.js';
+import { DocumentChooser, type ChooserMode } from './DocumentChooser.js';
 import { FolderPicker } from './FolderPicker.js';
 import { SOURCE_LABEL, confirmDiscard, folderLabel } from './labels.js';
 
@@ -10,6 +12,12 @@ export interface ReviewCardProps {
   folders: FoldersState;
   onApprove: (body: ApproveBody) => Promise<void>;
   onDiscard: () => Promise<void>;
+  /** Every card in review, and recently filed documents: what Combine with… and File with… offer. */
+  review?: DocumentView[];
+  filed?: DocumentView[];
+  onCombine?: (ids: string[]) => Promise<void>;
+  /** Re-analyze, or with an anchor id, File with. */
+  onReanalyze?: (anchorId?: string) => Promise<void>;
 }
 
 const APPROVE_ERRORS: Record<string, string> = {
@@ -43,7 +51,7 @@ function bodyFolder(f: FolderRef): NonNullable<ApproveBody['folder']> {
   return f.kind === 'existing' ? { kind: 'existing', linkId: f.linkId } : { kind: 'new', parentLinkId: f.parentLinkId, name: f.name };
 }
 
-export function ReviewCard({ doc, folders, onApprove, onDiscard }: ReviewCardProps) {
+export function ReviewCard({ doc, folders, onApprove, onDiscard, review = [], filed = [], onCombine, onReanalyze }: ReviewCardProps) {
   const suggested = doc.analysis;
   const [name, setName] = useState(suggested?.name ?? '');
   const [folder, setFolder] = useState<FolderRef | null>(suggested?.folder ?? null);
@@ -52,6 +60,11 @@ export function ReviewCard({ doc, folders, onApprove, onDiscard }: ReviewCardPro
   const [error, setError] = useState<string | null>(null);
   const changeRef = useRef<HTMLButtonElement>(null);
   const wasPicking = useRef(false);
+  const [menu, setMenu] = useState(false);
+  const [choosing, setChoosing] = useState<ChooserMode | null>(null);
+  const canCombine = !!onCombine && combineCandidates(doc, review).length > 0;
+  const anchors = anchorCandidates(doc, review, filed);
+  const canFileWith = anchors.review.length + anchors.filed.length > 0;
 
   // Hand focus back to Change when the picker closes, not to <body>.
   useEffect(() => {
@@ -84,6 +97,19 @@ export function ReviewCard({ doc, folders, onApprove, onDiscard }: ReviewCardPro
       await onDiscard();
     } catch {
       setError('Could not discard. Try again.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function reanalyze() {
+    if (!onReanalyze) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await onReanalyze();
+    } catch {
+      setError('Could not re-analyse. Try again.');
     } finally {
       setBusy(false);
     }
@@ -145,6 +171,7 @@ export function ReviewCard({ doc, folders, onApprove, onDiscard }: ReviewCardPro
           {Math.round(suggested.confidence * 100)}% confident{doc.reviewReason ? ` · ${doc.reviewReason}` : ''}
         </p>
       )}
+      {doc.anchorName && <p class="muted">Filed with “{doc.anchorName}”</p>}
       {suggested?.rationale && <p class="rationale">{suggested.rationale}</p>}
       {doc.prepareNote && <p class="muted">{doc.prepareNote}</p>}
       {suggested?.contentSeen === false && <p class="muted">Analysed from the file's details only; its contents could not be read.</p>}
@@ -160,7 +187,54 @@ export function ReviewCard({ doc, folders, onApprove, onDiscard }: ReviewCardPro
         <button class="btn btn-secondary" disabled={busy} onClick={() => void discard()}>
           Discard
         </button>
+        {onReanalyze && !doc.possiblyInDrive && (
+          <button
+            class="btn btn-secondary"
+            aria-expanded={menu}
+            aria-controls={`more-${doc.id}`}
+            disabled={busy}
+            onClick={() => {
+              setMenu((m) => !m);
+              setChoosing(null);
+            }}
+          >
+            <span aria-hidden="true">⋯ </span>More
+          </button>
+        )}
       </div>
+      {menu && !choosing && onReanalyze && (
+        <div class="actions" id={`more-${doc.id}`}>
+          {canCombine && (
+            <button class="btn btn-secondary btn-small" disabled={busy} onClick={() => setChoosing('combine')}>
+              Combine with…
+            </button>
+          )}
+          {canFileWith && (
+            <button class="btn btn-secondary btn-small" disabled={busy} onClick={() => setChoosing('file-with')}>
+              File with…
+            </button>
+          )}
+          <button class="btn btn-secondary btn-small" disabled={busy} onClick={() => void reanalyze()}>
+            Re-analyse
+          </button>
+        </div>
+      )}
+      {choosing && onReanalyze && (
+        <DocumentChooser
+          mode={choosing}
+          current={doc}
+          review={review}
+          filed={filed}
+          onCombine={async (ids) => {
+            await onCombine?.(ids);
+          }}
+          onFileWith={(anchorId) => onReanalyze(anchorId)}
+          onCancel={() => {
+            setChoosing(null);
+            setMenu(false);
+          }}
+        />
+      )}
     </article>
   );
 }
