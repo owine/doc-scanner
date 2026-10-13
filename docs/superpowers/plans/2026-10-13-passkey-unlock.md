@@ -18,8 +18,15 @@
 **Deviations from the spec** (Task 17 records them in the spec):
 
 1. `GET /api/passkeys` answers `{ passkeys, notice }`, not a bare array. The spec has Settings say "Your passkeys were removed because your Proton password changed" once, but gives that no channel. `notice` is `'password_changed'` on the first read after such a removal, and the read clears it.
-2. `fetchAndDecryptUserKey` also returns `primaryUserKeyId`. `resume` needs it to find the primary key's `KeySalt` for the fingerprint.
-3. The PWA fetches `unlock/begin` when the locked banner appears, and `passkeys/begin` when **Add passkey** is tapped. The passkey prompt then starts straight from the next tap, with no request in between: WebKit may refuse a prompt that follows a network round trip. Either flow still fetches for itself if that early fetch failed.
+2. `ProtonAuth.resume` returns no `keySaltFingerprint` and doesn't call `getKeySalts`. Nothing shows that Proton serves key salts to a resumed or refreshed session, and the value isn't needed: a successful unlock proves the passphrase, and so the KeySalt, unchanged since enrolment, and while any passkey exists the stored `passkeys.key_salt_fingerprint` is current. The unlock route carries that stored value into the live session (`LiveSession.keySaltFingerprint` is `string | null`), and enrolment writes the fingerprint only when the session knows it.
+3. The PWA fetches `unlock/begin` when the locked banner appears (and again after any failed unlock), and `passkeys/begin` when **Add passkey** is tapped. The passkey prompt then starts straight from the next tap, with no request in between: WebKit may refuse a prompt that follows a network round trip. Either flow still fetches for itself if that early fetch failed.
+
+**Additions the spec doesn't ask for:**
+
+- `ProtonApi` requests time out after 30 seconds (`AbortSignal.timeout`), so a hung Proton call can't hold the auth mutex. A `TimeoutError` counts as transient: an unlock answers 503 `proton_unavailable`.
+- If `startLiveSession` fails, it disposes the `MailboxSecret` before rethrowing. A login as a different account forgets the old live session before it stores the new tokens, so a failure part-way can't leave account A's keys beside account B's tokens.
+- The PWA also signals a passkey as unknown when the server refuses it for any reason (not only an expired enrolment), or when a setup is abandoned at Finish setup. It keeps a passkey whose add got no answer, since the server may have stored it.
+- After the unlock refusals `proton_login_required`, `passkeys_stale` and `passkey_unreadable`, the app reads its status again, so its Proton state and passkey count match the server's.
 
 **Readings of the spec** that the code makes explicit:
 
@@ -28,6 +35,7 @@
 - The `Sec-Fetch-Site` check covers `PATCH` as well as `POST`/`PUT`/`DELETE`.
 - `KeyDecryptError` reason `user_key` covers any active user key that won't decrypt: `keys.ts` decrypts every active user key, not only the primary one, and throws on the first failure.
 - A 401 on `resume`'s retry, after a successful refresh, is not mapped by the spec; it answers 500 and changes nothing.
+- "A network error" is undici's `TypeError('fetch failed')`, or a `TypeError` that carries the socket error as its `cause`, or a `TimeoutError`/`AbortError`. Any other `TypeError` is a bug: it is reported and answers 500.
 - WebAuthn requires a `challenge`, and nothing verifies one here, so the PWA sends 32 random bytes.
 - In header mode the middleware reads the stored email from the `sessions.email` column (plaintext) instead of decrypting the session, because it runs on every request.
 
@@ -64,7 +72,7 @@
 | `server/src/auth/mutex.ts` | `Mutex`: login, unlock and logout take turns |
 | `server/src/http/routes-passkeys.ts` | `/api/passkeys`: begin, add, list, remove |
 | `server/tests/helpers/auth-app.ts` | An app with a fake `ProtonAuth`, header mode by default, and passkey fixtures |
-| `server/tests/http/middleware.test.ts`, `server/tests/http/routes-auth-header.test.ts`, `server/tests/http/routes-passkeys.test.ts`, `server/tests/http/routes-unlock.test.ts`, `server/tests/auth/passkey-store.test.ts`, `server/tests/auth/app-settings.test.ts`, `server/tests/auth/proton-auth.test.ts`, `server/tests/auth/mutex.test.ts` | Their tests |
+| `server/tests/http/middleware.test.ts`, `server/tests/http/routes-auth-header.test.ts`, `server/tests/http/routes-passkeys.test.ts`, `server/tests/http/routes-unlock.test.ts`, `server/tests/observability/unlock-route.test.ts`, `server/tests/auth/passkey-store.test.ts`, `server/tests/auth/app-settings.test.ts`, `server/tests/auth/proton-auth.test.ts`, `server/tests/auth/mutex.test.ts` | Their tests |
 
 **Server: modify**
 
@@ -78,9 +86,10 @@
 | `server/src/http/routes-drive.ts`, `server/src/http/routes-documents.ts` | Take the mode |
 | `server/src/index.ts` | `authModeFrom(config)` |
 | `server/src/crypto/at-rest.ts` | Purpose `'passkeys'` |
-| `server/src/auth/keys.ts` | `KeyDecryptError.reason`; returns `{ decryptedKeys, userId, primaryUserKeyId }` |
+| `server/src/auth/keys.ts` | `KeyDecryptError.reason`; returns `{ decryptedKeys, userId }` |
 | `server/src/auth/srp.ts` | `LoginResult.userId`/`keySaltFingerprint`; `resume`, `SessionEndedError`, `isTransientProtonError` |
-| `server/src/auth/live-session.ts` | `LiveSession.userId`, `keySaltFingerprint` |
+| `server/src/auth/proton-api.ts` | A 30-second timeout on every request |
+| `server/src/auth/live-session.ts` | `LiveSession.userId`, `keySaltFingerprint` (`string \| null`) |
 | `server/src/drive/folder-cache-store.ts` | `clear()` |
 | `server/src/documents/pipeline.ts` | `clearAccountData()` |
 | `server/src/observability/report.ts` | `captureAuthFailure` operation `'unlock'` |
@@ -1322,7 +1331,7 @@ git commit -m "feat(server): store passkey-wrapped Proton passphrases"
 
 - [ ] **Step 1: Write the failing tests**
 
-`fetchAndDecryptUserKey` now returns `{ decryptedKeys, userId, primaryUserKeyId }`. In `server/tests/auth/keys.test.ts`, the three tests that read the keys destructure them:
+`fetchAndDecryptUserKey` now returns `{ decryptedKeys, userId }`. In `server/tests/auth/keys.test.ts`, the three tests that read the keys destructure them:
 
 Replace each of the 3 occurrences of
 
@@ -1391,7 +1400,7 @@ Before
 add
 
 ```ts
-  it('returns the Proton user id and the primary user key id with the keys', async () => {
+  it('returns the Proton user id with the keys', async () => {
     const passphrase = 'ids-mailbox-password';
     const userKeyArmored = await makeUserKey(passphrase);
     const { addrKeyArmored, Token } = await makeAddressKeyWithToken(userKeyArmored, passphrase);
@@ -1415,8 +1424,7 @@ add
       mailboxPasswordBytes: new TextEncoder().encode(passphrase),
     });
 
-    expect(result.userId).toBe('user-123');
-    expect(result.primaryUserKeyId).toBe('uk-primary');
+    expect(result).toEqual({ decryptedKeys: expect.any(Object), userId: 'user-123' });
     expect(result.decryptedKeys.addresses[0]!.addressId).toBe('addr-1');
   });
 
@@ -1643,7 +1651,7 @@ with
 
 Run: `cd server && NODE_OPTIONS=--import=tsx pnpm exec vitest run tests/auth/keys.test.ts tests/auth/proton-auth.test.ts`
 
-Expected: FAIL: the existing key tests with `Cannot read properties of undefined (reading 'primaryKey')` (the destructuring finds no `decryptedKeys`), the reason tests with `expected KeyDecryptError: … to match object { name: 'KeyDecryptError', …(1) }`, and the login test with `expected undefined to be 'user-123'`.
+Expected: FAIL: the existing key tests with `Cannot read properties of undefined (reading 'primaryKey')` (the destructuring finds no `decryptedKeys`), the user-id test with `expected { …(3) } to deeply equal { decryptedKeys: Any<Object>, userId: 'user-123' }`, the reason tests with `expected KeyDecryptError: … to match object { name: 'KeyDecryptError', …(1) }`, and the login test with `expected undefined to be 'user-123'`.
 
 - [ ] **Step 3: Implement the key reasons and ids**
 
@@ -1681,8 +1689,6 @@ export interface UnlockedKeys {
   decryptedKeys: DecryptedUserKey;
   /** Proton's `User.ID`: tells a different account from the same one typed differently. */
   userId: string;
-  /** The primary user key's ID; its KeySalt gives the key-salt fingerprint. */
-  primaryUserKeyId: string;
 }
 ```
 
@@ -1793,7 +1799,6 @@ with
       addresses: decryptedAddresses,
     },
     userId: User.ID,
-    primaryUserKeyId: primaryUserKey.id,
   };
 ```
 
@@ -1892,7 +1897,7 @@ with
     };
 ```
 
-In `server/src/auth/live-session.ts`, the live session keeps both, so enrolment can record the fingerprint however the session started:
+In `server/src/auth/live-session.ts`, the live session keeps both. The fingerprint is nullable: an unlock carries over the stored one, which Task 9 reads, and enrolment (Task 8) writes it only when known:
 
 Replace
 
@@ -1909,8 +1914,12 @@ with
   driveClient: DriveClient;
   /** Proton's `User.ID` for the account these keys belong to. */
   userId: string;
-  /** Enrolment records it, whether this session came from a login or an unlock. */
-  keySaltFingerprint: string;
+  /**
+   * SHA-256 of the primary user key's KeySalt, which enrolment records. A
+   * login computes it; an unlock carries over the stored one (null if none
+   * was stored), since the passphrase it opened proves the salt unchanged.
+   */
+  keySaltFingerprint: string | null;
 }
 ```
 
@@ -1949,11 +1958,11 @@ git commit -m "feat(auth): key-decrypt reasons, the Proton user id and the key-s
 
 ---
 
-### Task 5: `ProtonAuth.resume` with `onRefreshed`
+### Task 5: `ProtonAuth.resume`, transient Proton errors, and a request timeout
 
 **Files:**
-- Modify: `server/src/auth/srp.ts`
-- Test: `server/tests/auth/proton-auth.test.ts`
+- Modify: `server/src/auth/srp.ts`, `server/src/auth/proton-api.ts`
+- Test: `server/tests/auth/proton-auth.test.ts`, `server/tests/auth/proton-api.test.ts`
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1983,7 +1992,7 @@ with
 const { ProtonAuth, SessionEndedError, isTransientProtonError, keySaltFingerprint } = await import('../../src/auth/srp.js');
 ```
 
-and append:
+and append. `resume` must not ask for the key salts: nothing shows that Proton serves them to a resumed or refreshed session, and the unlock doesn't need them (Task 9 carries over the stored fingerprint). Only undici's network failure counts as transient among `TypeError`s, so a bug still reaches the error report:
 
 ```ts
 describe('ProtonAuth.resume', () => {
@@ -1997,9 +2006,11 @@ describe('ProtonAuth.resume', () => {
     const api = fakeApi();
     const onRefreshed = vi.fn();
     const result = await new ProtonAuth(api).resume(SESSION, bytes(), { onRefreshed });
-    expect(result).toMatchObject({ session: SESSION, userId: 'user-123', keySaltFingerprint: keySaltFingerprint(KEY_SALT) });
+    expect(result).toEqual({ session: SESSION, decryptedKeys: expect.any(Object), userId: 'user-123' });
     expect(result.decryptedKeys.primaryAddress.addressId).toBe('addr-1');
     expect(api.getUser).toHaveBeenCalledWith('uid-1', 'at-1');
+    // The key salts aren't needed: the passkey's passphrase opened the keys, so the salt is unchanged.
+    expect(api.getKeySalts).not.toHaveBeenCalled();
     expect(api.refresh).not.toHaveBeenCalled();
     expect(onRefreshed).not.toHaveBeenCalled();
   });
@@ -2057,8 +2068,13 @@ describe('ProtonAuth.resume', () => {
 });
 
 describe('isTransientProtonError', () => {
-  it('is true for no answer, rate limiting and server errors only', () => {
+  it('is true for no answer, a timeout, rate limiting and server errors only', () => {
     expect(isTransientProtonError(new TypeError('fetch failed'))).toBe(true);
+    expect(isTransientProtonError(Object.assign(new TypeError('terminated'), { cause: new Error('other side closed') }))).toBe(true);
+    expect(isTransientProtonError(new DOMException('The operation was aborted due to timeout', 'TimeoutError'))).toBe(true);
+    expect(isTransientProtonError(new DOMException('This operation was aborted', 'AbortError'))).toBe(true);
+    // A bug, not the network: it must reach the error report.
+    expect(isTransientProtonError(new TypeError('x'))).toBe(false);
     for (const status of [429, 500, 502, 503]) expect(isTransientProtonError(new ProtonApiError('x', status))).toBe(true);
     for (const status of [400, 401, 422]) expect(isTransientProtonError(new ProtonApiError('x', status))).toBe(false);
     expect(isTransientProtonError(new Error('other'))).toBe(false);
@@ -2066,13 +2082,41 @@ describe('isTransientProtonError', () => {
 });
 ```
 
+In `server/tests/auth/proton-api.test.ts`, add a last test inside the describe. It stands in an already-expired signal for `AbortSignal.timeout`, so it doesn't wait 30 seconds:
+
+Before
+
+```ts
+  });
+});
+```
+
+add
+
+```ts
+  });
+
+  it('gives up on a request after 30 seconds, as a TimeoutError', async () => {
+    // A signal that has already timed out; the fake fetch rejects as fetch does.
+    const timeout = vi
+      .spyOn(AbortSignal, 'timeout')
+      .mockReturnValueOnce(AbortSignal.abort(new DOMException('The operation was aborted due to timeout', 'TimeoutError')));
+    mockFetch.mockImplementationOnce(async (_url: string, init: RequestInit) => {
+      init.signal!.throwIfAborted();
+      return new Response('{}');
+    });
+    const api = new ProtonApi('https://api.example.test', 'external-drive-docscanner@0.1.0');
+    await expect(api.getUser('uid-1', 'at-1')).rejects.toMatchObject({ name: 'TimeoutError' });
+    expect(timeout).toHaveBeenCalledWith(30_000);
+```
+
 - [ ] **Step 2: Run them to verify they fail**
 
-Run: `cd server && NODE_OPTIONS=--import=tsx pnpm exec vitest run tests/auth/proton-auth.test.ts`
+Run: `cd server && NODE_OPTIONS=--import=tsx pnpm exec vitest run tests/auth/proton-auth.test.ts tests/auth/proton-api.test.ts`
 
-Expected: FAIL, 9 tests: `(intermediate value).resume is not a function`, and `isTransientProtonError is not a function`. The login test still passes.
+Expected: FAIL: the resume tests with `(intermediate value).resume is not a function`; `isTransientProtonError is not a function`; the timeout test with `expected TypeError: … to match object { name: 'TimeoutError' }` (no signal is passed, so the fake fetch reads `undefined.throwIfAborted`). The login test still passes.
 
-- [ ] **Step 3: Implement**
+- [ ] **Step 3: Implement `resume` and the classifier**
 
 In `server/src/auth/srp.ts`, add the result type, the error and the classifier above the `LoginStage` type. `SessionEndedError` passes its cause through `ErrorOptions` (ES2022 lib), so it doesn't redeclare `cause`:
 
@@ -2085,13 +2129,16 @@ Before
 add
 
 ```ts
-/** What an unlock (spec §2) gets back: the keys open again, maybe with refreshed tokens. */
+/**
+ * What an unlock (spec §2) gets back: the keys open again, maybe with
+ * refreshed tokens. No key-salt fingerprint: the passphrase from the passkey
+ * opened the keys, so the salt is the one recorded at enrolment.
+ */
 export interface ResumeResult {
   /** The tokens in use: refreshed if the stored access token had expired. */
   session: ProtonSession;
   decryptedKeys: DecryptedUserKey;
   userId: string;
-  keySaltFingerprint: string;
 }
 
 /** Proton refused the refresh token (400, 401 or 422): only a password login helps now. */
@@ -2105,12 +2152,16 @@ export class SessionEndedError extends Error {
 const SESSION_ENDED = new Set([400, 401, 422]);
 
 /**
- * Worth trying again in a moment: no answer at all (fetch throws a
- * TypeError), rate limiting, or a server error.
+ * Worth trying again in a moment: rate limiting, a server error, no answer
+ * at all, or no answer in time (ProtonApi's timeout). No answer is undici's
+ * TypeError('fetch failed'), or a TypeError carrying the socket error as its
+ * cause; any other TypeError is a bug and must be reported.
  */
 export function isTransientProtonError(error: unknown): boolean {
   if (error instanceof ProtonApiError) return error.status === 429 || error.status >= 500;
-  return error instanceof TypeError;
+  if (error instanceof TypeError) return error.message === 'fetch failed' || 'cause' in error;
+  const name = typeof error === 'object' && error !== null && 'name' in error ? error.name : undefined;
+  return name === 'TimeoutError' || name === 'AbortError';
 }
 ```
 
@@ -2158,31 +2209,65 @@ add
   }
 
   private async openKeys(session: ProtonSession, passphraseBytes: Uint8Array): Promise<ResumeResult> {
-    const { decryptedKeys, userId, primaryUserKeyId } = await fetchAndDecryptUserKey({
+    const { decryptedKeys, userId } = await fetchAndDecryptUserKey({
       api: this.api,
       uid: session.uid,
       accessToken: session.accessToken,
       mailboxPasswordBytes: passphraseBytes,
     });
-    // There is no password step here, so the salt is fetched for the fingerprint alone.
-    const { KeySalts } = await this.api.getKeySalts(session.uid, session.accessToken);
-    const salt = KeySalts.find((s) => s.ID === primaryUserKeyId);
-    if (!salt) throw new Error('No KeySalt for the primary user key');
-    return { session, decryptedKeys, userId, keySaltFingerprint: keySaltFingerprint(salt.KeySalt) };
+    return { session, decryptedKeys, userId };
   }
 ```
 
-- [ ] **Step 4: Run the tests and the typecheck**
+- [ ] **Step 4: Time out Proton requests**
 
-Run: `cd server && NODE_OPTIONS=--import=tsx pnpm exec vitest run tests/auth/proton-auth.test.ts && pnpm --filter @doc-scanner/server run typecheck`
+In `server/src/auth/proton-api.ts`. Login, unlock and logout hold the auth mutex (Task 7) while Proton answers, so a hung request must not hold it for minutes. `AbortSignal.timeout` rejects with a `TimeoutError`, which `isTransientProtonError` counts as transient: an unlock answers 503 `proton_unavailable`. The SRP and login tests stub `fetch` and ignore the signal; the integration tests' requests take far less than 30 seconds.
 
-Expected: PASS (10 tests); typecheck clean.
+Before
 
-- [ ] **Step 5: Commit**
+```ts
+export class ProtonApi {
+```
+
+add
+
+```ts
+/**
+ * How long one Proton request may take. Login, unlock and logout hold the
+ * auth mutex while they wait, so a hung request must not hold it for the
+ * minutes a socket can stall. A timeout rejects with a TimeoutError.
+ */
+const REQUEST_TIMEOUT_MS = 30_000;
+```
+
+Replace
+
+```ts
+        ...extraHeaders,
+      },
+    };
+```
+
+with
+
+```ts
+        ...extraHeaders,
+      },
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    };
+```
+
+- [ ] **Step 5: Run the tests and the typecheck**
+
+Run: `cd server && NODE_OPTIONS=--import=tsx pnpm exec vitest run tests/auth tests/observability && pnpm --filter @doc-scanner/server run typecheck`
+
+Expected: PASS; typecheck clean.
+
+- [ ] **Step 6: Commit**
 
 ```bash
-git add server/src/auth/srp.ts server/tests/auth/proton-auth.test.ts
-git commit -m "feat(auth): resume a stored Proton session with a passphrase"
+git add server/src/auth/srp.ts server/src/auth/proton-api.ts server/tests/auth/proton-auth.test.ts server/tests/auth/proton-api.test.ts
+git commit -m "feat(auth): resume a stored Proton session with a passphrase, and time out Proton requests"
 ```
 
 ---
@@ -2257,7 +2342,7 @@ export function loginResult(keys: DecryptedUserKey, over: Partial<LoginResult> =
 }
 
 export function resumeResult(keys: DecryptedUserKey, over: Partial<ResumeResult> = {}): ResumeResult {
-  return { session: { ...SESSION }, decryptedKeys: keys, userId: 'user-1', keySaltFingerprint: 'fp-1', ...over };
+  return { session: { ...SESSION }, decryptedKeys: keys, userId: 'user-1', ...over };
 }
 
 export interface FakeAuth {
@@ -2887,7 +2972,7 @@ describe('signing in again', () => {
     expect(readSetting(c.db, SETTING.protonUserId)).toBe('user-1');
   });
 
-  it('as a different Proton account, clears the caches, the folder cache and the passkeys before the new session is used', async () => {
+  it('as a different Proton account, forgets the old session, then clears the caches, the folder cache and the passkeys', async () => {
     const c = setup({ pipeline: true });
     await signIn(c, keys, { userId: 'user-A' });
     c.pipeline!.folderCache.save(TREE, new Date());
@@ -2897,12 +2982,28 @@ describe('signing in again', () => {
       seen.push(getLiveSession('proxy')?.userId);
     });
     await signIn(c, keys, { userId: 'user-B' });
-    // Cleared while the old session was still the registered one.
-    expect(seen).toEqual(['user-A']);
+    // Account A's session was gone before anything was cleared, and B's not yet registered.
+    expect(seen).toEqual([undefined]);
     expect(getLiveSession('proxy')?.userId).toBe('user-B');
     expect(c.pipeline!.folderCache.load()).toBeNull();
     expect(c.passkeys.count()).toBe(0);
     expect(readSetting(c.db, SETTING.protonUserId)).toBe('user-B');
+  });
+
+  it('leaves no live session, and the old account id, when switching accounts fails part-way', async () => {
+    const c = setup({ pipeline: true });
+    await signIn(c, keys, { userId: 'user-A' });
+    vi.spyOn(DriveClient.prototype, 'clearCaches').mockRejectedValue(new Error('disk full'));
+    const second = loginResult(keys, { userId: 'user-B', session: { ...SESSION, accessToken: 'b' } });
+    c.auth.login.mockResolvedValueOnce(second);
+    const res = await post(c.app, '/api/auth/login', { email: 'b@x.test', password: 'p' });
+    expect(res.status).toBe(500);
+    // Account A's keys went with its session; B's tokens are stored, locked.
+    expect(getLiveSession('proxy')).toBeUndefined();
+    expect(c.store.load()?.accessToken).toBe('b');
+    // So the next login still sees a different account, and clears again.
+    expect(readSetting(c.db, SETTING.protonUserId)).toBe('user-A');
+    await expect(second.mailboxSecret.use(() => 1)).rejects.toThrow('already disposed');
   });
 
   it('treats an email that differs only in case as the same account', async () => {
@@ -2955,7 +3056,7 @@ describe('signing in again', () => {
 
 Run: `cd server && NODE_OPTIONS=--import=tsx pnpm exec vitest run tests/auth/mutex.test.ts tests/drive/folder-cache-store.test.ts tests/http/routes-auth-header.test.ts`
 
-Expected: FAIL: `Cannot find module '../../src/auth/mutex.js'`; `s.clear is not a function`; `expected null to be 'user-1'` (no user id is stored); `expected [] to deeply equal [ 'user-A' ]` (nothing cleared); `expected 1 to be +0` (a changed key salt keeps the passkeys). The email-case, first-login, no-notice and unchanged-salt tests already pass: they guard against over-clearing.
+Expected: FAIL: `Cannot find module '../../src/auth/mutex.js'`; `s.clear is not a function`; `expected null to be 'user-1'` (no user id is stored); `expected [] to deeply equal [ undefined ]` (nothing cleared); `expected 200 to be 500` (the failing cache clear is never reached); `expected 1 to be +0` (a changed key salt keeps the passkeys). The email-case, first-login, no-notice and unchanged-salt tests already pass: they guard against over-clearing.
 
 - [ ] **Step 3: Implement the mutex and the folder-cache clear**
 
@@ -3111,45 +3212,109 @@ add
   const mutex = new Mutex();
 ```
 
-`startLiveSession` clears the SDK caches on the new client, before registering it, when told to:
+`startLiveSession` now disposes the passphrase if anything fails (no session will own it), and clears the SDK caches on the new client, before registering it, when told to. Replace it:
 
 Replace
 
 ```ts
+  /**
+   * Builds the Drive client and registers the live session. Registering
+   * runs the onLiveSessionRegistered listeners, so the worker resumes what
+   * waited for a login (pipeline.ts). Login and unlock both start here.
+   */
+  async function startLiveSession(s: {
+    sid: string;
+    session: ProtonSession;
+    mailboxSecret: MailboxSecret;
+    decryptedKeys: DecryptedUserKey;
+    userId: string;
     keySaltFingerprint: string;
   }): Promise<void> {
     const driveClient = new DriveClient({
+      db: deps.db,
+      encryptionKey: deps.encryptionKey,
+      appVersion: deps.appVersion ?? 'external-drive-docscanner@0.1.0',
+      user: s.decryptedKeys,
+      session: s.session,
+      protonAuth: deps.protonAuth,
+      // The SDK's HTTP adapter refreshes the access token on a 401. Persist
+      // the rotated tokens, or the next process restart resumes with a
+      // refresh token Proton has already invalidated.
+      onSessionRefreshed: (session) => {
+        deps.store.save(session);
+        logger.info({ email: session.email }, 'proton session refreshed');
+      },
+    });
+    registerLiveSession({
+      sid: s.sid,
+      session: s.session,
+      mailboxSecret: s.mailboxSecret,
+      decryptedKeys: s.decryptedKeys,
+      driveClient,
+      userId: s.userId,
+      keySaltFingerprint: s.keySaltFingerprint,
+    });
+  }
 ```
 
 with
 
 ```ts
+  /**
+   * Builds the Drive client and registers the live session. Registering
+   * runs the onLiveSessionRegistered listeners, so the worker resumes what
+   * waited for a login (pipeline.ts). Login and unlock both start here. On a
+   * failure the passphrase is disposed: no session will ever own it.
+   */
+  async function startLiveSession(s: {
+    sid: string;
+    session: ProtonSession;
+    mailboxSecret: MailboxSecret;
+    decryptedKeys: DecryptedUserKey;
+    userId: string;
     keySaltFingerprint: string;
     /** Another Proton account: clear the entities and event-id caches before the session can use them. */
     clearDriveCaches?: boolean;
   }): Promise<void> {
+    try {
+      await registerNewSession(s);
+    } catch (err) {
+      s.mailboxSecret.dispose();
+      throw err;
+    }
+  }
+
+  async function registerNewSession(s: Parameters<typeof startLiveSession>[0]): Promise<void> {
     const driveClient = new DriveClient({
-```
-
-Replace
-
-```ts
-      },
-    });
-    registerLiveSession({
-```
-
-with
-
-```ts
+      db: deps.db,
+      encryptionKey: deps.encryptionKey,
+      appVersion: deps.appVersion ?? 'external-drive-docscanner@0.1.0',
+      user: s.decryptedKeys,
+      session: s.session,
+      protonAuth: deps.protonAuth,
+      // The SDK's HTTP adapter refreshes the access token on a 401. Persist
+      // the rotated tokens, or the next process restart resumes with a
+      // refresh token Proton has already invalidated.
+      onSessionRefreshed: (session) => {
+        deps.store.save(session);
+        logger.info({ email: session.email }, 'proton session refreshed');
       },
     });
     // They are not account-scoped; the new client clears the shared tables.
     if (s.clearDriveCaches) await driveClient.clearCaches();
     registerLiveSession({
+      sid: s.sid,
+      session: s.session,
+      mailboxSecret: s.mailboxSecret,
+      decryptedKeys: s.decryptedKeys,
+      driveClient,
+      userId: s.userId,
+      keySaltFingerprint: s.keySaltFingerprint,
+    });
+  }
 ```
 
-Replace the whole `/login` handler with the fingerprint check and the new handler. The user id is written last, so a login that fails after clearing leaves the old id and the next login clears again:
+Replace the whole `/login` handler with the fingerprint check and the new handler. On a different account, the old live session is forgotten before the new tokens are stored, so a failure can never leave account A's keys beside account B's tokens. The user id is written last, so a login that fails after clearing leaves the old id, and the next login clears again:
 
 Replace
 
@@ -3222,12 +3387,14 @@ with
       try {
         const result = await deps.protonAuth.login(email, password, totp);
         loggedIn = true;
-        deps.store.save(result.session);
         // Never a logout first: it would remove the passkeys. Compared by
         // User.ID, since one account can be typed as different emails.
         const previousUserId = readSetting(deps.db, SETTING.protonUserId);
         const otherAccount = previousUserId !== null && previousUserId !== result.userId;
         if (otherAccount) {
+          // First the old account's live session, before the new tokens are
+          // stored: a failure below must never leave A's keys beside B's tokens.
+          forgetAllSessions();
           deps.clearAccountData();
           deps.passkeys.removeAll();
           deleteSetting(deps.db, SETTING.keySaltFingerprint);
@@ -3236,6 +3403,7 @@ with
         } else {
           dropStalePasskeys(result.keySaltFingerprint);
         }
+        deps.store.save(result.session);
         // Header mode keeps one live session, which each login replaces; no cookie.
         const sid = header ? PROXY_SID : issueSession(c, deps.secureCookie ?? true);
         await startLiveSession({
@@ -3352,12 +3520,14 @@ git commit -m "feat(server): take turns on Proton sign-ins, and clear a previous
 
 - [ ] **Step 1: Write the failing tests**
 
-Create `server/tests/http/routes-passkeys.test.ts`. The expired-salt test moves `Date.now` past the 5 minutes; the restart test builds a second app on the same database:
+Create `server/tests/http/routes-passkeys.test.ts`. The expired-salt test moves `Date.now` past the 5 minutes; the restart test builds a second app on the same database. A live session that knows no fingerprint (an unlock with none stored) must leave the recorded one alone:
 
 ```ts
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 import { _resetSids, COOKIE_MODE } from '../../src/http/middleware.js';
-import { _resetLiveSessions } from '../../src/auth/live-session.js';
+import { _resetLiveSessions, registerLiveSession } from '../../src/auth/live-session.js';
+import { MailboxSecret } from '../../src/auth/secrets/mailbox-password.js';
+import type { DriveClient } from '../../src/drive/client.js';
 import { SETTING, readSetting, writeSetting } from '../../src/auth/app-settings.js';
 import type { DecryptedUserKey } from '../../src/auth/keys.js';
 import {
@@ -3367,6 +3537,7 @@ import {
   PASSPHRASE,
   PRF,
   PRF_B64,
+  SESSION,
   authApp,
   del,
   get,
@@ -3434,6 +3605,24 @@ describe('passkey enrolment', () => {
     expect(await res.json()).toMatchObject({ credentialId: CRED, label: LABEL, lastUsedAt: null });
     expect(text(c.passkeys.unwrap(CRED, PRF))).toBe(PASSPHRASE);
     expect(readSetting(c.db, SETTING.keySaltFingerprint)).toBe('fp-1');
+  });
+
+  it('keeps the recorded fingerprint when the live session knows none', async () => {
+    const c = setup();
+    // As after an unlock with no fingerprint recorded.
+    registerLiveSession({
+      sid: 'proxy',
+      session: SESSION,
+      mailboxSecret: new MailboxSecret(new TextEncoder().encode(PASSPHRASE)),
+      decryptedKeys: keys,
+      driveClient: {} as DriveClient,
+      userId: 'user-1',
+      keySaltFingerprint: null,
+    });
+    writeSetting(c.db, SETTING.keySaltFingerprint, 'fp-stored');
+    const { salt } = await begin(c);
+    expect((await add(c, { credentialId: CRED, salt, prf: PRF_B64 })).status).toBe(201);
+    expect(readSetting(c.db, SETTING.keySaltFingerprint)).toBe('fp-stored');
   });
 
   it('needs live Proton keys', async () => {
@@ -3541,7 +3730,7 @@ describe('passkey routes in cookie mode', () => {
 
 Run: `cd server && NODE_OPTIONS=--import=tsx pnpm exec vitest run tests/http/routes-passkeys.test.ts`
 
-Expected: FAIL, 10 tests: every route answers 404 (`expected 404 to be 200`, `expected 404 to be 409`, …). The cookie-mode test already passes, since nothing is mounted yet.
+Expected: FAIL, 11 tests: every route answers 404 (`expected 404 to be 200`, `expected 404 to be 409`, …). The cookie-mode test already passes, since nothing is mounted yet.
 
 - [ ] **Step 3: Add the header-only guard**
 
@@ -3655,7 +3844,8 @@ export function passkeyRoutes(deps: { db: DB; store: SessionStore; passkeys: Pas
     );
     pending.delete(salt);
     // What a later password login compares, to tell the password changed (spec §2).
-    writeSetting(deps.db, SETTING.keySaltFingerprint, live.keySaltFingerprint);
+    // An unlocked session with none known leaves the recorded one in place.
+    if (live.keySaltFingerprint !== null) writeSetting(deps.db, SETTING.keySaltFingerprint, live.keySaltFingerprint);
     logger.info({ credential: shortId(credentialId) }, 'passkey added');
     return c.json(entry, 201);
   });
@@ -3721,7 +3911,7 @@ git commit -m "feat(server): passkey enrolment routes"
 ### Task 9: Unlock routes
 
 **Files:**
-- Create: `server/tests/http/routes-unlock.test.ts`
+- Create: `server/tests/http/routes-unlock.test.ts`, `server/tests/observability/unlock-route.test.ts`
 - Modify: `server/src/http/routes-auth.ts`, `server/src/observability/report.ts`
 
 - [ ] **Step 1: Write the failing tests**
@@ -3736,6 +3926,7 @@ import { ProtonApiError } from '../../src/auth/proton-api.js';
 import { SessionEndedError } from '../../src/auth/srp.js';
 import { KeyDecryptError, type DecryptedUserKey } from '../../src/auth/keys.js';
 import { logger } from '../../src/logger.js';
+import { SETTING, deleteSetting, writeSetting } from '../../src/auth/app-settings.js';
 import {
   CRED,
   CRED_2,
@@ -3767,12 +3958,13 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-/** Locked: Proton tokens stored, a passkey enrolled, no live session (a restart). */
+/** Locked: Proton tokens stored, a passkey enrolled (with its fingerprint), no live session (a restart). */
 function locked(opts: Parameters<typeof authApp>[0] = {}): AuthApp {
   const a = authApp(opts);
   apps.push(a);
   a.store.save(SESSION);
   seedPasskey(a.passkeys);
+  writeSetting(a.db, SETTING.keySaltFingerprint, 'fp-enrolled');
   return a;
 }
 
@@ -3823,13 +4015,22 @@ describe('POST /api/auth/unlock', () => {
     expect(session).toEqual(SESSION);
     expect(new TextDecoder().decode(passphrase as Uint8Array)).toBe(PASSPHRASE);
     expect(opts).toEqual({ onRefreshed: expect.any(Function) });
-    expect(getLiveSession('proxy')).toMatchObject({ userId: 'user-1', keySaltFingerprint: 'fp-1' });
+    // The fingerprint recorded at enrolment: the passphrase that opened the keys proves the salt unchanged.
+    expect(getLiveSession('proxy')).toMatchObject({ userId: 'user-1', keySaltFingerprint: 'fp-enrolled' });
     expect(c.passkeys.list()[0]?.lastUsedAt).not.toBeNull();
+  });
+
+  it('starts the session with no fingerprint when none is recorded', async () => {
+    const c = locked();
+    deleteSetting(c.db, SETTING.keySaltFingerprint);
+    c.auth.resume.mockResolvedValue(resumeResult(keys));
+    expect((await unlock(c)).status).toBe(200);
+    expect(getLiveSession('proxy')?.keySaltFingerprint).toBeNull();
   });
 
   it('answers with the status, without touching Proton, when already live', async () => {
     const c = locked();
-    await signIn(c, keys);
+    await signIn(c, keys, { keySaltFingerprint: 'fp-enrolled' });
     const res = await unlock(c);
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual(LIVE_STATUS);
@@ -4025,11 +4226,60 @@ describe('enrolling, then unlocking after a restart', () => {
 });
 ```
 
+Create `server/tests/observability/unlock-route.test.ts`. A `TypeError` that isn't undici's network failure is a bug: it must reach the error report and answer 500, not hide as a 503:
+
+```ts
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { flushEvents, initRecordingSentry } from '../helpers/sentry-transport.js';
+import { _resetSids } from '../../src/http/middleware.js';
+import { _resetLiveSessions } from '../../src/auth/live-session.js';
+import { CRED, PRF_B64, SESSION, authApp, post, seedPasskey, type AuthApp } from '../helpers/auth-app.js';
+
+const { events } = initRecordingSentry();
+
+let ctx: AuthApp | null = null;
+beforeEach(() => {
+  events.length = 0;
+  _resetSids();
+  _resetLiveSessions();
+});
+afterEach(() => {
+  ctx?.cleanup();
+  ctx = null;
+  vi.restoreAllMocks();
+});
+
+describe('POST /api/auth/unlock failure reporting', () => {
+  it('reports a TypeError that is not a network failure, and answers 500', async () => {
+    ctx = authApp();
+    ctx.store.save(SESSION);
+    seedPasskey(ctx.passkeys);
+    ctx.auth.resume.mockRejectedValue(new TypeError('x'));
+    const res = await post(ctx.app, '/api/auth/unlock', { credentialId: CRED, prf: PRF_B64 });
+    await flushEvents();
+    expect(res.status).toBe(500);
+    expect(events).toHaveLength(1);
+    expect(events[0]?.tags).toMatchObject({ 'auth.operation': 'unlock', 'auth.stage': 'keys' });
+  });
+
+  it('does not report a network failure, which answers 503', async () => {
+    ctx = authApp();
+    ctx.store.save(SESSION);
+    seedPasskey(ctx.passkeys);
+    ctx.auth.resume.mockRejectedValue(new TypeError('fetch failed'));
+    const res = await post(ctx.app, '/api/auth/unlock', { credentialId: CRED, prf: PRF_B64 });
+    await flushEvents();
+    expect(res.status).toBe(503);
+    expect(events).toHaveLength(0);
+  });
+});
+```
+
 - [ ] **Step 2: Run them to verify they fail**
 
-Run: `cd server && NODE_OPTIONS=--import=tsx pnpm exec vitest run tests/http/routes-unlock.test.ts`
+Run: `cd server && NODE_OPTIONS=--import=tsx pnpm exec vitest run tests/http/routes-unlock.test.ts tests/observability/unlock-route.test.ts`
 
-Expected: FAIL, 23 tests: both routes answer 404 (the two concurrency tests also time out waiting for `resume`). The cookie-mode test already passes.
+Expected: FAIL: neither route exists yet, so the unlock tests get 404 (the two concurrency tests fail when `vi.waitFor` gives up waiting for `resume`), and the reporting tests `expected 404 to be 500` / `to be 503`. The cookie-mode test already passes.
 
 - [ ] **Step 3: Implement**
 
@@ -4105,6 +4355,24 @@ add
 import { errorName } from '../observability/error-name.js';
 ```
 
+An unlock carries over the fingerprint recorded at enrolment, which may be missing:
+
+Replace
+
+```ts
+    userId: string;
+    keySaltFingerprint: string;
+    /** Another Proton account
+```
+
+with
+
+```ts
+    userId: string;
+    keySaltFingerprint: string | null;
+    /** Another Proton account
+```
+
 Add the body schema above `type Env`:
 
 Before
@@ -4124,7 +4392,7 @@ const UnlockSchema = z
   .strict();
 ```
 
-and the two routes. The passphrase bytes are zeroed on every failure; on success the new `MailboxSecret` owns them:
+and the two routes. The passphrase bytes are zeroed on every failure; on success the new `MailboxSecret` owns them. The session's fingerprint is the stored one: the passphrase that opened the keys proves the KeySalt unchanged since enrolment:
 
 After
 
@@ -4210,7 +4478,8 @@ add
         mailboxSecret: new MailboxSecret(passphrase),
         decryptedKeys: resumed.decryptedKeys,
         userId: resumed.userId,
-        keySaltFingerprint: resumed.keySaltFingerprint,
+        // Recorded at enrolment and unchanged: this passphrase still opened the keys.
+        keySaltFingerprint: readSetting(deps.db, SETTING.keySaltFingerprint),
       });
       deps.passkeys.touch(credentialId);
       logger.info({ credential }, 'unlocked with a passkey');
@@ -4223,12 +4492,12 @@ add
 
 Run: `pnpm --filter @doc-scanner/server test && pnpm --filter @doc-scanner/server run typecheck`
 
-Expected: PASS (61 files); typecheck clean.
+Expected: PASS (62 files, 754 tests); typecheck clean.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add server/src/http/routes-auth.ts server/src/observability/report.ts server/tests/http/routes-unlock.test.ts
+git add server/src/http/routes-auth.ts server/src/observability/report.ts server/tests/http/routes-unlock.test.ts server/tests/observability/unlock-route.test.ts
 git commit -m "feat(server): unlock the Proton keys with a passkey"
 ```
 
@@ -4758,7 +5027,7 @@ git commit -m "feat(pwa): WebAuthn PRF helper for passkeys"
 
 - [ ] **Step 1: Write the failing tests**
 
-Create `pwa/tests/auth/flows.test.ts`. It runs the real `api` and `passkeys.ts` against a stubbed `fetch` and the fake credentials:
+Create `pwa/tests/auth/flows.test.ts`. It runs the real `api` and `passkeys.ts` against a stubbed `fetch` and the fake credentials. A passkey that was created but will never be stored (no PRF, refused by the server, or abandoned at Finish setup) is signalled as unknown, so the password manager can hide it; one whose add got no answer is kept, since the server may have stored it:
 
 ```ts
 import { describe, it, expect, vi, afterEach } from 'vitest';
@@ -4873,6 +5142,37 @@ describe('enrol', () => {
     expect(await first.finish()).toEqual({ kind: 'added', passkey: ENTRY });
   });
 
+  it('asks the password manager to hide a passkey abandoned at Finish setup', async () => {
+    server({});
+    const c = installCredentials();
+    c.create.mockResolvedValue(fakeCredential(ID, null));
+    c.get.mockRejectedValue(domError('NotAllowedError'));
+    const signalUnknownCredential = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('PublicKeyCredential', { signalUnknownCredential });
+    const first = await enrol('Phone', 'user@example.test', BEGIN);
+    if (first.kind !== 'finish_setup') throw new Error(`expected finish_setup, got ${first.kind}`);
+    expect(await first.abandon()).toBe(true);
+    expect(signalUnknownCredential).toHaveBeenCalledWith({ rpId: location.hostname, credentialId: ID });
+  });
+
+  it('asks the password manager to hide a passkey the server refused', async () => {
+    server({ 'POST /api/passkeys': json({ error: 'proton_not_live' }, 409) });
+    installCredentials().create.mockResolvedValue(fakeCredential(ID, PRF));
+    const signalUnknownCredential = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('PublicKeyCredential', { signalUnknownCredential });
+    expect(await enrol('Phone', 'user@example.test', BEGIN)).toEqual({ kind: 'failed', code: 'proton_not_live', forgotten: true });
+    expect(signalUnknownCredential).toHaveBeenCalledWith({ rpId: location.hostname, credentialId: ID });
+  });
+
+  it('keeps a passkey whose add never got an answer: the server may have stored it', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
+    installCredentials().create.mockResolvedValue(fakeCredential(ID, PRF));
+    const signalUnknownCredential = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('PublicKeyCredential', { signalUnknownCredential });
+    expect(await enrol('Phone', 'user@example.test', BEGIN)).toEqual({ kind: 'failed', code: 'error' });
+    expect(signalUnknownCredential).not.toHaveBeenCalled();
+  });
+
   it('maps a cancelled prompt and an already-added passkey, and fails on a server error', async () => {
     server({ 'POST /api/passkeys/begin': json({ error: 'proton_not_live' }, 409) });
     const c = installCredentials();
@@ -4922,8 +5222,10 @@ export type EnrolOutcome =
   | { kind: 'prf_unsupported'; forgotten: boolean }
   /** The server lost the salt (5 minutes, or a restart); the passkey exists but was never stored. */
   | { kind: 'expired'; forgotten: boolean }
-  | { kind: 'finish_setup'; finish: () => Promise<EnrolOutcome> }
-  | { kind: 'failed'; code: string };
+  /** `abandon`: the user walked away, so ask the password manager to hide the half-made passkey. */
+  | { kind: 'finish_setup'; finish: () => Promise<EnrolOutcome>; abandon: () => Promise<boolean> }
+  /** `forgotten`: set when the server refused a created passkey, as for `prf_unsupported`. */
+  | { kind: 'failed'; code: string; forgotten?: boolean };
 
 const codeOf = (e: unknown): string => (e instanceof ApiError ? (e.code ?? 'request_failed') : 'error');
 const failed = (e: unknown): EnrolOutcome => ({ kind: 'failed', code: codeOf(e) });
@@ -4961,7 +5263,7 @@ async function settle(result: EnrolResult, salt: string, label: string): Promise
       // Created, but it can't unlock: nothing goes to the server.
       return { kind: 'prf_unsupported', forgotten: await forgetCredential(result.credentialId) };
     case 'finish_setup': {
-      const { finish } = result;
+      const { finish, credentialId } = result;
       return {
         kind: 'finish_setup',
         finish: async () => {
@@ -4971,16 +5273,19 @@ async function settle(result: EnrolResult, salt: string, label: string): Promise
             return failed(e);
           }
         },
+        abandon: () => forgetCredential(credentialId),
       };
     }
     case 'ok':
       try {
         return { kind: 'added', passkey: await api.passkeys.add({ credentialId: result.credentialId, salt, prf: result.prf, label }) };
       } catch (e) {
-        if (e instanceof ApiError && e.code === 'invalid_enrolment') {
-          return { kind: 'expired', forgotten: await forgetCredential(result.credentialId) };
-        }
-        throw e;
+        // A request that got no answer may have been stored: keep that passkey.
+        if (!(e instanceof ApiError)) throw e;
+        // The server refused it, so it will never unlock: ask the password manager to hide it.
+        const forgotten = await forgetCredential(result.credentialId);
+        if (e.code === 'invalid_enrolment') return { kind: 'expired', forgotten };
+        return { kind: 'failed', code: codeOf(e), forgotten };
       }
   }
 }
@@ -5018,7 +5323,7 @@ export const passkeysClient: PasskeysClient = {
 
 Run: `cd pwa && pnpm exec vitest run tests/auth && cd .. && pnpm --filter @doc-scanner/pwa run typecheck`
 
-Expected: PASS (21 tests); typecheck clean.
+Expected: PASS (24 tests); typecheck clean.
 
 - [ ] **Step 5: Commit**
 
@@ -5036,7 +5341,7 @@ git commit -m "feat(pwa): unlock and enrolment flows"
 
 - [ ] **Step 1: Write the failing tests**
 
-Create `pwa/tests/ui/LockedBanner.test.tsx`:
+Create `pwa/tests/ui/LockedBanner.test.tsx`. After any failed unlock the banner drops the salts it fetched and fetches them again, so the next tap uses fresh ones; after a refusal that changed the server's state (`proton_login_required`, `passkeys_stale`, `passkey_unreadable`) it calls `onStatusChanged`, so the app reads its status again:
 
 ```tsx
 import { describe, it, expect, vi } from 'vitest';
@@ -5056,8 +5361,9 @@ function setup(outcome: UnlockOutcome, passkeys = 1) {
   };
   const onUnlocked = vi.fn();
   const onSignIn = vi.fn();
-  render(<LockedBanner passkeys={passkeys} onUnlocked={onUnlocked} onSignIn={onSignIn} client={client} />);
-  return { client, onUnlocked, onSignIn };
+  const onStatusChanged = vi.fn();
+  render(<LockedBanner passkeys={passkeys} onUnlocked={onUnlocked} onSignIn={onSignIn} onStatusChanged={onStatusChanged} client={client} />);
+  return { client, onUnlocked, onSignIn, onStatusChanged };
 }
 
 /** Lets the salts fetched on mount arrive. */
@@ -5078,6 +5384,23 @@ describe('LockedBanner', () => {
     expect(client.unlock).toHaveBeenCalledWith(CREDENTIALS);
   });
 
+  it('fetches the salts again after a failed unlock, so the next tap uses fresh ones', async () => {
+    const fresh = [{ credentialId: 'AgICAgICAgICAgICAgICAg', salt: 'BAQE' }];
+    const { client, onUnlocked } = setup({ kind: 'failed', code: 'unlock_failed' });
+    await prepared(client);
+    vi.mocked(client.prepare).mockResolvedValue(fresh);
+    vi.mocked(client.unlock).mockResolvedValueOnce({ kind: 'failed', code: 'unlock_failed' }).mockResolvedValueOnce({ kind: 'unlocked', status: LIVE });
+    fireEvent.click(screen.getByRole('button', { name: 'Unlock' }));
+    expect(await screen.findByText(RETRY)).toBeInTheDocument();
+    await waitFor(() => expect(client.prepare).toHaveBeenCalledTimes(2));
+    await act(async () => {
+      await vi.mocked(client.prepare).mock.results[1]!.value;
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Unlock' }));
+    await waitFor(() => expect(onUnlocked).toHaveBeenCalledWith(LIVE));
+    expect(client.unlock).toHaveBeenLastCalledWith(fresh);
+  });
+
   it('offers only a Proton sign-in with no passkeys', () => {
     const { client, onSignIn } = setup({ kind: 'cancelled' }, 0);
     expect(screen.getByText('Filing is paused. Sign in to Proton to resume.')).toBeInTheDocument();
@@ -5093,10 +5416,11 @@ describe('LockedBanner', () => {
     ['a network failure', { kind: 'failed', code: 'error' }],
   ] as const) {
     it(`asks to try again after ${label}, keeping the button`, async () => {
-      setup(outcome);
+      const { onStatusChanged } = setup(outcome);
       fireEvent.click(screen.getByRole('button', { name: 'Unlock' }));
       expect(await screen.findByText(RETRY)).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Unlock' })).toBeEnabled();
+      expect(onStatusChanged).not.toHaveBeenCalled();
     });
   }
 
@@ -5112,10 +5436,11 @@ describe('LockedBanner', () => {
     ['passkeys_stale', 'Your Proton password changed. Sign in again, then add your passkey again in Settings.'],
     ['passkey_unreadable', 'That passkey can no longer unlock. Sign in to Proton, then remove it and add it again in Settings.'],
   ] as const) {
-    it(`sends the user to sign in after ${code}`, async () => {
-      const { onSignIn } = setup({ kind: 'failed', code });
+    it(`sends the user to sign in after ${code}, and tells the app its status changed`, async () => {
+      const { onSignIn, onStatusChanged } = setup({ kind: 'failed', code });
       fireEvent.click(screen.getByRole('button', { name: 'Unlock' }));
       expect(await screen.findByText(text)).toBeInTheDocument();
+      expect(onStatusChanged).toHaveBeenCalledTimes(1);
       expect(screen.queryByRole('button', { name: 'Unlock' })).toBeNull();
       fireEvent.click(screen.getByRole('button', { name: 'Sign in to Proton' }));
       expect(onSignIn).toHaveBeenCalled();
@@ -5159,6 +5484,8 @@ export interface LockedBannerProps {
   onUnlocked: (status: StatusResponse) => void;
   /** Opens the sign-in-to-Proton screen. */
   onSignIn: () => void;
+  /** The server changed the Proton state or the passkeys (a refusal that cleared something). */
+  onStatusChanged?: () => void;
   client?: UnlockClient;
 }
 
@@ -5180,6 +5507,9 @@ function problemOf(code: string): Problem {
   }
 }
 
+/** Refusals after which the server's state differs: the app reads its status again. */
+const STATUS_CHANGING = new Set(['proton_login_required', 'passkeys_stale', 'passkey_unreadable']);
+
 const SIGN_IN_TEXT = {
   login_required: 'Filing is paused. Sign in to Proton to resume.',
   stale: 'Your Proton password changed. Sign in again, then add your passkey again in Settings.',
@@ -5191,10 +5521,12 @@ const SIGN_IN_TEXT = {
  * (passkey-unlock spec §3). Unlock waits for a tap, since iOS needs a user
  * gesture for the passkey prompt; the salts are fetched before it.
  */
-export function LockedBanner({ passkeys, onUnlocked, onSignIn, client = unlockClient }: LockedBannerProps) {
+export function LockedBanner({ passkeys, onUnlocked, onSignIn, onStatusChanged = () => {}, client = unlockClient }: LockedBannerProps) {
   const [problem, setProblem] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
   const prepared = useRef<UnlockCredential[] | null>(null);
+  // Only the latest fetch may fill `prepared`.
+  const generation = useRef(0);
   const mounted = useRef(true);
   // A layout effect: Preact 11 runs useEffect cleanups after paint, too late for this guard.
   useLayoutEffect(() => {
@@ -5204,15 +5536,21 @@ export function LockedBanner({ passkeys, onUnlocked, onSignIn, client = unlockCl
     };
   }, []);
 
-  useEffect(() => {
-    if (passkeys === 0) return;
+  function prefetch() {
+    const mine = ++generation.current;
+    prepared.current = null;
     client
       .prepare()
       .then((credentials) => {
-        prepared.current = credentials;
+        if (generation.current === mine) prepared.current = credentials;
       })
       // The tap fetches them itself then.
       .catch(() => {});
+  }
+
+  useEffect(() => {
+    if (passkeys === 0) return;
+    prefetch();
   }, [client, passkeys]);
 
   async function tap() {
@@ -5221,8 +5559,14 @@ export function LockedBanner({ passkeys, onUnlocked, onSignIn, client = unlockCl
     const outcome = await client.unlock(prepared.current);
     if (!mounted.current) return;
     setBusy(false);
-    if (outcome.kind === 'unlocked') onUnlocked(outcome.status);
-    else setProblem(outcome.kind === 'cancelled' ? 'retry' : problemOf(outcome.code));
+    if (outcome.kind === 'unlocked') {
+      onUnlocked(outcome.status);
+      return;
+    }
+    // A passkey may have been removed, or another added elsewhere: the next tap gets fresh salts.
+    prefetch();
+    setProblem(outcome.kind === 'cancelled' ? 'retry' : problemOf(outcome.code));
+    if (outcome.kind === 'failed' && STATUS_CHANGING.has(outcome.code)) onStatusChanged();
   }
 
   const signInOnly =
@@ -5254,7 +5598,7 @@ export function LockedBanner({ passkeys, onUnlocked, onSignIn, client = unlockCl
 
 Run: `cd pwa && pnpm exec vitest run tests/ui/LockedBanner.test.tsx && cd .. && pnpm --filter @doc-scanner/pwa run typecheck`
 
-Expected: PASS (10 tests); typecheck clean.
+Expected: PASS (11 tests); typecheck clean.
 
 - [ ] **Step 5: Commit**
 
@@ -5350,6 +5694,17 @@ describe('InboxScreen while Proton is locked', () => {
     await waitFor(() => expect(onUnlocked).toHaveBeenCalledWith(LIVE));
   });
 
+  it('tells the app when an unlock refusal changed the server state', async () => {
+    const onStatusChanged = vi.fn();
+    const client: UnlockClient = {
+      prepare: vi.fn().mockResolvedValue([]),
+      unlock: vi.fn().mockResolvedValue({ kind: 'failed', code: 'passkeys_stale' }),
+    };
+    setup([], {}, undefined, { proton: 'locked', passkeys: 1, onStatusChanged, unlockClient: client });
+    fireEvent.click(screen.getByRole('button', { name: 'Unlock' }));
+    await waitFor(() => expect(onStatusChanged).toHaveBeenCalled());
+  });
+
   it('opens the Proton sign-in when no passkey can unlock', async () => {
     const onSignInToProton = vi.fn();
     setup([], {}, undefined, { proton: 'locked', passkeys: 0, onSignInToProton });
@@ -5394,7 +5749,7 @@ describe('InboxScreen passkey nudge', () => {
 
 Run: `cd pwa && pnpm exec vitest run tests/ui/InboxScreen.test.tsx`
 
-Expected: FAIL, 5 tests: no element with the text `/filing is paused until you unlock/i`, no button named "Unlock", "Sign in to Proton" or "Add passkey". (The existing tests still pass; the new props are optional.)
+Expected: FAIL, 6 tests: no element with the text `/filing is paused until you unlock/i`, no button named "Unlock", "Sign in to Proton" or "Add passkey". (The existing tests still pass; the new props are optional.)
 
 - [ ] **Step 3: Implement**
 
@@ -5455,6 +5810,8 @@ with
   proton?: ProtonState;
   passkeys?: number;
   onUnlocked?: (status: StatusResponse) => void;
+  /** An unlock refusal changed the server's state (spec §3): the app reads its status again. */
+  onStatusChanged?: () => void;
   /** Opens the sign-in-to-Proton screen; defaults to onSignInAgain. */
   onSignInToProton?: () => void;
   /** After a Proton login in header mode with no passkey yet. */
@@ -5481,6 +5838,7 @@ with
   proton = 'live',
   passkeys = 0,
   onUnlocked = () => {},
+  onStatusChanged = () => {},
   onSignInToProton = onSignInAgain,
   showPasskeyNudge = false,
   onAddPasskey = onSettings,
@@ -5535,6 +5893,7 @@ with
           <LockedBanner
             passkeys={passkeys}
             onUnlocked={onUnlocked}
+            onStatusChanged={onStatusChanged}
             onSignIn={onSignInToProton}
             {...(unlockClient ? { client: unlockClient } : {})}
           />
@@ -5578,7 +5937,7 @@ Append to `pwa/src/theme/theme.css`:
 
 Run: `cd pwa && pnpm exec vitest run tests/ui/InboxScreen.test.tsx && cd .. && pnpm --filter @doc-scanner/pwa run typecheck`
 
-Expected: PASS (50 tests); typecheck clean.
+Expected: PASS (51 tests); typecheck clean.
 
 - [ ] **Step 5: Commit**
 
@@ -5697,6 +6056,32 @@ with
       }
     });
 
+    it('reads the status again after an unlock refusal that changed it', async () => {
+      const id = toBase64url(new Uint8Array(16).fill(1));
+      const routes: Record<string, () => Response> = {
+        'GET /api/auth/status': status('locked', 1),
+        ...inbox,
+        'POST /api/auth/unlock/begin': json({ credentials: [{ credentialId: id, salt: toBase64url(new Uint8Array(32).fill(3)) }] }),
+        'POST /api/auth/unlock': json({ error: 'passkeys_stale' }, 409),
+      };
+      const fetch = server(routes);
+      installCredentials().get.mockResolvedValue(fakeCredential(id, new Uint8Array(32).fill(7)));
+      const statusReads = () => fetch.mock.calls.filter(([url]) => url === '/api/auth/status').length;
+      try {
+        render(<App />);
+        const unlockButton = await screen.findByRole('button', { name: 'Unlock' });
+        // The server removed the passkeys while refusing.
+        routes['GET /api/auth/status'] = status('locked', 0);
+        fireEvent.click(unlockButton);
+        expect(
+          await screen.findByText('Your Proton password changed. Sign in again, then add your passkey again in Settings.'),
+        ).toBeInTheDocument();
+        await waitFor(() => expect(statusReads()).toBe(2));
+      } finally {
+        removeCredentials();
+      }
+    });
+
     it('signs in to Proton over the inbox from the locked banner, and Cancel goes back', async () => {
       const fetch = server({ 'GET /api/auth/status': status('locked', 0), ...inbox });
       render(<App />);
@@ -5732,7 +6117,7 @@ with
 
 Run: `cd pwa && pnpm exec vitest run tests/ui/App.test.tsx tests/ui/login.test.tsx`
 
-Expected: FAIL, 5 tests: no Cancel button; with `proton: 'none'` the inbox shows instead of the login screen; no "Unlock" or "Sign in to Proton" button; and the nudge never appears, because "Sign in again" still logs out.
+Expected: FAIL, 6 tests: no Cancel button; with `proton: 'none'` the inbox shows instead of the login screen; no "Unlock" or "Sign in to Proton" button (so the status is never read again after a refusal); and the nudge never appears, because "Sign in again" still logs out.
 
 - [ ] **Step 3: Implement `LoginScreen` Cancel**
 
@@ -5959,6 +6344,7 @@ with
         proton={status.proton}
         passkeys={status.passkeys}
         onUnlocked={setStatus}
+        onStatusChanged={() => void refreshStatus()}
         onSignInToProton={() => setRoute({ kind: 'proton-login' })}
         showPasskeyNudge={justSignedIn && status.unlockAvailable && status.passkeys === 0}
         onAddPasskey={() => setRoute({ kind: 'settings' })}
@@ -5971,7 +6357,7 @@ with
 
 Run: `pnpm --filter @doc-scanner/pwa test && pnpm --filter @doc-scanner/pwa run typecheck`
 
-Expected: PASS (37 files); typecheck clean.
+Expected: PASS (37 files, 380 tests); typecheck clean.
 
 - [ ] **Step 6: Commit**
 
@@ -5991,7 +6377,7 @@ git commit -m "feat(pwa): route on the Proton state, and sign in to Proton over 
 
 - [ ] **Step 1: Write the failing tests**
 
-Create `pwa/tests/ui/PasskeysSection.test.tsx`:
+Create `pwa/tests/ui/PasskeysSection.test.tsx`. `unfinished()` builds a setup that waits for its second tap:
 
 ```tsx
 import { describe, it, expect, vi } from 'vitest';
@@ -6014,8 +6400,8 @@ function setup(over: Partial<PasskeysClient> = {}, props: Partial<PasskeysSectio
     ...over,
   };
   const onChanged = vi.fn();
-  render(<PasskeysSection email="user@example.test" live onChanged={onChanged} client={client} {...props} />);
-  return { client, onChanged };
+  const { unmount } = render(<PasskeysSection email="user@example.test" live onChanged={onChanged} client={client} {...props} />);
+  return { client, onChanged, unmount };
 }
 
 /** Opens the name form and waits until the begin fetched for it has arrived. */
@@ -6073,15 +6459,62 @@ describe('PasskeysSection', () => {
     expect(await screen.findByText(/you can delete it there/i)).toBeInTheDocument();
   });
 
+  /** An enrolment that needs a second tap; `finish` and `abandon` are its two ways out. */
+  function unfinished(finished: EnrolOutcome = { kind: 'added', passkey: LAPTOP }) {
+    const finish = vi.fn<() => Promise<EnrolOutcome>>().mockResolvedValue(finished);
+    const abandon = vi.fn<() => Promise<boolean>>().mockResolvedValue(true);
+    const outcome: EnrolOutcome = { kind: 'finish_setup', finish, abandon };
+    return { finish, abandon, enrol: vi.fn().mockResolvedValue(outcome) };
+  }
+
   it('finishes setup from its own button when the follow-up prompt needed a tap', async () => {
-    const finish = vi.fn<() => Promise<EnrolOutcome>>().mockResolvedValue({ kind: 'added', passkey: LAPTOP });
-    setup({ enrol: vi.fn().mockResolvedValue({ kind: 'finish_setup', finish }) });
+    const { finish, abandon, enrol } = unfinished();
+    setup({ enrol });
     await startAdding();
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Finish setup' }));
     expect(await screen.findByText('Laptop')).toBeInTheDocument();
     expect(finish).toHaveBeenCalled();
+    expect(abandon).not.toHaveBeenCalled();
     expect(screen.queryByRole('button', { name: 'Finish setup' })).toBeNull();
+  });
+
+  it('offers nothing but Finish setup or Cancel setup while a setup waits for its tap', async () => {
+    setup({ enrol: unfinished().enrol });
+    await startAdding();
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    await screen.findByRole('button', { name: 'Finish setup' });
+    expect(screen.queryByRole('button', { name: 'Continue' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Add passkey' })).toBeNull();
+  });
+
+  it('hides the half-made passkey when the setup is cancelled', async () => {
+    const { abandon, enrol } = unfinished();
+    setup({ enrol });
+    await startAdding();
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Cancel setup' }));
+    expect(await screen.findByText('Setup cancelled.')).toBeInTheDocument();
+    expect(abandon).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('button', { name: 'Finish setup' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Add passkey' })).toBeInTheDocument();
+  });
+
+  it('hides the half-made passkey when Settings closes before the setup finished', async () => {
+    const { abandon, enrol } = unfinished();
+    const { unmount } = setup({ enrol });
+    await startAdding();
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    await screen.findByRole('button', { name: 'Finish setup' });
+    unmount();
+    expect(abandon).toHaveBeenCalledTimes(1);
+  });
+
+  it('says where to delete a passkey the server refused when the browser could not hide it', async () => {
+    setup({ enrol: vi.fn().mockResolvedValue({ kind: 'failed', code: 'internal', forgotten: false }) });
+    await startAdding();
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    expect(await screen.findByText(/could not add the passkey\. try again\. the passkey was still saved/i)).toBeInTheDocument();
   });
 
   it('removes a passkey, and treats one already gone as removed', async () => {
@@ -6156,7 +6589,7 @@ Expected: FAIL: `Failed to resolve import "../../src/ui/PasskeysSection.js"`, an
 
 - [ ] **Step 3: Implement the section**
 
-Create `pwa/src/ui/PasskeysSection.tsx`. Add passkey fetches `begin` at once, so the Continue tap starts the passkey prompt with no request before it:
+Create `pwa/src/ui/PasskeysSection.tsx`. Add passkey fetches `begin` at once, so the Continue tap starts the passkey prompt with no request before it. While a setup waits for its Finish setup tap, only Finish setup and Cancel setup show; cancelling, or leaving Settings, abandons it (the password manager is asked to hide the passkey):
 
 ```tsx
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
@@ -6180,6 +6613,8 @@ const ADDED = 'Passkey added.';
 const day = (iso: string) => new Date(iso).toLocaleDateString();
 
 function messageFor(outcome: Exclude<EnrolOutcome, { kind: 'added' } | { kind: 'finish_setup' }>): string {
+  // A passkey the server refused, which the browser couldn't hide.
+  const hint = outcome.kind === 'failed' && outcome.forgotten === false ? DELETE_HINT : '';
   switch (outcome.kind) {
     case 'cancelled':
       return 'Setup cancelled.';
@@ -6190,7 +6625,7 @@ function messageFor(outcome: Exclude<EnrolOutcome, { kind: 'added' } | { kind: '
     case 'expired':
       return 'Setup expired. Try again.' + (outcome.forgotten ? '' : DELETE_HINT);
     case 'failed':
-      return outcome.code === 'proton_not_live' ? 'Sign in to Proton first, then add a passkey.' : 'Could not add the passkey. Try again.';
+      return (outcome.code === 'proton_not_live' ? 'Sign in to Proton first, then add a passkey.' : 'Could not add the passkey. Try again.') + hint;
   }
 }
 
@@ -6204,13 +6639,18 @@ export function PasskeysSection({ email, live, onChanged, client = passkeysClien
   // Fetched when Add passkey is tapped, so Continue starts the prompt straight away.
   const [begin, setBegin] = useState<PasskeyBegin | 'loading' | null>(null);
   const [busy, setBusy] = useState(false);
-  const [finish, setFinish] = useState<{ run: () => Promise<EnrolOutcome> } | null>(null);
+  // A created passkey waiting for its Finish setup tap.
+  const [finish, setFinish] = useState<{ run: () => Promise<EnrolOutcome>; abandon: () => Promise<boolean> } | null>(null);
+  // The same abandon, for the unmount cleanup, which sees no later state.
+  const pendingAbandon = useRef<(() => Promise<boolean>) | null>(null);
   const mounted = useRef(true);
   // A layout effect: Preact 11 runs useEffect cleanups after paint, too late for this guard.
   useLayoutEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
+      // Leaving Settings mid-setup: hide the passkey that will never unlock.
+      void pendingAbandon.current?.();
     };
   }, []);
 
@@ -6244,10 +6684,11 @@ export function PasskeysSection({ email, live, onChanged, client = passkeysClien
   async function run(step: () => Promise<EnrolOutcome>) {
     setBusy(true);
     setMessage(null);
-    setFinish(null);
     const outcome = await step();
     if (!mounted.current) return;
     setBusy(false);
+    setFinish(null);
+    pendingAbandon.current = null;
     if (outcome.kind === 'added') {
       setPasskeys((list) => [...(list ?? []), outcome.passkey]);
       setNaming(false);
@@ -6256,13 +6697,23 @@ export function PasskeysSection({ email, live, onChanged, client = passkeysClien
       setMessage(ADDED);
       onChanged();
     } else if (outcome.kind === 'finish_setup') {
-      setFinish({ run: outcome.finish });
+      setFinish({ run: outcome.finish, abandon: outcome.abandon });
+      pendingAbandon.current = outcome.abandon;
+      setNaming(false);
       setMessage('One more step: tap Finish setup to turn on unlocking.');
     } else {
       setMessage(messageFor(outcome));
       // The server forgot that salt: the next try needs a new one.
       if (outcome.kind === 'expired') fetchBegin();
     }
+  }
+
+  async function cancelSetup() {
+    if (!finish) return;
+    setFinish(null);
+    pendingAbandon.current = null;
+    const forgotten = await finish.abandon();
+    if (mounted.current) setMessage('Setup cancelled.' + (forgotten ? '' : DELETE_HINT));
   }
 
   async function remove(credentialId: string) {
@@ -6307,6 +6758,7 @@ export function PasskeysSection({ email, live, onChanged, client = passkeysClien
           </ul>
         )}
         {live &&
+          !finish &&
           (naming ? (
             <form
               onSubmit={(e) => {
@@ -6333,9 +6785,14 @@ export function PasskeysSection({ email, live, onChanged, client = passkeysClien
             </button>
           ))}
         {finish && (
-          <button class="btn" disabled={busy} onClick={() => void run(finish.run)}>
-            Finish setup
-          </button>
+          <div class="actions">
+            <button class="btn" disabled={busy} onClick={() => void run(finish.run)}>
+              Finish setup
+            </button>
+            <button class="btn btn-secondary" disabled={busy} onClick={() => void cancelSetup()}>
+              Cancel setup
+            </button>
+          </div>
         )}
         <p role="status" class={message === ADDED ? 'muted' : 'error-text'}>
           {message}
@@ -6483,7 +6940,7 @@ with
 
 Run: `pnpm --filter @doc-scanner/pwa test && pnpm --filter @doc-scanner/pwa run typecheck`
 
-Expected: PASS (38 files); typecheck clean.
+Expected: PASS (38 files, 396 tests); typecheck clean.
 
 - [ ] **Step 6: Commit**
 
@@ -6592,7 +7049,7 @@ lives in-process for the cookie's lifetime (`live-session.ts`).
 add
 
 ```markdown
-**Header mode** (`AUTH_PROXY_USER`; spec `2026-10-13-passkey-unlock-design.md`): the middleware signs a request in when Authelia's `Remote-User` matches (and `AUTH_PROXY_SECRET`, if set), keeps one live session under `PROXY_SID`, and refuses cross-site `POST`/`PUT`/`PATCH`/`DELETE` by `Sec-Fetch-Site`; cookie mode (unset) is the development default. After a restart, Proton is `locked` (tokens stored, keys gone) until a **passkey unlock**: `PasskeyStore` (`passkey-store.ts`) wraps the mailbox passphrase under HKDF of the passkey's WebAuthn PRF output, then the `passkeys` at-rest cipher, and `ProtonAuth.resume` opens the keys with the stored tokens. Login, unlock and logout share a mutex. A login never logs out first; a different Proton `User.ID` clears the SDK caches, the folder cache and the passkeys; a changed key salt removes the passkeys, and so does logout. Never log a PRF output, the passphrase, a salt or a passkey label; credential ids only by their first 8 characters.
+**Header mode** (`AUTH_PROXY_USER`; spec `2026-10-13-passkey-unlock-design.md`): the middleware signs a request in when Authelia's `Remote-User` matches (and `AUTH_PROXY_SECRET`, if set), keeps one live session under `PROXY_SID`, and refuses cross-site `POST`/`PUT`/`PATCH`/`DELETE` by `Sec-Fetch-Site`; cookie mode (unset) is the development default. After a restart, Proton is `locked` (tokens stored, keys gone) until a **passkey unlock**: `PasskeyStore` (`passkey-store.ts`) wraps the mailbox passphrase under HKDF of the passkey's WebAuthn PRF output, then the `passkeys` at-rest cipher, and `ProtonAuth.resume` opens the keys with the stored tokens (the session keeps the fingerprint recorded at enrolment). Login, unlock and logout share a mutex, and every `ProtonApi` request times out after 30 s so none can hold it. A login never logs out first; a different Proton `User.ID` clears the SDK caches, the folder cache and the passkeys; a changed key salt removes the passkeys, and so does logout. Never log a PRF output, the passphrase, a salt or a passkey label; credential ids only by their first 8 characters.
 ```
 
 In the PWA paragraph:
@@ -6656,13 +7113,49 @@ with
 Replace
 
 ```markdown
-- **Where the values come from:** `fetchAndDecryptUserKey` returns the user's `User.ID` alongside the keys,
+and `ProtonAuth.login` and `ProtonAuth.resume` both return `keySaltFingerprint` (SHA-256 of the primary user key's `KeySalt`; `resume` calls `getKeySalts` too, since it has no password step). `LiveSession` keeps `userId` and `keySaltFingerprint`, so enrolment can write the fingerprint whichever way the session started.
 ```
 
 with
 
 ```markdown
-- **Where the values come from:** `fetchAndDecryptUserKey` returns the user's `User.ID` and the primary user key's ID alongside the keys,
+and `ProtonAuth.login` returns `keySaltFingerprint` (SHA-256 of the primary user key's `KeySalt`). `ProtonAuth.resume` doesn't fetch the salts: a successful unlock proves the passphrase, and so the KeySalt, unchanged since enrolment, and while any passkey exists the stored `passkeys.key_salt_fingerprint` is current. So the unlock carries the stored value into the session. `LiveSession` keeps `userId` and `keySaltFingerprint` (null if none is stored), and enrolment writes the fingerprint when the session knows it.
+```
+
+Replace
+
+```markdown
+**`ProtonAuth.resume(session, passphraseBytes, { onRefreshed }) → { session, decryptedKeys, userId, keySaltFingerprint }`**
+```
+
+with
+
+```markdown
+**`ProtonAuth.resume(session, passphraseBytes, { onRefreshed }) → { session, decryptedKeys, userId }`**
+```
+
+Replace
+
+```markdown
+        - A network error, 429 or 5xx (from `getUser` or `refresh`): change nothing, 503 `proton_unavailable` (retryable).
+```
+
+with
+
+```markdown
+        - A network error, 429 or 5xx (from `getUser` or `refresh`): change nothing, 503 `proton_unavailable` (retryable). A network error is undici's `TypeError('fetch failed')` (or a `TypeError` with a `cause`), or a timeout: every Proton request gives up after 30 seconds, so a hung call can't hold the mutex. Any other `TypeError` is a bug, reported, and answers 500.
+```
+
+Replace
+
+```markdown
+A passkey that was created but never stored on the server (no PRF, an expired or restarted enrolment) is left in the password manager;
+```
+
+with
+
+```markdown
+A passkey that was created but never stored on the server (no PRF, an expired or restarted enrolment, any other refusal by the server, or a setup abandoned at **Finish setup**) is left in the password manager;
 ```
 
 After
@@ -6674,7 +7167,8 @@ After
 add
 
 ```markdown
-  - The banner fetches `unlock/begin` when it appears, and Settings fetches `passkeys/begin` when **Add passkey** is tapped, so each passkey prompt starts straight from a tap, with no request in between.
+  - The banner fetches `unlock/begin` when it appears, and again after any failed unlock; Settings fetches `passkeys/begin` when **Add passkey** is tapped. So each passkey prompt starts straight from a tap, with no request in between.
+  - After `proton_login_required`, `passkeys_stale` or `passkey_unreadable`, the app reads `GET /api/auth/status` again, so its Proton state and passkey count match the server's.
 ```
 
 - [ ] **Step 7: Full verification**
@@ -6733,6 +7227,7 @@ This needs production, Authelia and a real iPhone, so it is the user's step, ass
 | §2 Data, `PasskeyStore`, `AtRestPurpose` | 3 |
 | §2 Enrolment (server) | 8 |
 | §2 Unlock, `ProtonAuth.resume`, error mapping, `KeyDecryptError.reason` | 4, 5, 9 |
+| Additions: request timeout; dispose on failure and the account-switch order; refetch after a failed unlock; status refresh after a refusal; signalling abandoned or refused passkeys | 5; 7; 13; 13–15; 12, 16 |
 | §2 Logging | 3, 8, 9 (the no-secret log test) |
 | §3 `App`, sign-in-to-Proton route, `signInAgain` | 15 |
 | §3 Locked banner | 13, 14 |
@@ -6746,8 +7241,10 @@ This needs production, Authelia and a real iPhone, so it is the user's step, ass
 **Type consistency:**
 
 - `AuthMode` (`middleware.ts`) is what `createApp`, every router, `headerOnly` and `authModeFrom` take; `PROXY_SID` is `'proxy'` everywhere.
-- `LiveSession.userId`/`keySaltFingerprint` are set by `startLiveSession` from `LoginResult` (Task 4) and `ResumeResult` (Task 5).
+- `LiveSession.userId`/`keySaltFingerprint` are set by `startLiveSession`: from `LoginResult` on a login, and from `ResumeResult.userId` plus the stored `passkeys.key_salt_fingerprint` (`string | null`) on an unlock.
 - `PasskeyStore.unwrap` returns `Uint8Array | 'unknown' | 'wrong_secret' | 'unreadable'`; the unlock route narrows on the three strings, then owns the bytes.
 - Server `AuthStatus` and PWA `StatusResponse` have the same four fields; `ProtonState` is `'live' | 'locked' | 'none'` on both sides.
 - `GET /api/passkeys` answers `PasskeyList` (`{ passkeys, notice }`) on both sides.
 - `UnlockClient` (`prepare`, `unlock`) and `PasskeysClient` (`list`, `remove`, `begin`, `enrol`) are what `LockedBanner`, `InboxScreen`, `PasskeysSection` and `SettingsScreen` take as optional props.
+- `EnrolOutcome`'s `finish_setup` carries `finish` and `abandon`, and its `failed` an optional `forgotten`; `PasskeysSection` uses all three.
+- `onStatusChanged` runs from `LockedBanner` through `InboxScreen` to `App.refreshStatus`.
