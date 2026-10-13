@@ -1,7 +1,7 @@
 # Combine and File With — Design Spec
 
 **Date:** 2026-10-13
-**Status:** Approved design; not yet planned
+**Status:** Implemented on `feat/combine-and-file-with` (plan: `docs/superpowers/plans/2026-10-13-combine-and-file-with.md`); this text reflects what was built, including review changes
 **Parent spec:** [`2026-10-09-ai-document-filing-design.md`](2026-10-09-ai-document-filing-design.md)
 **Branch:** `feat/combine-and-file-with`
 
@@ -25,7 +25,7 @@ These are separate actions. Neither touches a file already in Drive.
 
 | Question | Decision | Why |
 |---|---|---|
-| Where the actions start | A **⋯ More** menu on the review card: Combine with…, File with…, Re-analyze | No selection mode on the home screen; both pickers start from the document in hand. |
+| Where the actions start | A **⋯ More** menu on the review card: Combine with…, File with…, Re-analyse (British spelling in the UI, as elsewhere in the PWA; the API and code say `reanalyze`) | No selection mode on the home screen; both pickers start from the document in hand. |
 | What can be combined | 2–10 documents, all in `needs_review` | Only they are at rest with an analysis and prepared output; nothing else is mid-stage. |
 | Combined bytes | A new PDF built with `@cantoo/pdf-lib` (already a server dependency) from each part's **prepared PDF when it has one**, else its original | Prepared PDFs already carry the OCR text layer, so `ocrmypdf --skip-text` skips those pages on the combined document. |
 | What happens to the parts | `needs_review → discarded`, with `combined_into` pointing at the new row | Undo comes free: discard the combined document, restore the parts. |
@@ -45,19 +45,21 @@ These are separate actions. Neither touches a file already in Drive.
 -- combined_into: set on a part when it was combined into another document
 --   (plaintext document id; cleared on restore).
 -- anchor: sealed JSON {documentId, name, folder} for a "File with" re-analysis.
+-- reanalyzed: the user asked for a fresh analysis, so it always goes to review.
 ALTER TABLE documents ADD COLUMN combined_into TEXT;
 ALTER TABLE documents ADD COLUMN anchor BLOB;
+ALTER TABLE documents ADD COLUMN reanalyzed INTEGER NOT NULL DEFAULT 0 CHECK (reanalyzed IN (0, 1));
 ```
 
 - `anchor` is sealed like the row's other names and paths (AES-GCM, associated data bound to row id and column). An anchor that won't decrypt quarantines the row to `failed`, like any other sealed column.
-- `DocumentRow` and `DocumentPatch` gain `combinedInto: string | null` and `anchor: Anchor | null`, where
+- `DocumentRow` and `DocumentPatch` gain `combinedInto: string | null`, `reanalyzed: boolean` and `anchor: Anchor | null`, where
 
 ```ts
 interface Anchor {
   documentId: string;
   /** Without extension. */
   name: string;
-  folder: Decision['folder']; // existing {linkId, path} or new {parentLinkId, parentPath, name}
+  folder: FolderChoice; // existing {linkId, path} or new {parentLinkId, parentPath, name}
 }
 ```
 
@@ -86,7 +88,7 @@ interface Anchor {
   - `unsupported_type`: text, Office and other non-page types.
   - `too_large`: the result is over the server's intake limit (`MAX_UPLOAD_BYTES` in `routes-documents.ts`, 50 MiB).
 
-**Before building:** refuse with `409 possibly_in_drive` if any part has `possiblyInDrive`. Refuse with `too_large` if the parts' input sizes (the prepared blob where it will be used, else `size`) already exceed the limit, so ten large parts are never loaded into memory together.
+**Before building:** a part with a pending discard counts as not in review (`409 not_in_review`). Refuse with `409 possibly_in_drive` if any part has `possiblyInDrive`. Refuse with `too_large` if the parts' input sizes (the prepared blob where it will be used, else `size`) already exceed the limit, so ten large parts are never loaded into memory together.
 - The prepared blob's size needs a new `InboxStore.size(id, kind)`, read from the file's stat. The ciphertext's fixed overhead is close enough for this check.
 - The check after building stays, because a photo re-encoded as JPEG can grow.
 
@@ -94,10 +96,10 @@ interface Anchor {
 
 1. Build the PDF in memory; compute its SHA-256.
 2. Generate the new row's id with a helper exported from the repo (today's generator, `randomBytes(12).toString('base64url')`, is private inside `insert()`), and put the blob in the inbox under it. If the server crashes before the commit, the blob has no row, and the hourly orphan sweep deletes it.
-3. Call a new repo method, `insertCombined(id, newDoc, partIds)`. The repo has no transaction helper today and `insert()` makes its own id. The new method takes the pre-made id and wraps steps (a) and (b) in `BEGIN`/`COMMIT`/`ROLLBACK`. Every step is synchronous, so nothing can interleave.
+3. Call a new repo method, `insertCombined(id, newDoc, parts)`, with each part's `{ id, seq }` as read. Inside the transaction a part whose seq has moved on (even one that left review and came back with a filing target while the PDF was built) makes the whole combine a conflict. It needs two or more distinct parts, and is not reentrant: it never joins a caller's transaction. The repo has no transaction helper today and `insert()` makes its own id. The new method takes the pre-made id and wraps steps (a) and (b) in `BEGIN`/`COMMIT`/`ROLLBACK`. Every step is synchronous, so nothing can interleave.
    - (a) Insert the new row in `received`. It takes the first part's `source`, `originalName` null, `mime: 'application/pdf'`, and `sourceContext: "combined from N documents"`.
    - (b) Transition each part `needs_review → discarded` with `combinedInto` and `discardedAt` (compare-and-set).
-4. If any compare-and-set fails, roll back, delete the blob and return `409 conflict`. Otherwise wake the worker and return the new document's view.
+4. If any check or compare-and-set fails, roll back, delete the blob and return `409 conflict`. Refusals are logged at info with the part's id and the reason only. Otherwise wake the worker and return the new document's view.
 
 The combined document then takes the normal path: analyse → prepare (OCR skips the pages that already have text) → decide → review.
 
@@ -107,14 +109,14 @@ Restoring a part while the combined document still exists is allowed: the same p
 
 ### 3. Re-analyze and File with (server)
 
-**Endpoint:** `POST /api/documents/:id/reanalyze`, body `{ anchorId?: string }`. The document must be in `needs_review` (else `409 not_in_review`).
+**Endpoint:** `POST /api/documents/:id/reanalyze`, body `{ anchorId?: string }`. The document must be in `needs_review` (else `409 not_in_review`). The route reads the body before the row, so its checks see what the transition's compare-and-set will (approve was changed the same way).
 
 **Anchor snapshot**, when `anchorId` is given:
 
 | Anchor state | `name` | `folder` |
 |---|---|---|
-| `filed` | `filedName` without extension | existing `{ linkId: filingTarget.folderLinkId, path: filedFolderPath }` |
-| `needs_review` | `decision.name ?? analysis.name` | `decision.folder ?? analysis.folder` (a proposed new folder is kept as the same `new` choice) |
+| `filed` | `filedName` without extension, through `sanitiseName` (a Drive name can be anything the user renamed it to; empty → rejected) | existing `{ linkId: filingTarget.folderLinkId, path: filedFolderPath }` |
+| `needs_review` | `decision.name ?? analysis.name` | `decision.folder ?? analysis.folder`. A new folder stays the same `new` choice, even one already created (`createdLinkId` is dropped: the created folder may not be in the cache yet, and `findChildFolder` reuses it) |
 
 Refused with `409 possibly_in_drive` when the document itself has `possiblyInDrive`.
 
@@ -129,18 +131,20 @@ Two documents that both carry the same new-folder proposal still end in one fold
 
 **Transition:** `needs_review → received`, with:
 
-- the anchor stored (or `null` for a plain re-analyze)
+- the anchor stored (or `null` for a plain re-analysis) and `reanalyzed: true`
 - `analysis`, `decision`, `reviewReason`, `preparedMime`, `prepareNote` and `hasThumbnail` cleared
-- `userEdited: false`, `attempts: 0`, `nextAttemptAt: now`
+- `userEdited: false`, `autoFiled: false`, `attempts: 0`, `nextAttemptAt: now`
+
+`analyzeStage` records `'re-analysed'` from the `reanalyzed` flag. Reusing `review_reason` as the marker would break the rule that a fresh analysis clears a stale reason.
 
 Then wake the worker.
 
 **Analyzer:**
 
-- `AnalyzeInput` gains `anchor?: { name: string; folderPath: string }`.
+- `AnalyzeInput` gains `anchor?: { name: string; folderPath: string | null }`.
   - The path is resolved by `analyzeStage` from the folder cache at analysis time, so a renamed folder shows its current path.
   - An existing folder is looked up by `linkId`. A `new` folder is joined to its parent's current path the way `folderPath()` in `routes-documents.ts` does it (no `//` under the root).
-  - If the folder (or a new folder's parent) is gone from the cache, the prompt falls back to the snapshot's path. The pairing name is still useful, and the folder is nulled after the call anyway (below).
+  - If the folder (or a new folder's parent) is gone from the cache or now never-file-here, `folderPath` is null: the snapshot's path could be an excluded one, which the folder list hides from the model. The pairing name is still sent.
 - `formatArrival` adds a block before `File this document.`, only when the anchor is set:
 
 ```
@@ -151,7 +155,16 @@ the same conventions, saying what this document is.
 </related>
 ```
 
-  The anchor's name is quoted with the same `quote()` as recent names.
+  With a null `folderPath` the block is instead:
+
+```
+<related>
+The user says this document belongs with one named "{name}".
+Choose a filename that pairs with that name: the same conventions, saying what this document is.
+</related>
+```
+
+  The anchor's name is quoted with the same `quote()` as recent names. It is the user's own Drive name (sanitised) or a sanitised model answer, and only steers this document's filename.
 - With no anchor, the prompt is byte-identical to today's.
 
 **`analyzeStage`, after an `ok` outcome with an anchor:**
@@ -165,14 +178,16 @@ the same conventions, saying what this document is.
 
 ### 4. PWA
 
-- **`ReviewCard.tsx`:** a **⋯ More** button next to Approve/Discard opens a menu. The menu is not shown at all for a card with `possiblyInDrive`:
-  - **Combine with…**: shown when another review card exists.
-  - **File with…**: shown when another review card or a recently filed document exists.
-  - **Re-analyze**: always shown. It calls `reanalyze(id)` straight away, with no sheet.
-- **New `DocumentChooser.tsx`:** a sheet modelled on `FolderPicker` (search field, list, Cancel), with two modes.
+- **`MoreActions.tsx`** (rendered by `ReviewCard.tsx`): a **⋯ More** button next to Approve/Discard opens a menu. Nothing is shown for a card with `possiblyInDrive`:
+  - **Combine with…**: shown when another review card can be combined.
+  - **File with…**: shown when another review card or a recently filed document can be an anchor.
+  - **Re-analyse**: always shown. It calls `reanalyze(id)` straight away, with no sheet.
+  - It shares the card's busy state: while any request is in flight, Approve, Discard, Change, More and the chooser's controls (Cancel included) are disabled. Focus returns to More when the chooser closes.
+- **New `DocumentChooser.tsx`:** inline in the card, modelled on `FolderPicker` (search field, lists with `role="list"`, Cancel, Escape closes), with two modes.
   - *Combine:*
-    - The current card is pinned as item 1. The other review cards are listed with thumbnail and proposed name, and can be checked.
-    - Checked items get ↑/↓ to set page order.
+    - The current card is pinned as item 1. The other review cards are listed with proposed name and folder (no thumbnails: the cards above already show them), and can be checked. At 10 documents the unchecked boxes are disabled, and the cap is announced.
+    - Checked items get ↑/↓ to set the order. The edge buttons are `aria-disabled` (focus never drops), focus stays on the pressed button, and the new position is announced in a polite status region.
+    - A checked part that leaves review while the chooser is open drops out of the selection.
     - The confirm button reads **Combine N**.
   - *File with:* single choice in two sections.
     - **In review:** the other review cards.
@@ -187,10 +202,12 @@ the same conventions, saying what this document is.
 
 | Case | Response | PWA shows |
 |---|---|---|
-| A listed document moved on, or a discard raced the request | `409 conflict` / `not_in_review` / `invalid_anchor` | "Something changed; the list has been refreshed." The sheet stays open on a fresh list |
+| A listed document moved on, or a discard raced the request | `409 conflict` / `not_in_review` / `404 not_found` | "Something changed; the list is being updated." The chooser stays open and a poll refreshes the list |
+| The chosen anchor can't be one | `409 invalid_anchor` | "That document can’t be used. Pick another." |
+| More than 10 parts (the chooser prevents it) | `400 invalid_input` | "Could not do that. Pick up to 10 documents and try again." |
 | A part or the document may already be in Drive | `409 possibly_in_drive` | "This document may already be in Drive, so it can't be changed." (The menu hides the actions, so this happens only in a race) |
 | A part can't be combined | `422 cannot_combine` + `documentId`, `reason` | "‹name› can't be combined (password-protected / digitally signed / a dynamic form / unreadable / not a PDF or photo / too large together)." |
-| Network failure | — | An error in the sheet with Retry; nothing is queued |
+| Network failure | — | "Could not reach the server. Try again." in the chooser; pressing the action again retries. Nothing is queued |
 
 Logs carry document ids, counts and reasons, never names or paths. That is the same rule as the rest of the pipeline.
 
