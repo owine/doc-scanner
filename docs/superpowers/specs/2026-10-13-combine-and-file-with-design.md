@@ -33,7 +33,7 @@ These are separate actions. Neither touches a file already in Drive.
 | How "File with" works | A re-analysis with an **anchor** (another document) in the prompt; the folder is **pinned in code** to the anchor's folder; the model only writes a paired name | One mechanism covers in-review and filed anchors; the folder can't drift. |
 | Anchor lifetime | Snapshotted (name + folder) when requested, sealed on the row | The worker stays free of cross-row reads. A stale snapshot is harmless: the result is always reviewed. |
 | Documents that may already be in Drive | Combine, File with and Re-analyze are all refused (`409 possibly_in_drive`) for a row with a filing target or an unverified upload (the view's `possiblyInDrive`); the menu hides them | Such a row can sit in `needs_review` (restored from `awaiting_login`, or sent back by `FolderNameTakenError`). `prepareStage` skips a row with a target, so re-analysing it would file the original with no text layer, and the file stage's SHA-1 check would miss an earlier upload of the prepared bytes, making a duplicate. Combining it could put its pages in Drive twice. |
-| Review | A re-analysed document (anchored or not) always goes to review | The user asked for it from review; nothing should auto-file behind their back. |
+| Review | A re-analysed or combined document (anchored or not) always goes to review | The user asked for it from review; nothing should auto-file behind their back. |
 | Re-preparing | Re-analysis goes back through `received`, so preparing (OCR) re-runs | Keeps the "every prepare run starts by clearing prepared state" rule. Costs seconds for a typical one- or two-page document. |
 | Prompt for ordinary documents | Unchanged, byte for byte | The eval baseline and the prompt cache stay valid; the `<related>` block exists only when an anchor is set. |
 
@@ -84,7 +84,7 @@ interface Anchor {
   - `encrypted`: any encrypted PDF, including one locked only by an owner password. pdf-lib could decrypt that kind, but combining is refused so a locked document is never altered (user decision, 2026-10-13).
   - `signed`: a digitally signed PDF (`/AcroForm /SigFlags` bit 1). Copying its pages would break the signature.
   - `dynamic_form`: a dynamic XFA form (`/XFA` with `/NeedsRendering true`). Copying its pages would copy only the "Please wait…" placeholder.
-  - `unreadable`: a corrupt PDF or undecodable image.
+  - `unreadable`: a corrupt PDF or undecodable image, or a part whose blob is missing from the inbox.
   - `unsupported_type`: text, Office and other non-page types.
   - `too_large`: the result is over the server's intake limit (`MAX_UPLOAD_BYTES` in `routes-documents.ts`, 50 MiB).
 
@@ -100,6 +100,10 @@ interface Anchor {
    - (a) Insert the new row in `received`. It takes the first part's `source`, `originalName` null, `mime: 'application/pdf'`, and `sourceContext: "combined from N documents"`.
    - (b) Transition each part `needs_review → discarded` with `combinedInto` and `discardedAt` (compare-and-set).
 4. If any check or compare-and-set fails, roll back, delete the blob and return `409 conflict`. Refusals are logged at info with the part's id and the reason only. Otherwise wake the worker and return the new document's view.
+
+The combined row is inserted with `reanalyzed` set, so it is always reviewed with the reason `'requested from review'` and never auto-files. `insertRow` takes `{ reanalyzed?: boolean }` for this; plain `insert()` is unchanged.
+
+**Known limit:** the analyzer sends PDFs only up to 20 MB (`MAX_FILE_BYTES` in `server/src/analyze/content.ts`), so a large combine, such as several lossless camera-roll photos, is analysed from file details only and goes to review without a folder. Scans from the app are far smaller.
 
 The combined document then takes the normal path: analyse → prepare (OCR skips the pages that already have text) → decide → review.
 
@@ -135,7 +139,7 @@ Two documents that both carry the same new-folder proposal still end in one fold
 - `analysis`, `decision`, `reviewReason`, `preparedMime`, `prepareNote` and `hasThumbnail` cleared
 - `userEdited: false`, `autoFiled: false`, `attempts: 0`, `nextAttemptAt: now`
 
-`analyzeStage` records `'re-analysed'` from the `reanalyzed` flag. Reusing `review_reason` as the marker would break the rule that a fresh analysis clears a stale reason.
+`analyzeStage` records `'requested from review'` (no anchor) from the `reanalyzed` flag. Reusing `review_reason` as the marker would break the rule that a fresh analysis clears a stale reason.
 
 Then wake the worker.
 
@@ -149,7 +153,7 @@ Then wake the worker.
 
 ```
 <related>
-The user says this document belongs with one filed as "{name}" in {folderPath}.
+The user says this document belongs with one named "{name}", filed or to be filed in {folderPath}.
 It will be filed in that same folder. Choose a filename that pairs with that name:
 the same conventions, saying what this document is.
 </related>
@@ -170,8 +174,8 @@ Choose a filename that pairs with that name: the same conventions, saying what t
 **`analyzeStage`, after an `ok` outcome with an anchor:**
 
 - Overwrite `analysis.folder` with the anchor's folder, refreshed from the cache.
-- If that folder (for a `new` folder, its parent) is no longer in the cache, or is now under an excluded path, set it to `null`. The card asks for a folder, and the reason is `'the related document's folder is no longer available'`.
-- Otherwise record `reviewReason: 'filed with another document'`. With no anchor, record `'re-analysed'`.
+- If that folder (for a `new` folder, its parent) is no longer in the cache, or is now under an excluded path, set it to `null`. The card asks for a folder, and the reason is `'the related document's folder can't be used'`. It also covers a folder on the never-file-here list.
+- Otherwise record `reviewReason: 'filed with another document'`. With no anchor, record `'requested from review'`.
 - Reasons are fixed text: `decideStage` logs the recorded reason verbatim (`decide.ts:45`), and reasons never carry names. The card shows the anchor's name from `anchorName`.
 - `decideStage` already keeps a recorded reason, so the document always goes to review.
 - An unusable outcome keeps today's behaviour: no analysis, and the analyzer's reason.
@@ -194,8 +198,8 @@ Choose a filename that pairs with that name: the same conventions, saying what t
     - **Recently filed:** the 30 documents `groupDocuments` already keeps, so no new API.
     - Each row shows the name and folder path. Choosing one calls `reanalyze(id, anchorId)`.
 - **`documents/api.ts`:** `combine(ids)` and `reanalyze(id, anchorId?)`.
-- **Activity (`DocumentRows.tsx`, `labels.ts`):** a discarded document with `combinedInto` reads "Combined into another document" and keeps its Restore button.
-- **"Filed with …"** (from `anchorName`) shows on the waiting row (`DocumentRows.tsx`) and on the review card (`ReviewCard.tsx`).
+- **Activity (`DocumentRows.tsx`):** a discarded document with `combinedInto` reads "Combined into another document" and keeps its Restore button.
+- **"Paired with …"** (from `anchorName`) shows on the waiting row (`DocumentRows.tsx`) and on the review card (`ReviewCard.tsx`).
 - After either action, `DocumentSync`'s next poll moves the card(s) out of review. Re-analysed cards come back when analysis finishes.
 
 ### 5. Errors
