@@ -19,7 +19,7 @@ export interface ReviewCardProps {
   onReanalyze?: (anchorId?: string) => Promise<void>;
 }
 
-const APPROVE_ERRORS: Record<string, string> = {
+const ACTION_ERRORS: Record<string, string> = {
   unknown_folder: 'That folder no longer exists in Drive. Pick another.',
   excluded_folder: 'That folder is on your never-file-here list. Pick another.',
   folders_not_loaded: 'The folder list has not loaded from Drive yet. Try again in a moment.',
@@ -77,7 +77,7 @@ export function ReviewCard({ doc, folders, onApprove, onDiscard, review = [], fi
     try {
       await onApprove(body);
     } catch (err) {
-      setError((err instanceof ApiError && err.code && APPROVE_ERRORS[err.code]) || 'Could not approve. Try again.');
+      setError((err instanceof ApiError && err.code && ACTION_ERRORS[err.code]) || 'Could not approve. Try again.');
     } finally {
       setBusy(false);
     }
@@ -186,7 +186,7 @@ export function ReviewCard({ doc, folders, onApprove, onDiscard, review = [], fi
           {error}
         </p>
       )}
-      {onReanalyze ? (
+      {onReanalyze && onCombine ? (
         <MoreActions
           doc={doc}
           review={review}
@@ -196,7 +196,7 @@ export function ReviewCard({ doc, folders, onApprove, onDiscard, review = [], fi
           onCombine={onCombine}
           onReanalyze={onReanalyze}
           onReanalyzeError={(err) =>
-            setError((err instanceof ApiError && err.code && APPROVE_ERRORS[err.code]) || 'Could not re-analyse. Try again.')
+            setError((err instanceof ApiError && err.code && ACTION_ERRORS[err.code]) || 'Could not re-analyse. Try again.')
           }
         >
           {actions}

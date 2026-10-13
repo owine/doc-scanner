@@ -288,7 +288,7 @@ describe('ReviewCard more menu', () => {
   it('explains a refused re-analyse, with a fallback', async () => {
     const doc = makeDoc();
     const onReanalyze = vi.fn().mockRejectedValueOnce(new ApiError('not_in_review', 409, 'not_in_review')).mockRejectedValueOnce(new TypeError('Failed to fetch'));
-    render(<ReviewCard doc={doc} folders={folders} onApprove={vi.fn()} onDiscard={vi.fn()} review={[doc]} filed={[]} onReanalyze={onReanalyze} />);
+    render(<ReviewCard doc={doc} folders={folders} onApprove={vi.fn()} onDiscard={vi.fn()} review={[doc]} filed={[]} onCombine={vi.fn(async () => {})} onReanalyze={onReanalyze} />);
     fireEvent.click(screen.getByRole('button', { name: 'More' }));
     fireEvent.click(screen.getByRole('button', { name: 'Re-analyse' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('This document has already moved on.');

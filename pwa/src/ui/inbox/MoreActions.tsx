@@ -12,7 +12,7 @@ export interface MoreActionsProps {
   /** The card's one busy state, and the wrapper that sets it around a request. */
   busy: boolean;
   run: (fn: () => Promise<void>) => Promise<{ error: unknown } | null>;
-  onCombine?: ((ids: string[]) => Promise<void>) | undefined;
+  onCombine: (ids: string[]) => Promise<void>;
   /** Re-analyze, or with an anchor id, File with. */
   onReanalyze: (anchorId?: string) => Promise<void>;
   /** A plain Re-analyse failed. */
@@ -39,7 +39,7 @@ export function MoreActions({ doc, review, filed, busy, run, onCombine, onReanal
   }, [choosing]);
 
   const enabled = !doc.possiblyInDrive;
-  const canCombine = !!onCombine && combineCandidates(doc, review).length > 0;
+  const canCombine = combineCandidates(doc, review).length > 0;
   const anchors = anchorCandidates(doc, review, filed);
   const canFileWith = anchors.review.length + anchors.filed.length > 0;
   const showMenu = enabled && menu && !choosing;
@@ -94,7 +94,7 @@ export function MoreActions({ doc, review, filed, busy, run, onCombine, onReanal
           filed={filed}
           busy={busy}
           run={run}
-          onCombine={onCombine ?? (async () => {})}
+          onCombine={onCombine}
           onFileWith={(anchorId) => onReanalyze(anchorId)}
           onCancel={() => {
             setChoosing(null);

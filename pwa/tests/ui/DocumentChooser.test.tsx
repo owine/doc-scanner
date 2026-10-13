@@ -70,6 +70,23 @@ describe('DocumentChooser: combine', () => {
     expect(screen.getByRole('button', { name: 'Move Return receipt down' })).toHaveFocus();
   });
 
+  it('refocuses the button each time the same item moves the same way', () => {
+    const three = makeDoc({ analysis: { ...makeDoc().analysis!, name: 'Gas bill' } });
+    renderChooser('combine', { review: [letter, receipt, bill, three] });
+    for (const n of [/Return receipt/, /Water bill/, /Gas bill/]) fireEvent.click(screen.getByRole('checkbox', { name: n }));
+    const focus = vi.spyOn(HTMLElement.prototype, 'focus');
+    try {
+      const up = () => screen.getByRole('button', { name: 'Move Gas bill up' });
+      fireEvent.click(up());
+      fireEvent.click(up());
+      expect(order()[1]).toContain('Gas bill');
+      expect(focus.mock.contexts.filter((c) => c === up())).toHaveLength(2);
+      expect(up()).toHaveFocus();
+    } finally {
+      focus.mockRestore();
+    }
+  });
+
   it('keeps the edge buttons focusable, as aria-disabled no-ops', () => {
     renderChooser('combine');
     fireEvent.click(screen.getByRole('checkbox', { name: /Return receipt/ }));
@@ -121,9 +138,10 @@ describe('DocumentChooser: combine', () => {
     expect(screen.getByRole('button', { name: 'Combine 3' })).toBeEnabled();
     rerender(<DocumentChooser {...p} review={[letter, bill]} />);
     expect(order()).toEqual([expect.stringContaining('Certified letter'), expect.stringContaining('Water bill')]);
-    fireEvent.click(screen.getByRole('checkbox', { name: /Water bill/ })); // uncheck, which prunes the stale id
     rerender(<DocumentChooser {...p} review={[letter, receipt, bill]} />);
     expect(screen.getByRole('checkbox', { name: /Return receipt/ })).not.toBeChecked();
+    expect(screen.getByRole('checkbox', { name: /Water bill/ })).toBeChecked();
+    fireEvent.click(screen.getByRole('checkbox', { name: /Water bill/ }));
     fireEvent.click(screen.getByRole('checkbox', { name: /Return receipt/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Combine 2' }));
     await waitFor(() => expect(p.onCombine).toHaveBeenCalledWith([letter.id, receipt.id]));
@@ -143,11 +161,13 @@ describe('DocumentChooser: combine', () => {
     const many = Array.from({ length: 11 }, (_, i) => makeDoc({ analysis: { ...makeDoc().analysis!, name: `Part ${i}` } }));
     renderChooser('combine', { current: letter, review: [letter, ...many] });
     for (let i = 0; i < 9; i++) fireEvent.click(screen.getByRole('checkbox', { name: new RegExp(`Part ${i} ·`) }));
-    expect(screen.getByText('Up to 10 documents can be combined.')).toBeInTheDocument();
+    expect(screen.getByText('Up to 10 documents can be combined.', { selector: 'p' })).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('Up to 10 documents can be combined.');
     expect(screen.getByRole('checkbox', { name: /Part 9 ·/ })).toBeDisabled();
     expect(screen.getByRole('checkbox', { name: /Part 0 ·/ })).toBeEnabled();
     fireEvent.click(screen.getByRole('checkbox', { name: /Part 0 ·/ }));
     expect(screen.queryByText('Up to 10 documents can be combined.')).toBeNull();
+    expect(screen.getByRole('status')).toHaveTextContent('');
     expect(screen.getByRole('checkbox', { name: /Part 9 ·/ })).toBeEnabled();
   });
 

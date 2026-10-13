@@ -26,6 +26,8 @@ export interface DocumentChooserProps {
 /** The server combines 2 to 10 documents. */
 const MAX_COMBINE = 10;
 
+const CAP_NOTE = `Up to ${MAX_COMBINE} documents can be combined.`;
+
 const REFUSAL: Record<string, string> = {
   encrypted: 'it is password-protected',
   signed: 'it is digitally signed',
@@ -64,13 +66,14 @@ export function DocumentChooser({ mode, current, review, filed, busy, run, onCom
   const [chosen, setChosen] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [announcement, setAnnouncement] = useState('');
-  const [moved, setMoved] = useState<string | null>(null);
+  // A fresh object per move, so the same move twice still re-runs the focus effect.
+  const [moved, setMoved] = useState<{ key: string } | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const moveButtons = useRef(new Map<string, HTMLButtonElement>());
   useEffect(() => searchRef.current?.focus(), []);
   // Moving an item re-orders the DOM, which can drop focus: put it back on the button pressed.
   useLayoutEffect(() => {
-    if (moved) moveButtons.current.get(moved)?.focus();
+    if (moved) moveButtons.current.get(moved.key)?.focus();
   }, [moved]);
 
   const all = [current, ...review, ...filed];
@@ -78,6 +81,8 @@ export function DocumentChooser({ mode, current, review, filed, busy, run, onCom
   // A checked part may leave review while this is open (a poll, a refused combine): drop it from the selection.
   const offered = combineCandidates(current, review);
   const picked = chosen.filter((id) => offered.some((d) => d.id === id));
+  // A part that left review and came back is not checked again.
+  if (picked.length !== chosen.length) setChosen(picked);
   const atCap = picked.length >= MAX_COMBINE - 1;
   const visible = offered.filter((d) => matches(d, query));
   const searching = query.trim() !== '';
@@ -89,7 +94,9 @@ export function DocumentChooser({ mode, current, review, filed, busy, run, onCom
   }
 
   function toggle(id: string) {
-    setChosen(picked.includes(id) ? picked.filter((x) => x !== id) : [...picked, id]);
+    const next = picked.includes(id) ? picked.filter((x) => x !== id) : [...picked, id];
+    setChosen(next);
+    setAnnouncement(next.length >= MAX_COMBINE - 1 ? CAP_NOTE : '');
   }
   function move(id: string, by: -1 | 1) {
     const i = picked.indexOf(id);
@@ -100,7 +107,7 @@ export function DocumentChooser({ mode, current, review, filed, busy, run, onCom
     setChosen(next);
     // Position counts the pinned current card as 1.
     setAnnouncement(`${displayName(byId.get(id)!)} is now position ${j + 2}`);
-    setMoved(`${id}:${by}`);
+    setMoved({ key: `${id}:${by}` });
   }
 
   const row = (d: DocumentView) => (
@@ -191,7 +198,7 @@ export function DocumentChooser({ mode, current, review, filed, busy, run, onCom
               </li>
             ))}
           </ol>
-          {atCap && <p class="muted">Up to {MAX_COMBINE} documents can be combined.</p>}
+          {atCap && <p class="muted">{CAP_NOTE}</p>}
           {searching && visible.length === 0 && <p class="muted">No matching documents.</p>}
           {visible.length > 0 && (
             <ul class="folder-results" role="list" aria-label="Documents in review">
