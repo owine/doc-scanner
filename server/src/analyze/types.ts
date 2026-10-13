@@ -32,6 +32,11 @@ export interface AnalyzeInput {
   source: IngestSource;
   /** Free text about how the document arrived, e.g. an email subject line. */
   sourceContext?: string;
+  /**
+   * A document the user says this one belongs with ("File with"): the prompt
+   * asks for a filename that pairs with its name. The caller pins the folder.
+   */
+  anchor?: { name: string; folderPath: string };
 }
 
 export type FolderChoice =

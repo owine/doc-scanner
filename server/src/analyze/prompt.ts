@@ -61,6 +61,15 @@ export function formatArrival(input: AnalyzeInput, note: string | null): string 
   if (input.originalName !== null) lines.push(`original filename: ${input.originalName}`);
   if (input.sourceContext) lines.push(`source note: ${input.sourceContext}`);
   if (note) lines.push(`note: ${note}`);
-  lines.push('</arrival>', 'File this document.');
+  lines.push('</arrival>');
+  if (input.anchor) {
+    lines.push(
+      '<related>',
+      `The user says this document belongs with one filed as ${quote(input.anchor.name)} in ${input.anchor.folderPath}.`,
+      'It will be filed in that same folder. Choose a filename that pairs with that name: the same conventions, saying what this document is.',
+      '</related>',
+    );
+  }
+  lines.push('File this document.');
   return lines.join('\n');
 }
