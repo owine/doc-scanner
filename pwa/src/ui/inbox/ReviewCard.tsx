@@ -29,6 +29,7 @@ const ACTION_ERRORS: Record<string, string> = {
   not_found: 'This document no longer exists.',
   not_in_review: 'This document has already moved on.',
   conflict: 'This document has already moved on.',
+  possibly_in_drive: 'This document may already be in Drive, so it can’t be changed.',
 };
 
 /**
@@ -177,7 +178,7 @@ export function ReviewCard({ doc, folders, onApprove, onDiscard, review = [], fi
           {Math.round(suggested.confidence * 100)}% confident{doc.reviewReason ? ` · ${doc.reviewReason}` : ''}
         </p>
       )}
-      {doc.anchorName && <p class="muted">Filed with “{doc.anchorName}”</p>}
+      {doc.anchorName && <p class="muted">Paired with “{doc.anchorName}”</p>}
       {suggested?.rationale && <p class="rationale">{suggested.rationale}</p>}
       {doc.prepareNote && <p class="muted">{doc.prepareNote}</p>}
       {suggested?.contentSeen === false && <p class="muted">Analysed from the file's details only; its contents could not be read.</p>}

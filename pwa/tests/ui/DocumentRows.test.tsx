@@ -21,6 +21,6 @@ describe('DocumentRows', () => {
 
   it('says what a waiting document is being filed with', () => {
     render(<ul><WaitingRow doc={makeDoc({ state: 'analyzing', anchorName: 'Certified letter' })} onDiscard={vi.fn()} /></ul>);
-    expect(screen.getByText('Filed with “Certified letter”')).toBeInTheDocument();
+    expect(screen.getByText('Paired with “Certified letter”')).toBeInTheDocument();
   });
 });

@@ -246,7 +246,7 @@ describe('ReviewCard more menu', () => {
 
   it('says what the document is being filed with', () => {
     renderWithMenu(makeDoc({ anchorName: 'Certified letter' }));
-    expect(screen.getByText('Filed with “Certified letter”')).toBeInTheDocument();
+    expect(screen.getByText('Paired with “Certified letter”')).toBeInTheDocument();
   });
 
   it('returns focus to More when the chooser is cancelled, and ties aria-controls to a shown menu', () => {
@@ -283,6 +283,15 @@ describe('ReviewCard more menu', () => {
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
     finish();
     await waitFor(() => expect(screen.getByRole('button', { name: 'Approve' })).toBeEnabled());
+  });
+
+  it('explains a re-analyse refused for a race into Drive', async () => {
+    const doc = makeDoc();
+    const onReanalyze = vi.fn().mockRejectedValue(new ApiError('possibly_in_drive', 409, 'possibly_in_drive'));
+    render(<ReviewCard doc={doc} folders={folders} onApprove={vi.fn()} onDiscard={vi.fn()} review={[doc]} filed={[]} onCombine={vi.fn(async () => {})} onReanalyze={onReanalyze} />);
+    fireEvent.click(screen.getByRole('button', { name: 'More' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Re-analyse' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('This document may already be in Drive, so it can’t be changed.');
   });
 
   it('explains a refused re-analyse, with a fallback', async () => {

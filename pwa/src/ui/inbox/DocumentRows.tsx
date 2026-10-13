@@ -42,7 +42,7 @@ export function WaitingRow({ doc, onDiscard }: { doc: DocumentView; onDiscard: (
       <div class="doc-main">
         <div class="doc-name" id={nameId(doc)}>{displayName(doc)}</div>
         <div class="muted">{doc.discardRequested ? 'Discarding…' : (WAITING_LABEL[doc.state] ?? doc.state)}</div>
-        {doc.anchorName && <div class="muted">Filed with “{doc.anchorName}”</div>}
+        {doc.anchorName && <div class="muted">Paired with “{doc.anchorName}”</div>}
       </div>
       {/* A working document's discard is applied when its current step ends.
           Not while an upload is under way: the server files it regardless. */}
