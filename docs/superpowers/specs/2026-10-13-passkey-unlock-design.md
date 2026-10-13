@@ -39,9 +39,9 @@ It keeps the parent spec's trust boundary: a stolen database plus `SESSION_ENCRY
 | Storage of the wrapped passphrase | Two layers: inner AES-GCM under `HKDF(prf, salt)`, outer `AtRestCipher(SESSION_ENCRYPTION_KEY, 'passkeys')` | The database alone reveals nothing. The database plus the env key still lacks the PRF output |
 | Several passkeys | Allowed (for example Apple Passwords and 1Password). Each wraps the same passphrase independently | The guidance is to enrol two unlock methods. The Proton password login stays as the always-available fallback |
 | Platform support | iOS 18.4+ iCloud Keychain passkeys (PRF since iOS 18; 18.4 fixed data-loss bugs). 1Password on iOS is reported to work. A passkey without PRF is refused at enrolment with a clear message | Confirmed from current sources; see References |
-| Proton password changed | Detected two ways: (1) at unlock, the unwrapped passphrase fails to decrypt the **user** key; (2) at a password login, the stored key-salt fingerprint (see §2) no longer matches. Either way: delete every wrap and, when live, prompt re-enrolment | Every wrap holds the old passphrase; catching it at login avoids a surprise at the next restart |
-| Re-login in header mode | Never calls logout: a Proton login simply replaces the `PROXY_SID` live session and the stored tokens. Logging in as a **different** Proton account first clears the SDK caches (entities, folder cache, event ids) and all passkeys, as logout does | Today's "Sign in again" calls logout first, which would now destroy the passkeys |
-| Concurrency | Unlock and login are **single-flight**: one in-process promise; a second call while one runs awaits the same result | Two concurrent refreshes with one refresh token make Proton reject the second, which would clear the stored session |
+| Proton password changed | Detected two ways: (1) at unlock, the unwrapped passphrase fails to decrypt the **user** key; (2) at a password login, the stored key-salt fingerprint (see §2) no longer matches. Either way: delete every wrap and, when live, prompt re-enrolment. A user-key rotation without a password change also changes the salt and drops the passkeys; harmless (re-enrol) | Every wrap holds the old passphrase; catching it at login avoids a surprise at the next restart |
+| Re-login in header mode | Never calls logout: a Proton login simply replaces the `PROXY_SID` live session and the stored tokens. Logging in as a **different** Proton account (compared by Proton `User.ID`, not the typed email, which can differ in case or form) first clears the entities and event-id caches (`DriveClient.clearCaches()` on the new client, before it is registered), the folder cache (a new `FolderCacheStore.clear()`, reached through a `clearAccountData` callback the pipeline gives the auth routes) and all passkeys | Today's "Sign in again" calls logout first, which would now destroy the passkeys |
+| Concurrency | Unlock and login share one in-process **mutex**: calls queue, and each re-checks state when its turn comes (an unlock that finds `'live'` answers 200 without touching Proton). No call ever receives another call's result | Two concurrent refreshes with one refresh token make Proton reject the second, which would clear the stored session; sharing a result across operations could turn a wrong password into a success |
 | Logout | Also deletes every passkey wrap. In header mode it requires the matching `Remote-User` (it is unguarded today) | "Sign out" means "forget my Proton access here" |
 | Passkeys in cookie mode | Not offered: enrolment, listing and unlock routes are header-mode only (404 in cookie mode), and status reports `unlockAvailable: false` so the PWA hides passkey UI | Unlock is header-mode only, so a cookie-mode passkey could never be used |
 
@@ -52,14 +52,14 @@ It keeps the parent spec's trust boundary: a stolen database plus `SESSION_ENCRY
 **Config** (`server/src/config.ts`), both through `blankToUndefined` (Compose passes unset vars as `''`):
 
 - `AUTH_PROXY_USER`, optional. Setting it turns on header mode.
-- `AUTH_PROXY_SECRET`, optional, at least 32 characters. Only meaningful in header mode.
+- `AUTH_PROXY_SECRET`, optional, at least 32 characters. Setting it without `AUTH_PROXY_USER` fails startup (it would otherwise silently do nothing).
 
 `compose.yml` gains `AUTH_PROXY_USER: ${AUTH_PROXY_USER:-}` and `AUTH_PROXY_SECRET: ${AUTH_PROXY_SECRET:-}`, with a comment explaining when the secret is needed.
 
 **Middleware** (`http/middleware.ts`): `sessionMiddleware` takes the mode.
 
 - **Header mode:**
-  - When `Remote-User === AUTH_PROXY_USER` (and, if `AUTH_PROXY_SECRET` is set, `X-Doc-Scanner-Proxy-Secret` matches it in constant time), set `auth = { email, sid: PROXY_SID, liveSession: getLiveSession(PROXY_SID) }`.
+  - When `Remote-User === AUTH_PROXY_USER` (and, if `AUTH_PROXY_SECRET` is set, `X-Doc-Scanner-Proxy-Secret` matches it: compare the SHA-256 digests of both with `timingSafeEqual`, which needs equal lengths), set `auth = { email, sid: PROXY_SID, liveSession: getLiveSession(PROXY_SID) }`.
     - `email` is the stored Proton session's email if there is one, else `Remote-Email`, else the user.
     - `PROXY_SID` is a constant such as `'proxy'`.
   - Otherwise leave `auth` unset, so guarded routes answer 401 as they do today.
@@ -71,8 +71,9 @@ It keeps the parent spec's trust boundary: a stolen database plus `SESSION_ENCRY
 - In header mode it runs the same Proton login. It registers the live session under `PROXY_SID` and issues no cookie.
 - The work that builds the `DriveClient` and registers the live session moves into a shared `startLiveSession({ session, mailboxSecret, decryptedKeys, sid })` helper. `/login` and `/unlock` both use it. It keeps `onSessionRefreshed` persisting rotated tokens.
 - In cookie mode, login stays reachable without `auth`, as it is today. In header mode, login requires header auth (401 `not_authenticated` otherwise), so nothing can start a Proton session around Authelia.
-- Login is single-flight with unlock (Decisions). In header mode it never logs out first. If the stored session's email differs from the new login's, it clears the SDK caches and all passkeys before registering the new session.
-- After a successful password login, it compares the stored key-salt fingerprint (§2) with the current one; on a mismatch it removes every passkey wrap.
+- Login takes the shared mutex with unlock (Decisions). In header mode it never logs out first. If the stored Proton `User.ID` (`app_settings` `proton.user_id`) differs from the new login's, it clears the caches and all passkeys as the Decisions table describes, before registering the new session; it then stores the new `User.ID`.
+- After a successful password login, it compares the stored key-salt fingerprint (§2) with the login's; on a mismatch it removes every passkey wrap and records that, so Settings can say why once.
+- **Where the values come from:** `fetchAndDecryptUserKey` returns the user's `User.ID` alongside the keys, and `ProtonAuth.login` and `ProtonAuth.resume` both return `keySaltFingerprint` (SHA-256 of the primary user key's `KeySalt`; `resume` calls `getKeySalts` too, since it has no password step). `LiveSession` keeps `userId` and `keySaltFingerprint`, so enrolment can write the fingerprint whichever way the session started.
 
 **Status** (`GET /api/auth/status`) returns `{ email, proton, passkeys, unlockAvailable }`, where `passkeys` is a count, `unlockAvailable` is true in header mode only, and `proton` is one of:
 - `'live'`: a live session with decrypted keys exists.
@@ -141,7 +142,7 @@ A credential the authenticator already holds (excluded) throws `InvalidStateErro
    - The server checks that the salt is pending, unexpired and unused. If not: 400 `invalid_enrolment`.
    - It checks that `prf` decodes to 32 bytes. If not: 400 `invalid_input`.
    - It trims and caps the label at 60 characters (an empty label becomes "Passkey").
-   - It wraps the live session's passphrase (`mailboxSecret.use`), inserts the row, consumes the salt, writes the key-salt fingerprint, and answers 201 with the listed passkey.
+   - It wraps the live session's passphrase (`mailboxSecret.use`), inserts the row, consumes the salt, writes the live session's `keySaltFingerprint`, and answers 201 with the listed passkey.
    - A server restart between begin and this call loses the pending salt: 400 `invalid_enrolment`, and the PWA says "Setup expired. Try again."
 4. `GET /api/passkeys` returns `[{ credentialId, label, createdAt, lastUsedAt }]`.
 5. `DELETE /api/passkeys/:credentialId` answers 204, or 404.
@@ -153,16 +154,16 @@ A credential the authenticator already holds (excluded) throws `InvalidStateErro
    - `allowCredentials` listing them
    - `userVerification: 'required'`
    - `extensions: { prf: { evalByCredential: { [credentialId]: { first: salt } } } }`
-3. `POST /api/auth/unlock` with body `{ credentialId, prf }` (single-flight with login):
+3. `POST /api/auth/unlock` with body `{ credentialId, prf }` (takes the shared mutex with login, then re-checks state):
    - If `proton` is already `'live'`: 200 with the status (idempotent).
    - If there is no stored Proton session: 409 `proton_login_required`.
    - `unwrap`:
      - `'unknown'`: 404 `unknown_passkey`.
      - `'wrong_secret'`: 401 `unlock_failed`.
-     - `'unreadable'`: 409 `passkeys_stale` (the row is removed).
-   - With the passphrase bytes, call a new **`ProtonAuth.resume(session, passphraseBytes) → { session, decryptedKeys }`** (`auth/srp.ts`; it owns the private `ProtonApi`, so the routes never need it):
+     - `'unreadable'`: 409 `passkey_unreadable` (the row is removed; the PWA says "That passkey can no longer unlock. Remove it and add it again." rather than blaming a password change).
+   - With the passphrase bytes, call a new **`ProtonAuth.resume(session, passphraseBytes, { onRefreshed }) → { session, decryptedKeys, userId, keySaltFingerprint }`** (`auth/srp.ts`; it owns the private `ProtonApi`, so the routes never need it):
      1. Run `fetchAndDecryptUserKey` with the stored tokens.
-     2. On a `ProtonApiError` 401, refresh the session through `refresh()` and retry once. The refreshed session is returned, and the route **saves it to the session store** before anything else, then hands it to `startLiveSession`.
+     2. On a `ProtonApiError` 401, refresh the session through `refresh()` and retry once. `resume` calls `onRefreshed(newSession)` **the moment the refresh succeeds**, before the retry; the route's callback saves it to the session store. So rotated tokens are kept even if the retry then fails (5xx, 429, `KeyDecryptError`). On success the refreshed session is also returned and handed to `startLiveSession`.
      3. Errors map as follows:
         - `refresh()` rejected with `ProtonApiError` 400, 401 or 422 (Proton ended the session): clear the stored session, keep the passkeys, 409 `proton_login_required`.
         - A network error, 429 or 5xx (from `getUser` or `refresh`): change nothing, 503 `proton_unavailable` (retryable).
@@ -179,7 +180,7 @@ A credential the authenticator already holds (excluded) throws `InvalidStateErro
 
 **`App.tsx`** routes on `GET /api/auth/status`, and gains a **"sign in to Proton"** route: `LoginScreen` shown over a signed-in app (with **Cancel** back to the inbox) whenever the user chooses to sign in to Proton while `'live'` or `'locked'`. In header mode, `signInAgain` opens that route and **never calls logout**. In cookie mode it behaves as today.
 
-The routes:
+The routes (only the 401 case can't tell the modes apart; everywhere else `unlockAvailable` does, and `signInAgain` branches on it):
 - **401:** cookie mode shows today's `LoginScreen`. In header mode, a 401 means a misconfigured proxy; the PWA can't tell the modes apart, so it shows `LoginScreen` as today, and a Proton login in that state still fails with 401 and shows the error.
 - **`proton: 'none'`:** `LoginScreen` (Proton password and 2FA).
 - **`'live'` or `'locked'`:** the inbox.
@@ -190,6 +191,7 @@ App keeps `{ email, proton, passkeys }` in state and refreshes it after login, u
 - **With passkeys:** "Filing is paused until you unlock." with an **Unlock** button. The button is tapped, never auto-triggered, because iOS needs a user gesture. On success the status is refreshed.
 - **No passkeys, or after `proton_login_required`:** "Filing is paused. Sign in to Proton to resume." with **Sign in to Proton**, which shows `LoginScreen`.
 - **After `passkeys_stale`:** "Your Proton password changed. Sign in again, then add your passkey again in Settings."
+- **After `passkey_unreadable`:** "That passkey can no longer unlock. Sign in to Proton, then remove it and add it again in Settings."
 - **After `unlock_failed` or a cancelled ceremony:** "Couldn’t unlock. Try again." The button stays.
 - **After `proton_unavailable`:** "Proton isn’t reachable right now. Try again in a moment." The button stays.
 
@@ -254,13 +256,15 @@ App keeps `{ email, proton, passkeys }` in state and refreshes it after login, u
   - success resumes `awaiting_login` documents
   - the routes are 404 in cookie mode
   - transient failure (network, 5xx, 429): 503 `proton_unavailable`, nothing cleared
-  - a refreshed session is saved to the store before the live session starts
-  - two concurrent unlocks call `refresh` once (single-flight)
+  - a refreshed session is saved through `onRefreshed` before the retry, and stays saved when the retry then fails with 503
+  - two concurrent unlocks call `refresh` once (the second finds `'live'`)
+  - a login queued behind an unlock gets its own result (a wrong password still fails)
+  - `'unreadable'` answers `passkey_unreadable` and removes that row only
   - `KeyDecryptError` reasons other than `user_key` remove nothing
-  - an outer-layer failure (`unreadable`) removes that row only
   - the resume of `awaiting_login` happens through the live-session listener
 - **Logout** removes the passkeys, and needs header auth in header mode.
-- **Login in header mode:** does not log out; a different Proton account clears caches and passkeys; a changed key-salt fingerprint removes passkeys.
+- **Login in header mode:** does not log out; a different Proton `User.ID` clears entities, event ids, the folder cache and passkeys (an email differing only in case does not); a changed key-salt fingerprint removes passkeys.
+- **Config:** `AUTH_PROXY_SECRET` without `AUTH_PROXY_USER` fails startup; a secret header of a different length is rejected without throwing.
 - **Enrolment:** credential-id validation; restart between begin and add gives `invalid_enrolment`.
 - **Logs** never contain the PRF output, the label or the passphrase.
 - **Migration 009** applies.
