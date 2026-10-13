@@ -131,6 +131,49 @@ describe('PasskeyStore', () => {
   });
 });
 
+describe('PasskeyStore input checks', () => {
+  it('refuses a PRF output or salt that is not 32 bytes, or a malformed credential id', () => {
+    const { s } = setup();
+    expect(() => add(s, ID, new Uint8Array(0))).toThrow('invalid passkey entry');
+    expect(() => add(s, ID, new Uint8Array(31))).toThrow('invalid passkey entry');
+    expect(() => add(s, ID, PRF, new Uint8Array(16))).toThrow('invalid passkey entry');
+    expect(() => add(s, 'short')).toThrow('invalid passkey entry');
+    expect(() => add(s, 'has spaces and is long enough')).toThrow('invalid passkey entry');
+    expect(s.count()).toBe(0);
+  });
+
+  it('answers wrong_secret for a PRF output of the wrong length, even an empty one', () => {
+    const { s } = setup();
+    add(s);
+    expect(s.unwrap(ID, new Uint8Array(0))).toBe('wrong_secret');
+    expect(s.unwrap(ID, new Uint8Array(31))).toBe('wrong_secret');
+    expect(s.count()).toBe(1);
+  });
+
+  it('answers unreadable when the store is opened with a different env key', () => {
+    const { s, db } = setup();
+    add(s);
+    const other = new PasskeyStore(db, new AtRestCipher(Buffer.alloc(32, 6).toString('base64'), 'passkeys'), () => NOW);
+    expect(other.unwrap(ID, PRF)).toBe('unreadable');
+    expect(other.count()).toBe(0);
+  });
+
+  it('answers unreadable for an outer blob shorter than 28 bytes', () => {
+    const { s, db } = setup();
+    add(s);
+    db.prepare('UPDATE passkey_unlocks SET wrapped = ? WHERE credential_id = ?').run(new Uint8Array(10), ID);
+    expect(s.unwrap(ID, PRF)).toBe('unreadable');
+  });
+
+  it('answers wrong_secret when the inner layer is too short to hold an iv and tag', () => {
+    const { s, db } = setup();
+    add(s);
+    const sealed = new AtRestCipher(KEY, 'passkeys').seal(new Uint8Array(10), Buffer.from(ID));
+    db.prepare('UPDATE passkey_unlocks SET wrapped = ? WHERE credential_id = ?').run(sealed, ID);
+    expect(s.unwrap(ID, PRF)).toBe('wrong_secret');
+  });
+});
+
 describe('decodeBase64url', () => {
   it('decodes base64url and refuses anything else', () => {
     expect(Array.from(decodeBase64url('AQID-_8')!)).toEqual([1, 2, 3, 251, 255]);

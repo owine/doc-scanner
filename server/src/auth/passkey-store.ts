@@ -28,7 +28,12 @@ export interface PasskeyEntry {
  */
 export type UnwrapResult = Uint8Array | 'unknown' | 'wrong_secret' | 'unreadable';
 
-/** Strict base64url: null for anything with other characters (padding included). */
+/**
+ * Strict base64url: null for anything with other characters (padding
+ * included). It accepts non-canonical input (stray trailing bits); that is
+ * harmless because callers check the decoded length and look up pending salts
+ * by the exact string.
+ */
 export function decodeBase64url(value: string): Uint8Array | null {
   if (!/^[A-Za-z0-9_-]*$/.test(value)) return null;
   return new Uint8Array(Buffer.from(value, 'base64url'));
@@ -59,7 +64,15 @@ function innerOpen(key: Buffer, sealed: Uint8Array, aad: Uint8Array): Buffer {
   const decipher = createDecipheriv(ALGO, key, sealed.subarray(0, IV_LEN), { authTagLength: TAG_LEN });
   decipher.setAuthTag(sealed.subarray(IV_LEN, IV_LEN + TAG_LEN));
   decipher.setAAD(aad);
-  return Buffer.concat([decipher.update(sealed.subarray(IV_LEN + TAG_LEN)), decipher.final()]);
+  const head = decipher.update(sealed.subarray(IV_LEN + TAG_LEN));
+  const tail = decipher.final();
+  // GCM is a stream mode: update() returns everything and final() nothing, so
+  // the plaintext is returned as it is, with no extra copy to leave behind.
+  if (tail.length === 0) return head;
+  const joined = Buffer.concat([head, tail]);
+  head.fill(0);
+  tail.fill(0);
+  return joined;
 }
 
 interface Row {
@@ -89,8 +102,18 @@ export class PasskeyStore {
 
   /** Wraps the passphrase for one passkey. Adding a credential id again replaces its row. */
   add(entry: { credentialId: string; label: string; salt: Uint8Array; prf: Uint8Array; passphrase: Uint8Array }): PasskeyEntry {
+    if (entry.prf.length !== PRF_BYTES || entry.salt.length !== PRF_BYTES || !CREDENTIAL_ID.test(entry.credentialId)) {
+      // hkdfSync takes an empty key, which would leave the wrap sealed by the public salt alone.
+      throw new Error('invalid passkey entry');
+    }
     const aad = idAad(entry.credentialId);
-    const inner = innerSeal(innerKey(entry.prf, entry.salt), entry.passphrase, aad);
+    const key = innerKey(entry.prf, entry.salt);
+    let inner: Buffer;
+    try {
+      inner = innerSeal(key, entry.passphrase, aad);
+    } finally {
+      key.fill(0);
+    }
     const wrapped = this.cipher.seal(inner, aad);
     const label = this.cipher.seal(Buffer.from(entry.label, 'utf8'), labelAad(entry.credentialId));
     const createdAt = this.now().toISOString();
@@ -133,6 +156,7 @@ export class PasskeyStore {
 
   /** The passphrase bytes, or why not. The caller owns (and should zero) the bytes. */
   unwrap(credentialId: string, prf: Uint8Array): UnwrapResult {
+    if (prf.length !== PRF_BYTES) return 'wrong_secret';
     const row = this.db.prepare('SELECT salt, wrapped FROM passkey_unlocks WHERE credential_id = ?').get(credentialId) as
       | Pick<Row, 'salt' | 'wrapped'>
       | undefined;
@@ -147,10 +171,14 @@ export class PasskeyStore {
       logger.warn({ credential: shortId(credentialId) }, 'passkey unlock unreadable; removed');
       return 'unreadable';
     }
+    const key = innerKey(prf, row.salt);
     try {
-      return new Uint8Array(innerOpen(innerKey(prf, row.salt), inner, aad));
+      // The Buffer itself (a Uint8Array): the caller's zeroing reaches the only copy.
+      return innerOpen(key, inner, aad);
     } catch {
       return 'wrong_secret';
+    } finally {
+      key.fill(0);
     }
   }
 
