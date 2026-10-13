@@ -2,7 +2,26 @@ import { captureRequestFailure } from './observability/sentry.js';
 
 export interface LoginRequest { email: string; password: string; totp?: string }
 export interface LoginResponse { ok: true; email: string }
-export interface StatusResponse { email: string }
+/** `live`: Proton keys in memory. `locked`: tokens stored, keys not (a restart). `none`: nothing stored. */
+export type ProtonState = 'live' | 'locked' | 'none';
+
+export interface StatusResponse {
+  email: string;
+  proton: ProtonState;
+  /** How many passkeys can unlock. */
+  passkeys: number;
+  /** Header mode: passkey unlock exists. False in cookie mode, which hides every passkey control. */
+  unlockAvailable: boolean;
+}
+
+export interface PasskeyEntry { credentialId: string; label: string; createdAt: string; lastUsedAt: string | null }
+/** `notice`: a login removed the passkeys because the Proton password changed (said once). */
+export interface PasskeyList { passkeys: PasskeyEntry[]; notice: 'password_changed' | null }
+/** All base64url. */
+export interface PasskeyBegin { salt: string; userHandle: string; excludeCredentials: string[] }
+export interface PasskeyAddRequest { credentialId: string; salt: string; prf: string; label: string }
+export interface UnlockCredential { credentialId: string; salt: string }
+export interface UnlockRequest { credentialId: string; prf: string }
 
 class ApiError extends Error {
   constructor(
@@ -64,10 +83,24 @@ function errorBody(text: string): Record<string, unknown> {
   }
 }
 
+/** `api.unlock(body)` sends the PRF output; `api.unlock.begin()` fetches the salts first. */
+const unlock = Object.assign(
+  (body: UnlockRequest) => request<StatusResponse>('/api/auth/unlock', { method: 'POST', body: JSON.stringify(body) }),
+  { begin: () => request<{ credentials: UnlockCredential[] }>('/api/auth/unlock/begin', { method: 'POST' }) },
+);
+
 export const api = {
   login: (body: LoginRequest) => request<LoginResponse>('/api/auth/login', { method: 'POST', body: JSON.stringify(body) }),
   logout: () => request<{ ok: true }>('/api/auth/logout', { method: 'POST' }),
   status: () => request<StatusResponse>('/api/auth/status'),
+  passkeys: {
+    begin: () => request<PasskeyBegin>('/api/passkeys/begin', { method: 'POST' }),
+    add: (body: PasskeyAddRequest) => request<PasskeyEntry>('/api/passkeys', { method: 'POST', body: JSON.stringify(body) }),
+    list: () => request<PasskeyList>('/api/passkeys'),
+    remove: (credentialId: string) =>
+      request<Record<string, never>>(`/api/passkeys/${encodeURIComponent(credentialId)}`, { method: 'DELETE' }),
+  },
+  unlock,
 };
 
 export { ApiError };
