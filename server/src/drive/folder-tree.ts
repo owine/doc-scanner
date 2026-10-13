@@ -117,7 +117,7 @@ async function listFolder(
 
 export const RECENT_NAMES_PER_FOLDER = 5;
 
-function stripExtension(name: string): string {
+export function stripExtension(name: string): string {
   const dot = name.lastIndexOf('.');
   return dot > 0 ? name.slice(0, dot) : name;
 }

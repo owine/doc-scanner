@@ -11,6 +11,10 @@ export const documentsApi = {
   discard: (id: string) => request<{ result: 'discarded' | 'requested' }>(doc(id, '/discard'), { method: 'POST' }),
   restore: (id: string) => request<DocumentView>(doc(id, '/restore'), { method: 'POST' }),
   retry: (id: string) => request<DocumentView>(doc(id, '/retry'), { method: 'POST' }),
+  combine: (ids: string[]) =>
+    request<DocumentView>('/api/documents/combine', { method: 'POST', body: JSON.stringify({ ids }) }),
+  reanalyze: (id: string, anchorId?: string) =>
+    request<DocumentView>(doc(id, '/reanalyze'), { method: 'POST', body: JSON.stringify(anchorId ? { anchorId } : {}) }),
   folders: () => request<{ walkedAt: string; folders: FolderEntry[] }>('/api/folders'),
   refreshFolders: () => request<{ ok: true }>('/api/folders/refresh', { method: 'POST' }),
   settings: () => request<Settings>('/api/settings'),

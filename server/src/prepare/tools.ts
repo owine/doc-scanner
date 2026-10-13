@@ -64,7 +64,7 @@ const IMG2PDF_NATIVE: Record<string, readonly (readonly number[])[]> = {
 };
 
 /** The formats sharp may decode here; anything else (SVG above all) is refused. */
-const SHARP_FORMATS = new Set(['jpeg', 'png', 'webp', 'tiff', 'gif', 'heif']);
+export const SHARP_FORMATS = new Set(['jpeg', 'png', 'webp', 'tiff', 'gif', 'heif']);
 
 /** Whether sharp sees a raster format it may decode (it reads the header only). */
 async function sharpMayDecode(bytes: Uint8Array): Promise<boolean> {

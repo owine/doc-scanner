@@ -51,6 +51,10 @@ export interface DocumentView {
   discardedAt: string | null;
   prepareNote: string | null;
   hasThumbnail: boolean;
+  /** On a part a combine discarded: the combined document's id. */
+  combinedInto: string | null;
+  /** The name of the document this one is being filed with, if any. */
+  anchorName: string | null;
 }
 
 export interface FolderEntry {

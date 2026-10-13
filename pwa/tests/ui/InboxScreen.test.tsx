@@ -593,3 +593,52 @@ describe('InboxScreen scans on this device', () => {
     }
   });
 });
+
+describe('InboxScreen more menu', () => {
+  it('combines two cards from the More menu', async () => {
+    const a = makeDoc({ analysis: { ...makeDoc().analysis!, name: 'Certified letter' } });
+    const b = makeDoc({ analysis: { ...makeDoc().analysis!, name: 'Return receipt' } });
+    const combined = makeDoc({ id: 'combined', state: 'received', analysis: null, seq: 1000 });
+    const { api } = setup([a, b], { combine: vi.fn().mockResolvedValue(combined) });
+    const card = screen.getByRole('article', { name: 'Review Certified letter' });
+    fireEvent.click(within(card).getByRole('button', { name: 'More' }));
+    fireEvent.click(within(card).getByRole('button', { name: 'Combine with…' }));
+    fireEvent.click(within(card).getByRole('checkbox', { name: /Return receipt/ }));
+    fireEvent.click(within(card).getByRole('button', { name: 'Combine 2' }));
+    await waitFor(() => expect(api.combine).toHaveBeenCalledWith([a.id, b.id]));
+    // The parts are read back (now discarded) and leave review.
+    await waitFor(() => expect(api.get).toHaveBeenCalledWith(b.id));
+    await waitFor(() => expect(screen.queryByRole('article', { name: 'Review Return receipt' })).toBeNull());
+    // The combined document is in progress, and the other part left review too.
+    const progress = screen.getByRole('region', { name: 'In progress' });
+    expect(within(progress).getAllByRole('listitem')).toHaveLength(1);
+    expect(screen.queryByRole('article', { name: 'Review Certified letter' })).toBeNull();
+  });
+
+  it('files a card with a recently filed document', async () => {
+    const letter = makeDoc({ state: 'filed', filed: { name: 'Certified letter.pdf', folderPath: '/Legal', driveNodeUid: 'n', driveUrl: null } });
+    const receipt = makeDoc({ analysis: { ...makeDoc().analysis!, name: 'Return receipt' } });
+    const { api } = setup([letter, receipt], { reanalyze: vi.fn(async () => ({ ...receipt, state: 'received' as const, seq: 999 })) });
+    const card = screen.getByRole('article', { name: 'Review Return receipt' });
+    fireEvent.click(within(card).getByRole('button', { name: 'More' }));
+    fireEvent.click(within(card).getByRole('button', { name: 'File with…' }));
+    fireEvent.click(within(card).getByRole('button', { name: /Certified letter\.pdf/ }));
+    await waitFor(() => expect(api.reanalyze).toHaveBeenCalledWith(receipt.id, letter.id));
+    await waitFor(() => expect(screen.queryByRole('article', { name: 'Review Return receipt' })).toBeNull());
+  });
+
+  it('refreshes the list when a combine is refused as stale', async () => {
+    const a = makeDoc();
+    const b = makeDoc();
+    const { api, sync } = setup([a, b], { combine: vi.fn().mockRejectedValue(new ApiError('conflict', 409, 'conflict')) });
+    const poll = vi.spyOn(sync, 'poll');
+    const card = screen.getAllByRole('article')[0]!;
+    fireEvent.click(within(card).getByRole('button', { name: 'More' }));
+    fireEvent.click(within(card).getByRole('button', { name: 'Combine with…' }));
+    fireEvent.click(within(card).getAllByRole('checkbox')[0]!);
+    fireEvent.click(within(card).getByRole('button', { name: 'Combine 2' }));
+    await waitFor(() => expect(api.combine).toHaveBeenCalled());
+    await waitFor(() => expect(poll).toHaveBeenCalled());
+    expect(await within(card).findByText('Something changed; the list is being updated.')).toBeInTheDocument();
+  });
+});

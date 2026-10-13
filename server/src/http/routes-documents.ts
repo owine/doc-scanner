@@ -6,9 +6,13 @@ import type { SessionStore } from '../auth/session-store.js';
 import { sanitiseName } from '../analyze/resolve.js';
 import type { Pipeline } from '../documents/pipeline.js';
 import { InboxBlobMissingError } from '../documents/inbox-store.js';
-import type { Decision, DocumentRow, DocumentState } from '../documents/types.js';
+import type { Anchor, Decision, DocumentRow, DocumentState } from '../documents/types.js';
 import { intakeMime } from '../documents/extension.js';
-import { toView } from '../documents/view.js';
+import { possiblyInDrive, toView } from '../documents/view.js';
+import { snapshotAnchor } from '../documents/anchor.js';
+import { combineParts } from '../documents/combine.js';
+import { newDocumentId } from '../documents/repo.js';
+import { folderPath } from '../documents/folders.js';
 import { isUnderAny } from '../drive/folder-tree.js';
 import { logger } from '../logger.js';
 import { errorName } from '../observability/error-name.js';
@@ -57,6 +61,9 @@ function guarded(store: SessionStore): Hono<Env> {
   return r;
 }
 
+const CombineSchema = z.object({ ids: z.array(z.string().min(1)).min(2).max(10) }).strict();
+const ReanalyzeSchema = z.object({ anchorId: z.string().min(1).optional() }).strict();
+
 const ApproveSchema = z
   .object({
     name: z.string().optional(),
@@ -85,12 +92,6 @@ function currentFolder(want: FolderWant, pathOf: ReadonlyMap<string, string>): D
   const parentPath = pathOf.get(want.parentLinkId);
   const name = sanitiseName(want.name, '');
   return parentPath && name ? { kind: 'new', parentLinkId: want.parentLinkId, parentPath, name } : null;
-}
-
-/** The folder's own path; for a new folder, the one it will have once created (so it is under its parent's). */
-function folderPath(folder: Decision['folder']): string {
-  if (folder.kind === 'existing') return folder.path;
-  return `${folder.parentPath === '/' ? '' : folder.parentPath}/${folder.name}`;
 }
 
 /** Where a failed document picks up on retry: as late as what it already has allows. */
@@ -159,6 +160,96 @@ export function documentRoutes(deps: { store: SessionStore; pipeline: Pipeline }
     },
   );
 
+  // Spec §2: several documents in review become one PDF, analysed and filed once.
+  r.post('/combine', async (c) => {
+    const body = CombineSchema.safeParse(await c.req.json().catch(() => null));
+    if (!body.success || new Set(body.data.ids).size !== body.data.ids.length) return c.json({ error: 'invalid_input' }, 400);
+    const parts: DocumentRow[] = [];
+    for (const id of body.data.ids) {
+      const part = repo.get(id);
+      if (!part) return c.json({ error: 'not_found' }, 404);
+      parts.push(part);
+    }
+    if (parts.some((p) => p.state !== 'needs_review' || p.discardRequested)) return c.json({ error: 'not_in_review' }, 409);
+    // Combining one that may already be in Drive could put its pages there twice.
+    if (parts.some(possiblyInDrive)) return c.json({ error: 'possibly_in_drive' }, 409);
+
+    // A prepared PDF already has its text layer, so OCR skips those pages later.
+    const usePrepared = (p: DocumentRow) => p.preparedMime === 'application/pdf' && inbox.has(p.id, 'prepared');
+    // Checked before any blob is loaded, so ten large parts are never in memory together.
+    const refuseUnreadable = (documentId: string) => {
+      logger.info({ documentId, reason: 'unreadable' }, 'combine refused');
+      return c.json({ error: 'cannot_combine', documentId, reason: 'unreadable' }, 422);
+    };
+    let inputBytes = 0;
+    for (const p of parts) {
+      try {
+        inputBytes += usePrepared(p) ? inbox.size(p.id, 'prepared') : p.size;
+      } catch (err) {
+        if (err instanceof InboxBlobMissingError) return refuseUnreadable(p.id);
+        throw err;
+      }
+    }
+    if (inputBytes > MAX_UPLOAD_BYTES) {
+      logger.info({ parts: parts.length, reason: 'too_large' }, 'combine refused');
+      return c.json({ error: 'cannot_combine', reason: 'too_large' }, 422);
+    }
+
+    const inputs: { id: string; bytes: Uint8Array; mime: string }[] = [];
+    for (const p of parts) {
+      try {
+        inputs.push(
+          usePrepared(p)
+            ? { id: p.id, bytes: inbox.get(p.id, 'prepared'), mime: 'application/pdf' }
+            : { id: p.id, bytes: inbox.get(p.id, 'original'), mime: p.mime },
+        );
+      } catch (err) {
+        if (err instanceof InboxBlobMissingError) return refuseUnreadable(p.id);
+        throw err;
+      }
+    }
+    const result = await combineParts(inputs, MAX_UPLOAD_BYTES);
+    if (result.kind === 'too_large') {
+      logger.info({ parts: parts.length, reason: 'too_large' }, 'combine refused');
+      return c.json({ error: 'cannot_combine', reason: 'too_large' }, 422);
+    }
+    if (result.kind === 'refused') {
+      logger.info({ documentId: result.documentId, reason: result.reason }, 'combine refused');
+      return c.json({ error: 'cannot_combine', documentId: result.documentId, reason: result.reason }, 422);
+    }
+
+    const id = newDocumentId();
+    inbox.put(id, 'original', result.pdf);
+    let created: DocumentRow | null;
+    try {
+      created = repo.insertCombined(
+        id,
+        {
+          source: parts[0]!.source,
+          originalName: null,
+          mime: 'application/pdf',
+          size: result.pdf.byteLength,
+          sha256: createHash('sha256').update(result.pdf).digest('hex'),
+          sourceContext: `combined from ${parts.length} documents`,
+        },
+        // With the seqs as read: a part that changed during the build (even
+        // one that left review and came back) makes the whole combine a conflict.
+        parts.map((p) => ({ id: p.id, seq: p.seq })),
+      );
+    } catch (err) {
+      inbox.deleteAll(id);
+      throw err;
+    }
+    if (!created) {
+      inbox.deleteAll(id);
+      return c.json({ error: 'conflict' }, 409);
+    }
+    logger.info({ documentId: id, parts: parts.length }, 'documents combined');
+    const view = toView(created);
+    void worker.wake();
+    return c.json(view, 201);
+  });
+
   r.get('/', (c) => {
     const since = Number(c.req.query('since') ?? '0');
     if (!Number.isInteger(since) || since < 0) return c.json({ error: 'invalid_cursor' }, 400);
@@ -192,9 +283,6 @@ export function documentRoutes(deps: { store: SessionStore; pipeline: Pipeline }
   });
 
   r.post('/:id/approve', async (c) => {
-    const doc = repo.get(c.req.param('id'));
-    if (!doc) return c.json({ error: 'not_found' }, 404);
-    if (doc.state !== 'needs_review') return c.json({ error: 'not_in_review' }, 409);
     // Only an empty body means "as suggested": a truncated one must not file
     // anything, because an upload can't be taken back.
     const text = await c.req.text();
@@ -208,6 +296,11 @@ export function documentRoutes(deps: { store: SessionStore; pipeline: Pipeline }
     }
     const body = ApproveSchema.safeParse(raw);
     if (!body.success) return c.json({ error: 'invalid_input' }, 400);
+    // The row is read after the last await, so these checks see what the
+    // transition's compare-and-set will.
+    const doc = repo.get(c.req.param('id'));
+    if (!doc) return c.json({ error: 'not_found' }, 404);
+    if (doc.state !== 'needs_review') return c.json({ error: 'not_in_review' }, 409);
     const cache = folderCache.load();
     if (!cache) return c.json({ error: 'folders_not_loaded' }, 503);
     const pathOf = new Map(cache.tree.map((f) => [f.linkId, f.path]));
@@ -243,6 +336,59 @@ export function documentRoutes(deps: { store: SessionStore; pipeline: Pipeline }
     return c.json(toView(repo.get(doc.id)!));
   });
 
+  // Spec §3: analyse a document in review again, optionally "with" another
+  // (filed, or in review), whose folder it then takes.
+  r.post('/:id/reanalyze', async (c) => {
+    // The body first: the row is read after the last await, so the checks
+    // below see what the transition's compare-and-set will.
+    // As for approve: only an empty body means "no anchor".
+    const text = await c.req.text();
+    let raw: unknown = {};
+    if (text.trim()) {
+      try {
+        raw = JSON.parse(text);
+      } catch {
+        return c.json({ error: 'invalid_input' }, 400);
+      }
+    }
+    const body = ReanalyzeSchema.safeParse(raw);
+    if (!body.success) return c.json({ error: 'invalid_input' }, 400);
+    const doc = repo.get(c.req.param('id'));
+    if (!doc) return c.json({ error: 'not_found' }, 404);
+    if (doc.state !== 'needs_review') return c.json({ error: 'not_in_review' }, 409);
+    // Preparing skips a row with a filing target, so re-analysing it would
+    // file the original and miss the earlier upload's SHA-1: a duplicate.
+    if (possiblyInDrive(doc)) return c.json({ error: 'possibly_in_drive' }, 409);
+
+    let anchor: Anchor | null = null;
+    if (body.data.anchorId !== undefined) {
+      const other = body.data.anchorId === doc.id ? null : repo.get(body.data.anchorId);
+      anchor = other ? snapshotAnchor(other) : null;
+      if (!anchor) return c.json({ error: 'invalid_anchor' }, 409);
+    }
+
+    const moved = repo.transition(doc.id, 'needs_review', 'received', {
+      anchor,
+      reanalyzed: true,
+      analysis: null,
+      decision: null,
+      reviewReason: null,
+      preparedMime: null,
+      prepareNote: null,
+      hasThumbnail: false,
+      userEdited: false,
+      autoFiled: false,
+      attempts: 0,
+      error: null,
+      nextAttemptAt: new Date(),
+    });
+    if (!moved) return c.json({ error: 'conflict' }, 409);
+    logger.info({ documentId: doc.id, anchored: anchor !== null }, 'document re-analysis requested');
+    const view = toView(repo.get(doc.id)!);
+    void worker.wake();
+    return c.json(view);
+  });
+
   r.post('/:id/discard', (c) => {
     const result = repo.requestDiscard(c.req.param('id'));
     if (result === 'not_found') return c.json({ error: 'not_found' }, 404);
@@ -263,6 +409,7 @@ export function documentRoutes(deps: { store: SessionStore; pipeline: Pipeline }
     const to: DocumentState = !doc.analysis ? 'received' : unprepared ? 'preparing' : 'needs_review';
     const moved = repo.transition(doc.id, 'discarded', to, {
       discardedAt: null,
+      combinedInto: null,
       // decideStage keeps a recorded reason, so a restored document is always reviewed.
       reviewReason: doc.analysis ? 'restored after discard' : null,
       error: null,

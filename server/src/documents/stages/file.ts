@@ -142,6 +142,8 @@ export async function fileStage(doc: DocumentRow, ctx: StageContext): Promise<vo
             source: doc.source,
             autoFiled: doc.autoFiled,
             userEdited: doc.userEdited,
+            // The folder came from a related document, not the model: leave these out when calibrating.
+            anchored: doc.anchor !== null,
             // The model's confidence, to calibrate the auto-file threshold from real use.
             confidence: doc.analysis?.confidence ?? null,
           }),

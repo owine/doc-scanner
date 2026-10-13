@@ -1,4 +1,4 @@
-import type { Analysis, IngestSource } from '../analyze/types.js';
+import type { Analysis, FolderChoice, IngestSource } from '../analyze/types.js';
 
 export type DocumentState =
   | 'received'
@@ -42,6 +42,17 @@ export interface FilingTarget {
   name: string;
 }
 
+/**
+ * The document a "File with" re-analysis pairs this one with, as it was when
+ * the user asked: its name (no extension) and folder. A snapshot, so the
+ * worker never reads another row; the result is reviewed anyway.
+ */
+export interface Anchor {
+  documentId: string;
+  name: string;
+  folder: FolderChoice;
+}
+
 export interface DocumentRow {
   id: string;
   seq: number;
@@ -74,6 +85,11 @@ export interface DocumentRow {
   discardedAt: string | null;
   /** The filing target was lost to an unreadable value while an upload may have happened. */
   uploadUnverified: boolean;
+  /** On a part a combine discarded: the combined document's id. */
+  combinedInto: string | null;
+  anchor: Anchor | null;
+  /** The user asked for a fresh analysis: it always goes to review. */
+  reanalyzed: boolean;
 }
 
 export interface NewDocument {
@@ -105,4 +121,7 @@ export interface DocumentPatch {
   userEdited?: boolean;
   discardRequested?: boolean;
   discardedAt?: Date | null;
+  combinedInto?: string | null;
+  anchor?: Anchor | null;
+  reanalyzed?: boolean;
 }

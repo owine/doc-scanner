@@ -2,13 +2,16 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { createTestDb } from '../helpers/test-db.js';
 import { AtRestCipher } from '../../src/crypto/at-rest.js';
 import type { DB } from '../../src/db.js';
-import { DocumentDataUnreadableError, DocumentRepo } from '../../src/documents/repo.js';
+import { DocumentDataUnreadableError, DocumentRepo, newDocumentId } from '../../src/documents/repo.js';
 import type { DocumentPatch, NewDocument } from '../../src/documents/types.js';
 
 const KEY = Buffer.alloc(32, 5).toString('base64');
 
 let cleanup: () => void = () => {};
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  cleanup = () => {};
+});
 
 let clock = new Date('2026-10-10T12:00:00Z');
 let db: DB;
@@ -302,6 +305,16 @@ describe('DocumentRepo', () => {
     expect(r.get(a.id)).toMatchObject({ state: 'needs_review', discardedAt: null });
   });
 
+  it('round-trips combinedInto and reanalyzed as plaintext, defaulting to null and false', () => {
+    const r = repo();
+    const a = r.insert(doc());
+    expect(r.get(a.id)).toMatchObject({ combinedInto: null, anchor: null, reanalyzed: false });
+    r.transition(a.id, 'received', 'received', { combinedInto: 'XYZ', reanalyzed: true });
+    expect(r.get(a.id)).toMatchObject({ combinedInto: 'XYZ', reanalyzed: true });
+    const raw = db.prepare('SELECT combined_into, reanalyzed FROM documents WHERE id = ?').get(a.id);
+    expect(raw).toEqual({ combined_into: 'XYZ', reanalyzed: 1 });
+  });
+
   describe('metadata at rest', () => {
     // Fictional values, each containing a marker the raw row must never show.
     const MARK = 'Northwind';
@@ -321,9 +334,10 @@ describe('DocumentRepo', () => {
       filedFolderPath: `/Bills/${MARK} Energy`,
       reviewReason: `analysis invalid: ${MARK}`,
       error: `upload of ${MARK} Energy Sep 2026.pdf failed`,
+      anchor: { documentId: 'other', name: `${MARK} Letter`, folder: { kind: 'existing', linkId: 'BILLS', path: `/Bills/${MARK}` } },
     };
     const rawRow = (id: string) => db.prepare('SELECT * FROM documents WHERE id = ?').get(id) as Record<string, unknown>;
-    const SEALED = ['original_name', 'source_context', 'analysis', 'decision', 'filing_target', 'filed_name', 'filed_folder_path', 'review_reason', 'error'];
+    const SEALED = ['original_name', 'source_context', 'analysis', 'decision', 'filing_target', 'filed_name', 'filed_folder_path', 'review_reason', 'error', 'anchor'];
 
     it('keeps no plaintext name, path or text in the raw row', () => {
       const r = repo();
@@ -406,11 +420,20 @@ describe('DocumentRepo', () => {
         decision: null,
         filingTarget: null,
         filedName: null,
+        anchor: null,
       });
       expect(got.error).toMatch(/^stored document details could not be decrypted/);
       // Clients polling by seq see the change.
       expect(got.seq).toBeGreaterThan(seqBefore);
       for (const col of SEALED.filter((c) => c !== 'error')) expect([col, rawRow(a.id)[col]]).toEqual([col, null]);
+    });
+
+    it('quarantines a row whose anchor won\'t decrypt', () => {
+      const r = repo();
+      const a = r.insert(named());
+      r.transition(a.id, 'received', 'needs_review', everything);
+      db.prepare('UPDATE documents SET anchor = ? WHERE id = ?').run(new Uint8Array(40), a.id);
+      expect(r.get(a.id)).toMatchObject({ state: 'failed', anchor: null, analysis: null });
     });
 
     it('keeps the upload warning when quarantining a row whose upload may have happened', () => {
@@ -516,5 +539,71 @@ describe('DocumentRepo', () => {
       expect(rows.map((d) => d.id).sort()).toEqual([bad.id, good.id].sort());
       expect(rows.find((d) => d.id === bad.id)?.state).toBe('failed');
     });
+  });
+});
+
+it('makes URL-safe ids of 16 characters', () => {
+  expect(newDocumentId()).toMatch(/^[A-Za-z0-9_-]{16}$/);
+  expect(newDocumentId()).not.toBe(newDocumentId());
+});
+
+describe('insertCombined', () => {
+  const inReview = (r: DocumentRepo, sha: string) => {
+    const d = r.insert(doc({ sha256: sha }));
+    r.transition(d.id, 'received', 'needs_review');
+    return r.get(d.id)!;
+  };
+  const ref = (d: { id: string; seq: number }) => ({ id: d.id, seq: d.seq });
+
+  it('inserts the combined document under the given id and discards every part into it', () => {
+    const r = repo();
+    const a = inReview(r, 'a'.repeat(64));
+    const b = inReview(r, 'b'.repeat(64));
+    const id = newDocumentId();
+    const made = r.insertCombined(id, doc({ sha256: 'c'.repeat(64), originalName: null, sourceContext: 'combined from 2 documents' }), [ref(a), ref(b)]);
+    expect(made).toMatchObject({ id, state: 'received', reanalyzed: true, sourceContext: 'combined from 2 documents' });
+    for (const p of [a, b]) {
+      expect(r.get(p.id)).toMatchObject({ state: 'discarded', combinedInto: id, discardedAt: '2026-10-10T12:00:00.000Z' });
+    }
+  });
+
+  it('changes nothing when a part has left review', () => {
+    const r = repo();
+    const a = inReview(r, 'a'.repeat(64));
+    const b = r.insert(doc({ sha256: 'b'.repeat(64) })); // still received
+    const id = newDocumentId();
+    expect(r.insertCombined(id, doc({ sha256: 'c'.repeat(64) }), [ref(a), ref(b)])).toBeNull();
+    expect(r.get(id)).toBeNull();
+    expect(r.get(a.id)).toMatchObject({ state: 'needs_review', combinedInto: null, discardedAt: null });
+    expect(db.isTransaction).toBe(false);
+  });
+
+  it('changes nothing when a part changed since it was read, even back in review', () => {
+    const r = repo();
+    const a = inReview(r, 'a'.repeat(64));
+    const b = inReview(r, 'b'.repeat(64));
+    r.transition(b.id, 'needs_review', 'needs_review', { filingTarget: { folderLinkId: 'F', name: 'x.pdf' } });
+    const id = newDocumentId();
+    expect(r.insertCombined(id, doc({ sha256: 'c'.repeat(64) }), [ref(a), ref(b)])).toBeNull();
+    expect(r.get(id)).toBeNull();
+    expect(r.get(a.id)).toMatchObject({ state: 'needs_review', combinedInto: null });
+    expect(db.isTransaction).toBe(false);
+  });
+
+  it('refuses fewer than two parts or a repeated part', () => {
+    const r = repo();
+    const a = inReview(r, 'a'.repeat(64));
+    expect(() => r.insertCombined(newDocumentId(), doc({ sha256: 'c'.repeat(64) }), [ref(a)])).toThrow(/two or more distinct/);
+    expect(() => r.insertCombined(newDocumentId(), doc({ sha256: 'c'.repeat(64) }), [ref(a), ref(a)])).toThrow(/two or more distinct/);
+  });
+
+  it('rolls back and rethrows when the insert fails', () => {
+    const r = repo();
+    const a = inReview(r, 'a'.repeat(64));
+    const b = inReview(r, 'b'.repeat(64));
+    expect(() => r.insertCombined(a.id, doc({ sha256: 'c'.repeat(64) }), [ref(a), ref(b)])).toThrow();
+    expect(r.get(a.id)).toMatchObject({ state: 'needs_review', combinedInto: null });
+    expect(r.get(b.id)).toMatchObject({ state: 'needs_review', combinedInto: null });
+    expect(db.isTransaction).toBe(false);
   });
 });

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { toView } from '../../src/documents/view.js';
+import { possiblyInDrive, toView } from '../../src/documents/view.js';
 import type { DocumentRow } from '../../src/documents/types.js';
 import { ANALYSIS } from './harness.js';
 
@@ -34,6 +34,9 @@ const row = (over: Partial<DocumentRow> = {}): DocumentRow => ({
   uploadUnverified: false,
   prepareNote: null,
   hasThumbnail: false,
+  combinedInto: null,
+  anchor: null,
+  reanalyzed: false,
   ...over,
 });
 
@@ -70,5 +73,25 @@ describe('toView', () => {
     expect(v).not.toHaveProperty('sourceContext');
     expect(v.analysis).not.toHaveProperty('textSnippet');
     expect(v.filed).toBeNull();
+  });
+
+  it('shows what a document was combined into, and the name it is filed with, but not the anchor itself', () => {
+    const v = toView(
+      row({
+        state: 'needs_review',
+        combinedInto: 'C1',
+        anchor: { documentId: 'A1', name: 'Certified letter', folder: { kind: 'existing', linkId: 'BILLS', path: '/Bills' } },
+      }),
+    );
+    expect(v).toMatchObject({ combinedInto: 'C1', anchorName: 'Certified letter' });
+    expect(v).not.toHaveProperty('anchor');
+    expect(toView(row()).anchorName).toBeNull();
+  });
+
+  it('possiblyInDrive matches the view flag', () => {
+    expect(possiblyInDrive(row({ state: 'needs_review', filingTarget: TARGET }))).toBe(true);
+    expect(possiblyInDrive(row({ state: 'needs_review', uploadUnverified: true }))).toBe(true);
+    expect(possiblyInDrive(row({ state: 'needs_review' }))).toBe(false);
+    expect(possiblyInDrive(row({ state: 'filed', filingTarget: TARGET }))).toBe(false);
   });
 });

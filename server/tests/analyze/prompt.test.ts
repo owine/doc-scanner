@@ -33,6 +33,48 @@ describe('formatExamples', () => {
 
 describe('formatArrival', () => {
   const input = { bytes: new Uint8Array(10), mimeType: 'application/pdf', source: 'picker' as const };
+  it('is unchanged for a document with no related one', () => {
+    // A guard for the eval baseline and the prompt cache: only an anchor changes this text.
+    expect(formatArrival({ ...input, originalName: 'statement.pdf' }, null)).toBe(
+      ['<arrival>', 'source: picker', 'type: application/pdf', 'size: 10 bytes', 'original filename: statement.pdf', '</arrival>', 'File this document.'].join('\n'),
+    );
+  });
+
+  it('asks for a paired name without a folder when the related folder is unavailable', () => {
+    const text = formatArrival({ ...input, originalName: null, anchor: { name: 'Certified letter', folderPath: null } }, null);
+    expect(text).toBe(
+      [
+        '<arrival>',
+        'source: picker',
+        'type: application/pdf',
+        'size: 10 bytes',
+        '</arrival>',
+        '<related>',
+        'The user says this document belongs with one named "Certified letter".',
+        'Choose a filename that pairs with that name: the same conventions, saying what this document is.',
+        '</related>',
+        'File this document.',
+      ].join('\n'),
+    );
+  });
+
+  it('asks for a name that pairs with the related document, after the arrival', () => {
+    const text = formatArrival({ ...input, originalName: null, anchor: { name: 'Certified letter "A"', folderPath: '/Legal/Acme' } }, null);
+    expect(text).toBe(
+      [
+        '<arrival>',
+        'source: picker',
+        'type: application/pdf',
+        'size: 10 bytes',
+        '</arrival>',
+        '<related>',
+        `The user says this document belongs with one named "Certified letter 'A'", filed or to be filed in /Legal/Acme.`,
+        'It will be filed in that same folder. Choose a filename that pairs with that name: the same conventions, saying what this document is.',
+        '</related>',
+        'File this document.',
+      ].join('\n'),
+    );
+  });
 
   it('withholds the filename when it is null', () => {
     const text = formatArrival({ ...input, originalName: null }, null);

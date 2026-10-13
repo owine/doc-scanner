@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { AtRestCipher } from '../crypto/at-rest.js';
 
@@ -69,6 +69,19 @@ export class InboxStore {
 
   has(id: string, kind: BlobKind): boolean {
     return existsSync(this.path(id, kind));
+  }
+
+  /**
+   * The blob's size on disk: the sealed bytes, under 64 bytes over the
+   * plaintext. Close enough for a size check before loading blobs.
+   */
+  size(id: string, kind: BlobKind): number {
+    try {
+      return statSync(this.path(id, kind)).size;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') throw new InboxBlobMissingError(id, kind);
+      throw err;
+    }
   }
 
   /** Deletes one blob; nothing to do if it isn't there. */

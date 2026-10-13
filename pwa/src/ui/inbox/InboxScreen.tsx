@@ -194,6 +194,29 @@ export function InboxScreen({
   };
   const restore = (id: string) => act(id, () => documents.restore(id));
   const retry = (id: string) => act(id, () => documents.retry(id));
+  // A refusal for a stale list (a part moved on, an anchor went away) asks
+  // for fresh data; the chooser still says what happened.
+  const refreshIfStale = (err: unknown) => {
+    if (err instanceof ApiError && (err.status === 409 || err.status === 404)) void sync.poll();
+  };
+  const combine = async (ids: string[]) => {
+    try {
+      sync.upsert(await documents.combine(ids));
+    } catch (err) {
+      refreshIfStale(err);
+      throw err;
+    }
+    // The parts are discarded now: read them back so they leave review.
+    await Promise.all(ids.map(readBack));
+  };
+  const reanalyze = async (id: string, anchorId?: string) => {
+    try {
+      sync.upsert(await documents.reanalyze(id, anchorId));
+    } catch (err) {
+      refreshIfStale(err);
+      throw err;
+    }
+  };
 
   return (
     <main class="inbox">
@@ -287,7 +310,17 @@ export function InboxScreen({
           )
         ) : (
           g.review.map((d) => (
-            <ReviewCard key={d.id} doc={d} folders={folders} onApprove={(b) => approve(d.id, b)} onDiscard={() => discard(d.id)} />
+            <ReviewCard
+              key={d.id}
+              doc={d}
+              folders={folders}
+              review={g.review}
+              filed={g.filed}
+              onApprove={(b) => approve(d.id, b)}
+              onDiscard={() => discard(d.id)}
+              onCombine={combine}
+              onReanalyze={(anchorId) => reanalyze(d.id, anchorId)}
+            />
           ))
         )}
       </section>

@@ -41,4 +41,39 @@ describe('documentsApi', () => {
     expect(init.method).toBe('PUT');
     expect(JSON.parse(init.body)).toEqual({ autoFileEnabled: true });
   });
+
+  it('combines documents in the order given', async () => {
+    const fetch = stubFetch({ id: 'new' });
+    await documentsApi.combine(['b', 'a']);
+    const [url, init] = fetch.mock.calls[0]!;
+    expect(url).toBe('/api/documents/combine');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body)).toEqual({ ids: ['b', 'a'] });
+  });
+
+  it('re-analyses with or without an anchor', async () => {
+    const fetch = stubFetch({ id: 'x' });
+    await documentsApi.reanalyze('a/b');
+    await documentsApi.reanalyze('x', 'letter');
+    expect(fetch.mock.calls[0]![0]).toBe('/api/documents/a%2Fb/reanalyze');
+    expect(JSON.parse(fetch.mock.calls[0]![1].body)).toEqual({});
+    expect(JSON.parse(fetch.mock.calls[1]![1].body)).toEqual({ anchorId: 'letter' });
+  });
+
+  it('keeps the error body\'s other fields', async () => {
+    stubFetch({ error: 'cannot_combine', documentId: 'd2', reason: 'encrypted' }, 422);
+    await expect(documentsApi.combine(['a', 'b'])).rejects.toMatchObject({
+      status: 422,
+      code: 'cannot_combine',
+      body: { error: 'cannot_combine', documentId: 'd2', reason: 'encrypted' },
+    });
+  });
+
+  it.each([['an array', '[1,2]'], ['null', 'null'], ['a string', '"oops"'], ['not JSON', '<html>502</html>']])(
+    'has an empty error body for %s',
+    async (_name, text) => {
+      vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => new Response(text, { status: 502 })));
+      await expect(documentsApi.combine(['a', 'b'])).rejects.toMatchObject({ status: 502, code: undefined, body: {} });
+    },
+  );
 });

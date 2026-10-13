@@ -4,15 +4,22 @@ import type { ApproveBody, DocumentView, FolderRef } from '../../documents/types
 import type { FoldersState } from '../../documents/use-folders.js';
 import { FolderPicker } from './FolderPicker.js';
 import { SOURCE_LABEL, confirmDiscard, folderLabel } from './labels.js';
+import { MoreActions } from './MoreActions.js';
 
 export interface ReviewCardProps {
   doc: DocumentView;
   folders: FoldersState;
   onApprove: (body: ApproveBody) => Promise<void>;
   onDiscard: () => Promise<void>;
+  /** Every card in review, and recently filed documents: what Combine with… and File with… offer. */
+  review?: DocumentView[];
+  filed?: DocumentView[];
+  onCombine?: (ids: string[]) => Promise<void>;
+  /** Re-analyze, or with an anchor id, File with. */
+  onReanalyze?: (anchorId?: string) => Promise<void>;
 }
 
-const APPROVE_ERRORS: Record<string, string> = {
+const ACTION_ERRORS: Record<string, string> = {
   unknown_folder: 'That folder no longer exists in Drive. Pick another.',
   excluded_folder: 'That folder is on your never-file-here list. Pick another.',
   folders_not_loaded: 'The folder list has not loaded from Drive yet. Try again in a moment.',
@@ -22,6 +29,7 @@ const APPROVE_ERRORS: Record<string, string> = {
   not_found: 'This document no longer exists.',
   not_in_review: 'This document has already moved on.',
   conflict: 'This document has already moved on.',
+  possibly_in_drive: 'This document may already be in Drive, so it can’t be changed.',
 };
 
 /**
@@ -43,7 +51,7 @@ function bodyFolder(f: FolderRef): NonNullable<ApproveBody['folder']> {
   return f.kind === 'existing' ? { kind: 'existing', linkId: f.linkId } : { kind: 'new', parentLinkId: f.parentLinkId, name: f.name };
 }
 
-export function ReviewCard({ doc, folders, onApprove, onDiscard }: ReviewCardProps) {
+export function ReviewCard({ doc, folders, onApprove, onDiscard, review = [], filed = [], onCombine, onReanalyze }: ReviewCardProps) {
   const suggested = doc.analysis;
   const [name, setName] = useState(suggested?.name ?? '');
   const [folder, setFolder] = useState<FolderRef | null>(suggested?.folder ?? null);
@@ -70,7 +78,7 @@ export function ReviewCard({ doc, folders, onApprove, onDiscard }: ReviewCardPro
     try {
       await onApprove(body);
     } catch (err) {
-      setError((err instanceof ApiError && err.code && APPROVE_ERRORS[err.code]) || 'Could not approve. Try again.');
+      setError((err instanceof ApiError && err.code && ACTION_ERRORS[err.code]) || 'Could not approve. Try again.');
     } finally {
       setBusy(false);
     }
@@ -88,6 +96,31 @@ export function ReviewCard({ doc, folders, onApprove, onDiscard }: ReviewCardPro
       setBusy(false);
     }
   }
+
+  // One busy state for everything on the card: a request from the chooser or Re-analyse disables it all.
+  async function run(fn: () => Promise<void>): Promise<{ error: unknown } | null> {
+    setBusy(true);
+    setError(null);
+    try {
+      await fn();
+      return null;
+    } catch (error) {
+      return { error };
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const actions = (
+    <>
+      <button class="btn" disabled={busy || !name.trim() || !folder} onClick={() => void approve()}>
+        Approve
+      </button>
+      <button class="btn btn-secondary" disabled={busy} onClick={() => void discard()}>
+        Discard
+      </button>
+    </>
+  );
 
   return (
     <article class="card review-card" aria-label={`Review ${suggested?.name ?? doc.originalName ?? 'document'}`}>
@@ -145,6 +178,7 @@ export function ReviewCard({ doc, folders, onApprove, onDiscard }: ReviewCardPro
           {Math.round(suggested.confidence * 100)}% confident{doc.reviewReason ? ` · ${doc.reviewReason}` : ''}
         </p>
       )}
+      {doc.anchorName && <p class="muted">Paired with “{doc.anchorName}”</p>}
       {suggested?.rationale && <p class="rationale">{suggested.rationale}</p>}
       {doc.prepareNote && <p class="muted">{doc.prepareNote}</p>}
       {suggested?.contentSeen === false && <p class="muted">Analysed from the file's details only; its contents could not be read.</p>}
@@ -153,14 +187,24 @@ export function ReviewCard({ doc, folders, onApprove, onDiscard }: ReviewCardPro
           {error}
         </p>
       )}
-      <div class="actions">
-        <button class="btn" disabled={busy || !name.trim() || !folder} onClick={() => void approve()}>
-          Approve
-        </button>
-        <button class="btn btn-secondary" disabled={busy} onClick={() => void discard()}>
-          Discard
-        </button>
-      </div>
+      {onReanalyze && onCombine ? (
+        <MoreActions
+          doc={doc}
+          review={review}
+          filed={filed}
+          busy={busy}
+          run={run}
+          onCombine={onCombine}
+          onReanalyze={onReanalyze}
+          onReanalyzeError={(err) =>
+            setError((err instanceof ApiError && err.code && ACTION_ERRORS[err.code]) || 'Could not re-analyse. Try again.')
+          }
+        >
+          {actions}
+        </MoreActions>
+      ) : (
+        <div class="actions">{actions}</div>
+      )}
     </article>
   );
 }

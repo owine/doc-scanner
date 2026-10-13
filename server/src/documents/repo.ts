@@ -35,8 +35,11 @@ const COLUMN: Record<keyof DocumentPatch, string> = {
   userEdited: 'user_edited',
   discardRequested: 'discard_requested',
   discardedAt: 'discarded_at',
+  combinedInto: 'combined_into',
+  anchor: 'anchor',
+  reanalyzed: 'reanalyzed',
 };
-const JSON_FIELDS = new Set<keyof DocumentPatch>(['analysis', 'decision', 'filingTarget']);
+const JSON_FIELDS = new Set<keyof DocumentPatch>(['analysis', 'decision', 'filingTarget', 'anchor']);
 
 /**
  * Columns sealed at rest: everything that can hold a document's or folder's
@@ -56,6 +59,7 @@ const SEALED_COLUMNS = [
   'filing_target',
   'filed_name',
   'filed_folder_path',
+  'anchor',
 ] as const;
 type SealedColumn = (typeof SEALED_COLUMNS)[number];
 const SEALED = new Set<string>(SEALED_COLUMNS);
@@ -128,10 +132,18 @@ function fromRow(r: Raw, unseal: Unseal): DocumentRow {
     discardRequested: r.discard_requested === 1,
     discardedAt: r.discarded_at as string | null,
     uploadUnverified: r.upload_unverified === 1,
+    combinedInto: r.combined_into as string | null,
+    anchor: json('anchor'),
+    reanalyzed: r.reanalyzed === 1,
   };
 }
 
 const placeholders = (n: number) => Array(n).fill('?').join(', ');
+
+/** A new document id: 12 random bytes as 16 URL-safe characters (the inbox store's ID pattern). */
+export function newDocumentId(): string {
+  return randomBytes(12).toString('base64url');
+}
 
 /**
  * All SQL for `documents`. Every state change is a compare-and-set on the
@@ -242,13 +254,50 @@ export class DocumentRepo {
   }
 
   insert(d: NewDocument): DocumentRow {
-    const id = randomBytes(12).toString('base64url');
+    const id = newDocumentId();
+    this.insertRow(id, d);
+    return this.get(id)!;
+  }
+
+  /**
+   * Combine (spec §2): inserts the combined document under a pre-made id (its
+   * blob is already in the inbox) and discards every part into it, all or
+   * nothing. Null, with nothing changed, when a part has changed since the
+   * caller read it (seq), which covers leaving review and coming back. Every
+   * step is synchronous, so nothing interleaves. Not reentrant: BEGIN throws
+   * if a transaction is already open, and the null path rolls back, so it must
+   * never join a caller's transaction.
+   */
+  insertCombined(id: string, d: NewDocument, parts: readonly { id: string; seq: number }[]): DocumentRow | null {
+    if (parts.length < 2 || new Set(parts.map((p) => p.id)).size !== parts.length) {
+      throw new Error('insertCombined needs two or more distinct parts');
+    }
+    this.db.exec('BEGIN');
+    try {
+      this.insertRow(id, d, { reanalyzed: true });
+      const discardedAt = this.now();
+      for (const part of parts) {
+        const row = this.get(part.id);
+        if (!row || row.seq !== part.seq || !this.transition(part.id, 'needs_review', 'discarded', { combinedInto: id, discardedAt })) {
+          this.db.exec('ROLLBACK');
+          return null;
+        }
+      }
+      this.db.exec('COMMIT');
+    } catch (err) {
+      if (this.db.isTransaction) this.db.exec('ROLLBACK');
+      throw err;
+    }
+    return this.get(id);
+  }
+
+  private insertRow(id: string, d: NewDocument, opts: { reanalyzed?: boolean } = {}): void {
     const t = iso(this.now());
     this.db
       .prepare(
         `INSERT INTO documents (id, seq, created_at, updated_at, source, original_name, mime, size, sha256,
-                                source_context, state, next_attempt_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'received', ?)`,
+                                source_context, state, next_attempt_at, reanalyzed)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'received', ?, ?)`,
       )
       .run(
         id,
@@ -262,8 +311,8 @@ export class DocumentRepo {
         d.sha256,
         this.seal(id, 'source_context', d.sourceContext),
         t,
+        opts.reanalyzed ? 1 : 0,
       );
-    return this.get(id)!;
   }
 
   get(id: string): DocumentRow | null {

@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as openpgp from 'openpgp';
+import { PDFDocument } from '@cantoo/pdf-lib';
 import { createApp } from '../../src/http/server.js';
 import { createTestDb } from '../helpers/test-db.js';
 import type { ProtonAuth } from '../../src/auth/srp.js';
@@ -13,6 +14,7 @@ import { MailboxSecret } from '../../src/auth/secrets/mailbox-password.js';
 import type { DecryptedUserKey } from '../../src/auth/keys.js';
 import { createPipeline, type Pipeline } from '../../src/documents/pipeline.js';
 import { ANALYSIS, TREE, okOutcome, fakePrepare } from '../documents/harness.js';
+import type { DocumentPatch } from '../../src/documents/types.js';
 import { logger } from '../../src/logger.js';
 
 const KEY = Buffer.alloc(32, 1).toString('base64');
@@ -88,6 +90,8 @@ describe('document routes', () => {
       ['POST', '/api/documents/some-id/discard'],
       ['POST', '/api/documents/some-id/restore'],
       ['POST', '/api/documents/some-id/retry'],
+      ['POST', '/api/documents/combine'],
+      ['POST', '/api/documents/some-id/reanalyze'],
       ['GET', '/api/folders'],
       ['POST', '/api/folders/refresh'],
       ['GET', '/api/settings'],
@@ -241,6 +245,28 @@ function approve(app: App, cookie: string, id: string, body?: string) {
     headers: { cookie, 'content-type': 'application/json' },
     ...(body === undefined ? {} : { body }),
   });
+}
+
+async function pdfPages(sizes: number[], opts: { encrypt?: boolean } = {}): Promise<Uint8Array> {
+  const d = await PDFDocument.create();
+  for (const s of sizes) d.addPage([s, s]);
+  if (opts.encrypt) d.encrypt({ ownerPassword: 'o', userPassword: '' });
+  return d.save();
+}
+
+/** A PDF in review with its original in the inbox (no prepared blob unless a test adds one). */
+async function reviewPdf(pipeline: Pipeline, sha256: string, sizes: number[] = [100], over: DocumentPatch = {}, bytes?: Uint8Array) {
+  const body = bytes ?? (await pdfPages(sizes));
+  const doc = pipeline.repo.insert({ source: 'scanner', originalName: `${sha256}.pdf`, mime: 'application/pdf', size: body.length, sha256, sourceContext: null });
+  pipeline.inbox.put(doc.id, 'original', body);
+  pipeline.repo.transition(doc.id, 'received', 'needs_review', { analysis: ANALYSIS, preparedMime: 'application/pdf', ...over });
+  return doc;
+}
+
+const widthsOf = async (bytes: Uint8Array) => (await PDFDocument.load(bytes)).getPages().map((p) => Math.round(p.getWidth()));
+
+function combineReq(app: App, cookie: string, ids: unknown) {
+  return app.request('/api/documents/combine', { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ ids }) });
 }
 
 describe('approve', () => {
@@ -742,5 +768,260 @@ describe('thumbnail', () => {
       expect([id, res.status]).toEqual([id, 404]);
       expect(await res.json()).toEqual({ error: 'not_found' });
     }
+  });
+});
+
+describe('POST /api/documents/combine', () => {
+  it('combines the parts in the order given and discards them into the new document', async () => {
+    const { app, cookie, pipeline } = await setup();
+    const a = await reviewPdf(pipeline, 'ca', [100]);
+    const b = await reviewPdf(pipeline, 'cb', [200, 210]);
+    const res = await combineReq(app, cookie, [b.id, a.id]);
+    expect(res.status).toBe(201);
+    const view = (await res.json()) as { id: string };
+    expect(view).toMatchObject({ state: 'received', source: 'scanner', originalName: null, mime: 'application/pdf' });
+    expect(await widthsOf(pipeline.inbox.get(view.id, 'original'))).toEqual([200, 210, 100]);
+    expect(pipeline.repo.get(view.id)?.sourceContext).toBe('combined from 2 documents');
+    for (const p of [a, b]) expect(pipeline.repo.get(p.id)).toMatchObject({ state: 'discarded', combinedInto: view.id });
+    await pipeline.worker.wake();
+  });
+
+  it('uses a part\'s prepared PDF when it has one', async () => {
+    const { app, cookie, pipeline } = await setup();
+    const a = await reviewPdf(pipeline, 'pa', [100]);
+    pipeline.inbox.put(a.id, 'prepared', await pdfPages([300]));
+    const b = await reviewPdf(pipeline, 'pb', [150]);
+    const res = await combineReq(app, cookie, [a.id, b.id]);
+    const view = (await res.json()) as { id: string };
+    expect(await widthsOf(pipeline.inbox.get(view.id, 'original'))).toEqual([300, 150]);
+    await pipeline.worker.wake();
+  });
+
+  it('rejects bad input', async () => {
+    const { app, cookie, pipeline } = await setup();
+    const a = await reviewPdf(pipeline, 'ia');
+    for (const ids of [[a.id], [a.id, a.id], Array.from({ length: 11 }, (_, i) => `x${i}`), 'nope']) {
+      const res = await combineReq(app, cookie, ids);
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ error: 'invalid_input' });
+    }
+  });
+
+  it('404s an unknown part and 409s one not in review', async () => {
+    const { app, cookie, pipeline } = await setup();
+    const a = await reviewPdf(pipeline, 'na');
+    expect((await combineReq(app, cookie, [a.id, 'nope'])).status).toBe(404);
+    const r = pipeline.repo.insert({ source: 'picker', originalName: null, mime: 'application/pdf', size: 1, sha256: 'nr', sourceContext: null });
+    const res = await combineReq(app, cookie, [a.id, r.id]);
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: 'not_in_review' });
+  });
+
+  it('refuses a part that may already be in Drive', async () => {
+    const { app, cookie, pipeline } = await setup();
+    const a = await reviewPdf(pipeline, 'da');
+    const b = await reviewPdf(pipeline, 'db', [100], { filingTarget: { folderLinkId: 'BILLS', name: 'x.pdf' } });
+    const res = await combineReq(app, cookie, [a.id, b.id]);
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: 'possibly_in_drive' });
+  });
+
+  it('names a part that cannot be combined', async () => {
+    const { app, cookie, pipeline } = await setup();
+    const a = await reviewPdf(pipeline, 'ea');
+    const b = await reviewPdf(pipeline, 'eb', [], {}, await pdfPages([100], { encrypt: true }));
+    const res = await combineReq(app, cookie, [a.id, b.id]);
+    expect(res.status).toBe(422);
+    expect(await res.json()).toEqual({ error: 'cannot_combine', documentId: b.id, reason: 'encrypted' });
+    expect(pipeline.repo.get(a.id)?.state).toBe('needs_review');
+  });
+
+  it('names a part whose blob is gone', async () => {
+    const { app, cookie, pipeline } = await setup();
+    const a = await reviewPdf(pipeline, 'ma');
+    const b = await reviewPdf(pipeline, 'mb');
+    pipeline.inbox.deleteAll(b.id);
+    const res = await combineReq(app, cookie, [a.id, b.id]);
+    expect(res.status).toBe(422);
+    expect(await res.json()).toEqual({ error: 'cannot_combine', documentId: b.id, reason: 'unreadable' });
+    expect(pipeline.repo.get(a.id)?.state).toBe('needs_review');
+    expect(pipeline.repo.get(b.id)?.state).toBe('needs_review');
+  });
+
+  it('refuses parts too large together before reading them', async () => {
+    const { app, cookie, pipeline } = await setup();
+    const a = await reviewPdf(pipeline, 'la');
+    const big = pipeline.repo.insert({ source: 'picker', originalName: null, mime: 'application/pdf', size: 50 * 1024 * 1024, sha256: 'lb', sourceContext: null });
+    pipeline.repo.transition(big.id, 'received', 'needs_review', { analysis: ANALYSIS });
+    const get = vi.spyOn(pipeline.inbox, 'get');
+    const res = await combineReq(app, cookie, [a.id, big.id]);
+    expect(res.status).toBe(422);
+    expect(await res.json()).toEqual({ error: 'cannot_combine', reason: 'too_large' });
+    expect(get).not.toHaveBeenCalled();
+  });
+
+  it('leaves no blob behind when a part moved on meanwhile', async () => {
+    const { app, cookie, pipeline } = await setup();
+    const a = await reviewPdf(pipeline, 'ra');
+    const b = await reviewPdf(pipeline, 'rb');
+    vi.spyOn(pipeline.repo, 'insertCombined').mockReturnValue(null);
+    const res = await combineReq(app, cookie, [a.id, b.id]);
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: 'conflict' });
+    expect(pipeline.inbox.listIds().sort()).toEqual([a.id, b.id].sort());
+  });
+
+  it('409s a part with a discard pending, before building', async () => {
+    const { app, cookie, pipeline } = await setup();
+    const a = await reviewPdf(pipeline, 'pda');
+    const b = await reviewPdf(pipeline, 'pdb', [100], { discardRequested: true });
+    const res = await combineReq(app, cookie, [a.id, b.id]);
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: 'not_in_review' });
+  });
+
+  it('removes the new blob and answers 500 when the insert throws', async () => {
+    const { app, cookie, pipeline } = await setup();
+    const a = await reviewPdf(pipeline, 'xa');
+    const b = await reviewPdf(pipeline, 'xb');
+    vi.spyOn(pipeline.repo, 'insertCombined').mockImplementation(() => {
+      throw new Error('boom');
+    });
+    const res = await combineReq(app, cookie, [a.id, b.id]);
+    expect(res.status).toBe(500);
+    expect(pipeline.inbox.listIds().sort()).toEqual([a.id, b.id].sort());
+  });
+
+  it('restoring a part puts it back in review and forgets what it was combined into', async () => {
+    const { app, cookie, pipeline } = await setup();
+    const a = await reviewPdf(pipeline, 'sa');
+    const b = await reviewPdf(pipeline, 'sb');
+    await combineReq(app, cookie, [a.id, b.id]);
+    const res = await app.request(`/api/documents/${a.id}/restore`, { method: 'POST', headers: { cookie } });
+    expect(res.status).toBe(200);
+    expect(pipeline.repo.get(a.id)).toMatchObject({ state: 'needs_review', combinedInto: null });
+    await pipeline.worker.wake();
+  });
+});
+
+function reanalyzeReq(app: App, cookie: string, id: string, body?: unknown) {
+  return app.request(`/api/documents/${id}/reanalyze`, {
+    method: 'POST',
+    headers: { cookie, 'content-type': 'application/json' },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+}
+
+function filedLetter(pipeline: Pipeline) {
+  const doc = pipeline.repo.insert({ source: 'scanner', originalName: 'letter.pdf', mime: 'application/pdf', size: 1, sha256: 'letter', sourceContext: null });
+  pipeline.repo.transition(doc.id, 'received', 'filed', {
+    analysis: ANALYSIS,
+    filingTarget: { folderLinkId: 'BILLS', name: 'Certified letter to Northwind.pdf' },
+    filedName: 'Certified letter to Northwind.pdf',
+    filedFolderPath: '/Bills',
+    driveNodeUid: 'N1',
+  });
+  return doc;
+}
+
+describe('POST /api/documents/:id/reanalyze', () => {
+  it('analyses a document in review again from scratch, and reviews the result', async () => {
+    const { app, cookie, pipeline, analyze } = await setup();
+    pipeline.folderCache.save(TREE, new Date());
+    const doc = await reviewPdf(pipeline, 'plain', [100], {
+      decision: { name: 'x', folder: { kind: 'existing', linkId: 'ROOT', path: '/' } },
+      userEdited: true,
+      hasThumbnail: true,
+      prepareNote: 'x',
+      autoFiled: true,
+    });
+    const res = await reanalyzeReq(app, cookie, doc.id);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ state: 'received', analysis: null, decision: null, anchorName: null, hasThumbnail: false, prepareNote: null, autoFiled: false });
+    await pipeline.worker.wake();
+    expect(analyze).toHaveBeenCalledTimes(1);
+    expect(pipeline.repo.get(doc.id)).toMatchObject({ state: 'needs_review', reanalyzed: true, reviewReason: 'requested from review', userEdited: false });
+  });
+
+  it('files a document with a filed one: same folder, paired name asked for', async () => {
+    const { app, cookie, pipeline, analyze } = await setup();
+    pipeline.folderCache.save(TREE, new Date());
+    const letter = filedLetter(pipeline);
+    const receipt = await reviewPdf(pipeline, 'receipt');
+    analyze.mockResolvedValue(okOutcome({ ...ANALYSIS, name: 'Certified letter to Northwind - return receipt', folder: { kind: 'existing', linkId: 'ROOT', path: '/' } }));
+    const res = await reanalyzeReq(app, cookie, receipt.id, { anchorId: letter.id });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ state: 'received', anchorName: 'Certified letter to Northwind' });
+    await pipeline.worker.wake();
+    expect(analyze.mock.calls.at(-1)![0].anchor).toEqual({ name: 'Certified letter to Northwind', folderPath: '/Bills' });
+    expect(pipeline.repo.get(receipt.id)).toMatchObject({
+      state: 'needs_review',
+      reviewReason: 'filed with another document',
+      analysis: { name: 'Certified letter to Northwind - return receipt', folder: { kind: 'existing', linkId: 'BILLS', path: '/Bills' } },
+    });
+  });
+
+  it('files a document with another in review, using its current proposal', async () => {
+    const { app, cookie, pipeline } = await setup();
+    pipeline.folderCache.save(TREE, new Date());
+    const letter = await reviewPdf(pipeline, 'rl');
+    const receipt = await reviewPdf(pipeline, 'rr');
+    const res = await reanalyzeReq(app, cookie, receipt.id, { anchorId: letter.id });
+    expect(await res.json()).toMatchObject({ anchorName: ANALYSIS.name });
+    expect(pipeline.repo.get(receipt.id)?.anchor).toEqual({ documentId: letter.id, name: ANALYSIS.name, folder: ANALYSIS.folder });
+    await pipeline.worker.wake();
+    expect(pipeline.repo.get(receipt.id)).toMatchObject({ reviewReason: 'filed with another document', analysis: { folder: ANALYSIS.folder } });
+  });
+
+  it('refuses an anchor that cannot be one', async () => {
+    const { app, cookie, pipeline } = await setup();
+    const doc = await reviewPdf(pipeline, 'ia');
+    const noFolder = await reviewPdf(pipeline, 'ib', [100], { analysis: { ...ANALYSIS, folder: null } });
+    const waiting = pipeline.repo.insert({ source: 'picker', originalName: null, mime: 'application/pdf', size: 1, sha256: 'ic', sourceContext: null });
+    for (const anchorId of [doc.id, noFolder.id, waiting.id, 'nope']) {
+      const res = await reanalyzeReq(app, cookie, doc.id, { anchorId });
+      expect(res.status).toBe(409);
+      expect(await res.json()).toEqual({ error: 'invalid_anchor' });
+    }
+    expect(pipeline.repo.get(doc.id)?.state).toBe('needs_review');
+  });
+
+  it('refuses a document not in review, or one that may already be in Drive', async () => {
+    const { app, cookie, pipeline } = await setup();
+    const waiting = pipeline.repo.insert({ source: 'picker', originalName: null, mime: 'application/pdf', size: 1, sha256: 'na', sourceContext: null });
+    expect(await (await reanalyzeReq(app, cookie, waiting.id)).json()).toEqual({ error: 'not_in_review' });
+    const sent = await reviewPdf(pipeline, 'nb', [100], { filingTarget: { folderLinkId: 'BILLS', name: 'x.pdf' } });
+    const res = await reanalyzeReq(app, cookie, sent.id);
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: 'possibly_in_drive' });
+    expect((await reanalyzeReq(app, cookie, 'nope')).status).toBe(404);
+  });
+
+  it('rejects a malformed body', async () => {
+    const { app, cookie, pipeline } = await setup();
+    const doc = await reviewPdf(pipeline, 'mb');
+    for (const body of [{ anchorId: 5 }, { anchorId: '' }, { other: 1 }]) {
+      const res = await reanalyzeReq(app, cookie, doc.id, body);
+      expect(res.status).toBe(400);
+    }
+    const truncated = await app.request(`/api/documents/${doc.id}/reanalyze`, { method: 'POST', headers: { cookie }, body: '{"anchorId":' });
+    expect(truncated.status).toBe(400);
+  });
+
+  it('can be approved as suggested once re-analysed with a filed document', async () => {
+    const { app, cookie, pipeline, analyze } = await setup();
+    pipeline.folderCache.save(TREE, new Date());
+    const letter = filedLetter(pipeline);
+    const receipt = await reviewPdf(pipeline, 'e2e');
+    analyze.mockResolvedValue(okOutcome({ ...ANALYSIS, name: 'Return receipt', folder: { kind: 'existing', linkId: 'ROOT', path: '/' } }));
+    expect((await reanalyzeReq(app, cookie, receipt.id, { anchorId: letter.id })).status).toBe(200);
+    await pipeline.worker.wake();
+    expect(pipeline.repo.get(receipt.id)?.state).toBe('needs_review');
+    const res = await app.request(`/api/documents/${receipt.id}/approve`, { method: 'POST', headers: { cookie } });
+    expect(res.status).toBe(200);
+    expect(pipeline.repo.get(receipt.id)).toMatchObject({
+      decision: { name: 'Return receipt', folder: { kind: 'existing', linkId: 'BILLS', path: '/Bills' } },
+      userEdited: false,
+    });
   });
 });

@@ -28,6 +28,19 @@ describe('InboxStore', () => {
     for (const f of readdirSync(dir)) expect(readFileSync(join(dir, f)).includes('SECRET-MARKER')).toBe(false);
   });
 
+  it('reports a blob\'s stored size, a little over its plaintext', () => {
+    const s = store();
+    s.put('doc1', 'prepared', new Uint8Array(1000));
+    const size = s.size('doc1', 'prepared');
+    expect(size).toBeGreaterThanOrEqual(1000);
+    expect(size).toBeLessThan(1100);
+  });
+
+  it('throws InboxBlobMissingError for the size of a missing blob', () => {
+    const s = store();
+    expect(() => s.size('nope', 'prepared')).toThrow(InboxBlobMissingError);
+  });
+
   it('deletes every blob of a document', () => {
     const s = store();
     s.put('doc1', 'original', new Uint8Array([1]));

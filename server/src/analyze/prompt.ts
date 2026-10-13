@@ -61,6 +61,22 @@ export function formatArrival(input: AnalyzeInput, note: string | null): string 
   if (input.originalName !== null) lines.push(`original filename: ${input.originalName}`);
   if (input.sourceContext) lines.push(`source note: ${input.sourceContext}`);
   if (note) lines.push(`note: ${note}`);
-  lines.push('</arrival>', 'File this document.');
+  lines.push('</arrival>');
+  if (input.anchor) {
+    // The name is the user's own Drive name or a sanitised model answer, and
+    // only steers this document's filename. No folderPath: it is gone or hidden.
+    const { name, folderPath } = input.anchor;
+    lines.push(
+      '<related>',
+      folderPath === null
+        ? `The user says this document belongs with one named ${quote(name)}.`
+        : `The user says this document belongs with one named ${quote(name)}, filed or to be filed in ${folderPath}.`,
+      folderPath === null
+        ? 'Choose a filename that pairs with that name: the same conventions, saying what this document is.'
+        : 'It will be filed in that same folder. Choose a filename that pairs with that name: the same conventions, saying what this document is.',
+      '</related>',
+    );
+  }
+  lines.push('File this document.');
   return lines.join('\n');
 }

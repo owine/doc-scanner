@@ -1,5 +1,10 @@
 import type { DocumentRow } from './types.js';
 
+/** An upload was started: the document may already be in Drive, so it can't be combined or re-analysed safely, and discarding it may leave a copy there. */
+export function possiblyInDrive(d: DocumentRow): boolean {
+  return d.state !== 'filed' && (d.filingTarget !== null || d.uploadUnverified);
+}
+
 /** What the API returns for a document: no blobs, no history text. */
 export function toView(d: DocumentRow) {
   return {
@@ -34,9 +39,12 @@ export function toView(d: DocumentRow) {
     hasThumbnail: d.hasThumbnail && d.state !== 'filed',
     userEdited: d.userEdited,
     // An upload was started: discarding now may leave a copy in Drive (the PWA warns).
-    possiblyInDrive: d.state !== 'filed' && (d.filingTarget !== null || d.uploadUnverified),
+    possiblyInDrive: possiblyInDrive(d),
     discardRequested: d.discardRequested,
     discardedAt: d.discardedAt,
+    combinedInto: d.combinedInto,
+    // The name only: the anchor's folder and id stay on the server.
+    anchorName: d.anchor?.name ?? null,
   };
 }
 

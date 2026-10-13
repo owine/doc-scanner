@@ -23,7 +23,7 @@ describe('openDb', () => {
     cleanupFn = cleanup;
 
     const v = db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number };
-    expect(v.v).toBe(7);
+    expect(v.v).toBe(8);
   });
 
   it('migration 002 creates drive cache tables', () => {
@@ -37,7 +37,7 @@ describe('openDb', () => {
     expect(names).toContain('event_cursors');
 
     const v = db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number };
-    expect(v.v).toBe(7);
+    expect(v.v).toBe(8);
   });
 
   it('migration 006 adds documents.drive_url', () => {
@@ -58,6 +58,19 @@ describe('openDb', () => {
     ).run();
     expect(() => db.prepare('UPDATE documents SET has_thumbnail = 2 WHERE id = ?').run('d1')).toThrow();
     expect(() => db.prepare('UPDATE documents SET has_thumbnail = 1 WHERE id = ?').run('d1')).not.toThrow();
+  });
+
+  it('migration 008 adds documents.combined_into, anchor and reanalyzed', () => {
+    const { db, cleanup } = createTestDb();
+    cleanupFn = cleanup;
+    const cols = (db.prepare("SELECT name FROM pragma_table_info('documents')").all() as { name: string }[]).map((c) => c.name);
+    expect(cols).toEqual(expect.arrayContaining(['combined_into', 'anchor', 'reanalyzed']));
+    db.prepare(
+      `INSERT INTO documents (id, seq, created_at, updated_at, source, mime, size, sha256, state, next_attempt_at)
+       VALUES ('d1', 1, 't', 't', 'picker', 'application/pdf', 10, 'abc', 'received', 't')`,
+    ).run();
+    expect(db.prepare('SELECT reanalyzed FROM documents WHERE id = ?').get('d1')).toEqual({ reanalyzed: 0 });
+    expect(() => db.prepare('UPDATE documents SET reanalyzed = 2 WHERE id = ?').run('d1')).toThrow();
   });
 
   it('migration 003 keys event cursors by scope and adds app_settings', () => {
@@ -87,7 +100,7 @@ describe('openDb', () => {
     const secondCount = (db2.prepare('SELECT COUNT(*) AS c FROM schema_version').get() as { c: number }).c;
     db2.close();
 
-    expect(secondCount).toBe(7);
+    expect(secondCount).toBe(8);
     expect(secondCount).toBe(firstCount);
     expect(secondApplied).toBe(firstApplied);
   });
