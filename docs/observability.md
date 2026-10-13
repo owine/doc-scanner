@@ -14,16 +14,16 @@ All optional.
 | `SENTRY_ENVIRONMENT` | server runtime **and** Docker build arg | Environment tag on events (`production`, `staging`, …). | `NODE_ENV`-derived on the server (`production` / `development`); the Vite mode in the PWA |
 | `SENTRY_RELEASE` | server, runtime | Explicit release override. Normally leave unset: the image exports `GIT_SHA`, which is used instead. (The image deliberately doesn't export `SENTRY_RELEASE`, because the SDK reads that name on its own and would tag local builds `dev`.) | `GIT_SHA` from the image; `dev` is ignored |
 | `SENTRY_BROWSER_DSN` | Docker build arg | Browser DSN, compiled into the PWA bundle as `VITE_SENTRY_DSN`. Use a **separate GlitchTip project** from the server. A browser DSN is public by design (it ships in the JS), so a build arg is fine. | unset |
-| `GIT_SHA` | Docker build arg | Release for both sides. CI already passes it. For local compose builds: `GIT_SHA=$(git rev-parse HEAD) docker compose build`. | `dev` |
+| `GIT_SHA` | Docker build arg | Release for both sides. CI already passes it. For local compose builds: `GIT_SHA=$(git rev-parse HEAD) docker compose -f compose.yml -f compose.build.yml build`. | `dev` |
 | `VITE_SENTRY_DSN`, `VITE_SENTRY_ENVIRONMENT`, `VITE_SENTRY_RELEASE` | PWA build, outside Docker | What the Docker build args turn into. Set them directly for `pnpm --filter @doc-scanner/pwa build` (shell env or `pwa/.env.local`). | unset |
 
-The browser DSN is **build-time**: changing it means rebuilding the image. CI builds the published image (`ghcr.io/owine/doc-scanner`) without one, so **a deploy that pulls that image has no browser error reporting**; only the server reports. Getting it back means switching to runtime injection (the server hands the DSN to the page, as house-manager does with `SENTRY_BROWSER_DSN`), so one image doesn't carry one environment's DSN. A deploy that builds from source (`compose.yml` uses `build: .`) can still pass the build arg.
+The browser DSN is **build-time**: changing it means rebuilding the image. CI builds the published image (`ghcr.io/owine/doc-scanner`) without one, so **a deploy that pulls that image has no browser error reporting**; only the server reports. Getting it back means switching to runtime injection (the server hands the DSN to the page, as house-manager does with `SENTRY_BROWSER_DSN`), so one image doesn't carry one environment's DSN. A source build (`compose.build.yml`) can still pass the build arg.
 
 ## Where to set them
 
 CI publishes `ghcr.io/owine/doc-scanner` (`latest` and `sha-<short>`) on every push to `main`, but no stack in `docker-piwine` / `docker-piwine-office` / `docker-zendc` runs it yet. Until one does:
 
-- **This repo's `compose.yml`** reads all of the above from `.env` (see `.env.example`).
+- **This repo's `compose.yml`** (and the `compose.build.yml` overlay) reads all of the above from `.env` (see `.env.example`).
 - **When it moves to a homelab stack**, follow house-manager's convention: add `DOCSCANNER_SENTRY_DSN` to that host's `compose.env` and map it in the stack's `compose.yaml`. A browser DSN needs the runtime injection above first, since the stack pulls the published image.
 
 ## What gets reported
@@ -82,7 +82,7 @@ What the SDK would do on its own is also switched off, not just filtered on the 
 
 1. Create two projects in GlitchTip: one for the server (platform Node), one for the PWA (platform Browser JavaScript).
 2. Put the server project's DSN in `SENTRY_DSN` and the PWA project's DSN in `SENTRY_BROWSER_DSN`.
-3. Rebuild the image (the browser DSN is compiled in) and restart: `GIT_SHA=$(git rev-parse HEAD) docker compose up -d --build`.
+3. Rebuild the image from source (the browser DSN is compiled in) and restart: `GIT_SHA=$(git rev-parse HEAD) docker compose -f compose.yml -f compose.build.yml up -d --build`.
 4. To check it end to end, stop Proton access from the container, or point the server at a bad Proton host, and try `POST /api/drive/test-upload`. A `drive.operation` event should appear.
 
 ## Implementation notes

@@ -35,7 +35,9 @@ The integration tests share one login in a single fork, because Proton rate-limi
 PROTON_TEST_EMAIL=... PROTON_TEST_PASSWORD=... pnpm test:integration
 ```
 
-For a containerised run, `docker compose up --build` builds from source; a deploy can instead pull `ghcr.io/owine/doc-scanner:latest` (amd64 and arm64) with the same environment and volume. Compose reads `.env` for interpolation; the container serves the built PWA from the server on port `3000` and persists the database under `./data` (mounted at `/data`, where the image points `DB_PATH`).
+For a containerised run, `docker compose up -d` pulls the image CI publishes from `main` (`ghcr.io/owine/doc-scanner`, amd64 and arm64; set `DOC_SCANNER_TAG` to a `sha-<short>` tag to pin one). The package is private, so run `docker login ghcr.io` once on the host with a token that has `read:packages`. To build from this checkout instead, add the overlay: `docker compose -f compose.yml -f compose.build.yml up -d --build`. Compose reads `.env` for interpolation. The container serves the built PWA from the server on `127.0.0.1:3000`, has a healthcheck on `/api/health`, and persists the database and inbox under `./data` (mounted at `/data`, where the image points `DB_PATH`).
+
+For production, put a reverse proxy in front that terminates HTTPS (the session cookie is `Secure`, and the camera and service worker need a secure context) and accepts 50 MB request bodies (nginx's default of 1 MB rejects most scans). Back up `./data` together with `SESSION_ENCRYPTION_KEY`: everything in it is encrypted with keys derived from it. Run one container only; the document worker and live Proton sessions are in-process.
 
 The repo is a pnpm workspace (`pnpm-workspace.yaml`) with two packages:
 
