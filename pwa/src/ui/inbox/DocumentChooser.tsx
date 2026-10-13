@@ -59,6 +59,9 @@ export function DocumentChooser({ mode, current, review, filed, onCombine, onFil
 
   const all = [current, ...review, ...filed];
   const byId = new Map(all.map((d) => [d.id, d]));
+  // A checked part may leave review while this is open (a poll, a refused combine): drop it from the selection.
+  const offered = combineCandidates(current, review);
+  const picked = chosen.filter((id) => offered.some((d) => d.id === id));
 
   async function run(fn: () => Promise<void>) {
     setBusy(true);
@@ -76,7 +79,8 @@ export function DocumentChooser({ mode, current, review, filed, onCombine, onFil
     setChosen((c) => (c.includes(id) ? c.filter((x) => x !== id) : [...c, id]));
   }
   function move(id: string, by: -1 | 1) {
-    setChosen((c) => {
+    setChosen(() => {
+      const c = picked;
       const i = c.indexOf(id);
       const j = i + by;
       if (i < 0 || j < 0 || j >= c.length) return c;
@@ -124,7 +128,7 @@ export function DocumentChooser({ mode, current, review, filed, onCombine, onFil
       {mode === 'combine' ? (
         <>
           <ol class="folder-results chooser-order" aria-label="Page order">
-            {[current.id, ...chosen].map((id, i) => {
+            {[current.id, ...picked].map((id, i) => {
               const d = byId.get(id)!;
               return (
                 <li key={id}>
@@ -136,7 +140,7 @@ export function DocumentChooser({ mode, current, review, filed, onCombine, onFil
                       <button type="button" class="btn btn-secondary btn-small btn-square" disabled={i === 1} aria-label={`Move ${displayName(d)} up`} onClick={() => move(id, -1)}>
                         ↑
                       </button>
-                      <button type="button" class="btn btn-secondary btn-small btn-square" disabled={i === chosen.length} aria-label={`Move ${displayName(d)} down`} onClick={() => move(id, 1)}>
+                      <button type="button" class="btn btn-secondary btn-small btn-square" disabled={i === picked.length} aria-label={`Move ${displayName(d)} down`} onClick={() => move(id, 1)}>
                         ↓
                       </button>
                     </>
@@ -145,21 +149,22 @@ export function DocumentChooser({ mode, current, review, filed, onCombine, onFil
               );
             })}
           </ol>
+          {query.trim() && !offered.some((d) => matches(d, query)) && <p class="muted">No matching documents.</p>}
           <ul class="folder-results" aria-label="Documents in review">
-            {combineCandidates(current, review)
+            {offered
               .filter((d) => matches(d, query))
               .map((d) => (
                 <li key={d.id}>
                   <label class="chooser-option">
-                    <input type="checkbox" checked={chosen.includes(d.id)} onChange={() => toggle(d.id)} />
+                    <input type="checkbox" checked={picked.includes(d.id)} onChange={() => toggle(d.id)} />
                     <span>{row(d)}</span>
                   </label>
                 </li>
               ))}
           </ul>
           <div class="actions">
-            <button type="button" class="btn" disabled={busy || chosen.length === 0} onClick={() => void run(() => onCombine([current.id, ...chosen]))}>
-              Combine {chosen.length + 1}
+            <button type="button" class="btn" disabled={busy || picked.length === 0} onClick={() => void run(() => onCombine([current.id, ...picked]))}>
+              Combine {picked.length + 1}
             </button>
             <button type="button" class="btn btn-secondary" onClick={onCancel}>
               Cancel
@@ -170,6 +175,7 @@ export function DocumentChooser({ mode, current, review, filed, onCombine, onFil
         <>
           {section('In review', anchors.review.filter((d) => matches(d, query)))}
           {section('Recently filed', anchors.filed.filter((d) => matches(d, query)))}
+          {query.trim() && ![...anchors.review, ...anchors.filed].some((d) => matches(d, query)) && <p class="muted">No matching documents.</p>}
           <button type="button" class="btn btn-secondary" onClick={onCancel}>
             Cancel
           </button>

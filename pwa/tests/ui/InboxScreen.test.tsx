@@ -593,6 +593,9 @@ describe('InboxScreen scans on this device', () => {
     }
   });
 
+});
+
+describe('InboxScreen more menu', () => {
   it('combines two cards from the More menu', async () => {
     const a = makeDoc({ analysis: { ...makeDoc().analysis!, name: 'Certified letter' } });
     const b = makeDoc({ analysis: { ...makeDoc().analysis!, name: 'Return receipt' } });

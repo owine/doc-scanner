@@ -66,6 +66,14 @@ export function ReviewCard({ doc, folders, onApprove, onDiscard, review = [], fi
   const anchors = anchorCandidates(doc, review, filed);
   const canFileWith = anchors.review.length + anchors.filed.length > 0;
 
+  const moreRef = useRef<HTMLButtonElement>(null);
+  const wasChoosing = useRef(false);
+  // Hand focus back to More when the chooser closes.
+  useEffect(() => {
+    if (wasChoosing.current && !choosing) moreRef.current?.focus();
+    wasChoosing.current = !!choosing;
+  }, [choosing]);
+
   // Hand focus back to Change when the picker closes, not to <body>.
   useEffect(() => {
     if (wasPicking.current && !picking) changeRef.current?.focus();
@@ -189,9 +197,10 @@ export function ReviewCard({ doc, folders, onApprove, onDiscard, review = [], fi
         </button>
         {onReanalyze && !doc.possiblyInDrive && (
           <button
+            ref={moreRef}
             class="btn btn-secondary"
-            aria-expanded={menu}
-            aria-controls={`more-${doc.id}`}
+            aria-expanded={menu && !choosing}
+            aria-controls={menu && !choosing ? `more-${doc.id}` : undefined}
             disabled={busy}
             onClick={() => {
               setMenu((m) => !m);

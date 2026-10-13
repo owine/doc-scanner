@@ -9,6 +9,7 @@ const receipt = makeDoc({ analysis: { ...makeDoc().analysis!, name: 'Return rece
 const bill = makeDoc({ analysis: { ...makeDoc().analysis!, name: 'Water bill' } });
 const filed = makeDoc({ state: 'filed', filed: { name: 'Lease.pdf', folderPath: '/Home', driveNodeUid: 'n', driveUrl: null } });
 
+let rerender: (ui: preact.ComponentChild) => void;
 function renderChooser(mode: 'combine' | 'file-with', over: Partial<Parameters<typeof DocumentChooser>[0]> = {}) {
   const props = {
     mode,
@@ -20,7 +21,8 @@ function renderChooser(mode: 'combine' | 'file-with', over: Partial<Parameters<t
     onCancel: vi.fn(),
     ...over,
   };
-  render(<DocumentChooser {...props} />);
+  const r = render(<DocumentChooser {...props} />);
+  rerender = r.rerender;
   return props;
 }
 
@@ -81,9 +83,39 @@ describe('DocumentChooser: file with', () => {
     expect(screen.queryByRole('button', { name: /Lease/ })).toBeNull();
   });
 
+  it('says when a search matches nothing', () => {
+    renderChooser('file-with');
+    fireEvent.input(screen.getByRole('searchbox', { name: 'Search documents' }), { target: { value: 'zzz' } });
+    expect(screen.getByText('No matching documents.')).toBeInTheDocument();
+  });
+
   it('cancels', () => {
     const p = renderChooser('file-with');
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(p.onCancel).toHaveBeenCalled();
+  });
+
+  it('survives a checked part leaving review', async () => {
+    const p = renderChooser('combine');
+    fireEvent.click(screen.getByRole('checkbox', { name: /Return receipt/ }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /Water bill/ }));
+    expect(screen.getByRole('button', { name: 'Combine 3' })).toBeEnabled();
+    rerender(<DocumentChooser {...p} review={[letter, bill]} />);
+    const order = screen.getByRole('list', { name: 'Page order' });
+    expect(within(order).getAllByRole('listitem').map((li) => li.textContent)).toEqual([
+      expect.stringContaining('Certified letter'),
+      expect.stringContaining('Water bill'),
+    ]);
+    fireEvent.click(screen.getByRole('button', { name: 'Combine 2' }));
+    await waitFor(() => expect(p.onCombine).toHaveBeenCalledWith([letter.id, bill.id]));
+    rerender(<DocumentChooser {...p} review={[letter]} />);
+    expect(screen.getByRole('button', { name: 'Combine 1' })).toBeDisabled();
+  });
+
+  it('says when a search matches nothing', () => {
+    renderChooser('combine');
+    expect(screen.queryByText('No matching documents.')).toBeNull();
+    fireEvent.input(screen.getByRole('searchbox', { name: 'Search documents' }), { target: { value: 'zzz' } });
+    expect(screen.getByText('No matching documents.')).toBeInTheDocument();
   });
 });

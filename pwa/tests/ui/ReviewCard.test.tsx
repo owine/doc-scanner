@@ -248,4 +248,19 @@ describe('ReviewCard more menu', () => {
     renderWithMenu(makeDoc({ anchorName: 'Certified letter' }));
     expect(screen.getByText('Filed with “Certified letter”')).toBeInTheDocument();
   });
+
+  it('returns focus to More when the chooser is cancelled, and ties aria-controls to a shown menu', () => {
+    const doc = makeDoc();
+    renderWithMenu(doc, [doc, makeDoc()]);
+    const more = screen.getByRole('button', { name: 'More' });
+    expect(more).not.toHaveAttribute('aria-controls');
+    fireEvent.click(more);
+    expect(more).toHaveAttribute('aria-expanded', 'true');
+    expect(more).toHaveAttribute('aria-controls');
+    fireEvent.click(screen.getByRole('button', { name: 'File with…' }));
+    expect(more).toHaveAttribute('aria-expanded', 'false');
+    expect(more).not.toHaveAttribute('aria-controls');
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(more).toHaveFocus();
+  });
 });
