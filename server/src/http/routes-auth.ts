@@ -1,15 +1,23 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { TwoFactorRequiredError, type ProtonAuth, type ProtonSession } from '../auth/srp.js';
+import {
+  SessionEndedError,
+  TwoFactorRequiredError,
+  isTransientProtonError,
+  type ProtonAuth,
+  type ProtonSession,
+  type ResumeResult,
+} from '../auth/srp.js';
 import type { SessionStore } from '../auth/session-store.js';
-import type { DecryptedUserKey } from '../auth/keys.js';
-import type { MailboxSecret } from '../auth/secrets/mailbox-password.js';
-import type { PasskeyStore } from '../auth/passkey-store.js';
+import { KeyDecryptError, type DecryptedUserKey } from '../auth/keys.js';
+import { MailboxSecret } from '../auth/secrets/mailbox-password.js';
+import { CREDENTIAL_ID, PRF_BYTES, decodeBase64url, shortId, type PasskeyStore } from '../auth/passkey-store.js';
 import { SETTING, deleteSetting, readSetting, writeSetting } from '../auth/app-settings.js';
 import { Mutex } from '../auth/mutex.js';
 import {
   PROXY_SID,
   forgetAllSessions,
+  headerOnly,
   issueSession,
   revokeAllSessions,
   sessionMiddleware,
@@ -18,6 +26,7 @@ import {
 } from './middleware.js';
 import { logger } from '../logger.js';
 import { captureAuthFailure } from '../observability/report.js';
+import { errorName } from '../observability/error-name.js';
 import { DriveClient } from '../drive/client.js';
 import { getAnyLiveSession, getLiveSession, registerLiveSession } from '../auth/live-session.js';
 import type { DB } from '../db.js';
@@ -27,6 +36,13 @@ const LoginSchema = z.object({
   password: z.string().min(1),
   totp: z.string().regex(/^\d{6}$/).optional(),
 });
+
+const UnlockSchema = z
+  .object({
+    credentialId: z.string().regex(CREDENTIAL_ID),
+    prf: z.string().min(1).max(100),
+  })
+  .strict();
 
 type Env = { Variables: { auth?: AuthContext } };
 
@@ -79,7 +95,7 @@ export function authRoutes(deps: AuthRoutesDeps) {
     mailboxSecret: MailboxSecret;
     decryptedKeys: DecryptedUserKey;
     userId: string;
-    keySaltFingerprint: string;
+    keySaltFingerprint: string | null;
     /** Another Proton account: clear the entities and event-id caches before the session can use them. */
     clearDriveCaches?: boolean;
   }): Promise<void> {
@@ -224,6 +240,86 @@ export function authRoutes(deps: AuthRoutesDeps) {
     const auth = c.get('auth');
     if (!auth) return c.json({ error: 'not_authenticated' }, 401);
     return c.json(status(auth.email, auth.sid));
+  });
+
+  // Spec §2, Unlock: the salts for one passkey prompt. Header mode only.
+  r.post('/unlock/begin', headerOnly(deps.authMode), (c) => {
+    const credentials = deps.passkeys
+      .saltsFor()
+      .map((p) => ({ credentialId: p.credentialId, salt: Buffer.from(p.salt).toString('base64url') }));
+    if (credentials.length === 0) return c.json({ error: 'no_passkeys' }, 409);
+    return c.json({ credentials });
+  });
+
+  // Spec §2, Unlock: a PRF output opens the passphrase, which opens the keys.
+  r.post('/unlock', headerOnly(deps.authMode), async (c) => {
+    const auth = c.get('auth')!;
+    const body = UnlockSchema.safeParse(await c.req.json().catch(() => null));
+    if (!body.success) return c.json({ error: 'invalid_input' }, 400);
+    const prf = decodeBase64url(body.data.prf);
+    if (!prf || prf.length !== PRF_BYTES) return c.json({ error: 'invalid_input' }, 400);
+    const { credentialId } = body.data;
+    const credential = shortId(credentialId);
+    return mutex.run(async (): Promise<Response> => {
+      // Checked in turn: an unlock queued behind another finds the work done.
+      if (getLiveSession(PROXY_SID)) return c.json(status(auth.email, PROXY_SID));
+      const stored = deps.store.load();
+      if (!stored) return c.json({ error: 'proton_login_required' }, 409);
+      const passphrase = deps.passkeys.unwrap(credentialId, prf);
+      if (passphrase === 'unknown') return c.json({ error: 'unknown_passkey' }, 404);
+      if (passphrase === 'wrong_secret') {
+        logger.warn({ credential }, 'passkey unlock refused');
+        return c.json({ error: 'unlock_failed' }, 401);
+      }
+      // The store has removed the row and logged it.
+      if (passphrase === 'unreadable') return c.json({ error: 'passkey_unreadable' }, 409);
+
+      let resumed: ResumeResult;
+      try {
+        resumed = await deps.protonAuth.resume(stored, passphrase, {
+          // At once, before the retry: Proton has already invalidated the old refresh token.
+          onRefreshed: (session) => {
+            deps.store.save(session);
+            logger.info({ email: session.email }, 'proton session refreshed');
+          },
+        });
+      } catch (err) {
+        passphrase.fill(0);
+        if (err instanceof SessionEndedError) {
+          // Proton ended the session. The passkeys still hold the right passphrase.
+          deps.store.clear();
+          logger.info({ credential }, 'passkey unlock: proton session ended');
+          return c.json({ error: 'proton_login_required' }, 409);
+        }
+        if (isTransientProtonError(err)) {
+          logger.warn({ credential, errName: errorName(err) }, 'passkey unlock: proton unavailable');
+          return c.json({ error: 'proton_unavailable' }, 503);
+        }
+        if (err instanceof KeyDecryptError && err.reason === 'user_key') {
+          // The password changed since enrolment: every wrap holds the old passphrase.
+          const removed = deps.passkeys.removeAll();
+          deleteSetting(deps.db, SETTING.keySaltFingerprint);
+          logger.info({ credential, removed }, 'passkey unlock: passphrase no longer opens the user key; passkeys removed');
+          return c.json({ error: 'passkeys_stale' }, 409);
+        }
+        captureAuthFailure(err, 'unlock', 'keys');
+        logger.error({ credential, errName: errorName(err) }, 'passkey unlock failed');
+        return c.json({ error: 'internal' }, 500);
+      }
+      // From here the MailboxSecret owns the bytes; logout or the next login disposes it.
+      await startLiveSession({
+        sid: PROXY_SID,
+        session: resumed.session,
+        mailboxSecret: new MailboxSecret(passphrase),
+        decryptedKeys: resumed.decryptedKeys,
+        userId: resumed.userId,
+        // Recorded at enrolment and unchanged: this passphrase still opened the keys.
+        keySaltFingerprint: readSetting(deps.db, SETTING.keySaltFingerprint),
+      });
+      deps.passkeys.touch(credentialId);
+      logger.info({ credential }, 'unlocked with a passkey');
+      return c.json(status(auth.email, PROXY_SID));
+    });
   });
 
   return r;
