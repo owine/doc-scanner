@@ -1,8 +1,9 @@
-import { describe, it, expect, vi, afterEach, beforeAll } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeAll, beforeEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { act, createEvent, render, screen, fireEvent, waitFor, within } from '@testing-library/preact';
-import { InboxScreen } from '../../src/ui/inbox/InboxScreen.js';
+import { InboxScreen, type InboxScreenProps } from '../../src/ui/inbox/InboxScreen.js';
+import type { UnlockClient } from '../../src/auth/flows.js';
 import { DocumentSync } from '../../src/documents/sync.js';
 import type { DocumentsApi } from '../../src/documents/api.js';
 import type { DocumentView } from '../../src/documents/types.js';
@@ -77,7 +78,7 @@ async function folderLoad(api: DocumentsApi) {
   });
 }
 
-function setup(docs: DocumentView[], over: Partial<DocumentsApi> = {}, send?: Send) {
+function setup(docs: DocumentView[], over: Partial<DocumentsApi> = {}, send?: Send, extra: Partial<InboxScreenProps> = {}) {
   const sync = new DocumentSync({ list: vi.fn().mockResolvedValue({ documents: [], cursor: 0 }) });
   sync.loaded = true;
   for (const d of docs) sync.upsert(d);
@@ -95,7 +96,7 @@ function setup(docs: DocumentView[], over: Partial<DocumentsApi> = {}, send?: Se
   uploads.start();
   const scans = new ScansStore();
   const props = { onScan: vi.fn(), onSettings: vi.fn(), onSignInAgain: vi.fn() };
-  const { unmount } = render(<InboxScreen sync={sync} documents={api} now={() => NOW} uploads={uploads} scans={scans} {...props} />);
+  const { unmount } = render(<InboxScreen sync={sync} documents={api} now={() => NOW} uploads={uploads} scans={scans} {...props} {...extra} />);
   return { sync, api, props, uploads, scans, unmount };
 }
 
@@ -640,5 +641,76 @@ describe('InboxScreen more menu', () => {
     await waitFor(() => expect(api.combine).toHaveBeenCalled());
     await waitFor(() => expect(poll).toHaveBeenCalled());
     expect(await within(card).findByText('Something changed; the list is being updated.')).toBeInTheDocument();
+  });
+});
+
+describe('InboxScreen while Proton is locked', () => {
+  const LIVE = { email: 'user@example.test', proton: 'live' as const, passkeys: 1, unlockAvailable: true };
+  const unlockClient = (): UnlockClient => ({
+    prepare: vi.fn().mockResolvedValue([]),
+    unlock: vi.fn().mockResolvedValue({ kind: 'unlocked', status: LIVE }),
+  });
+
+  it('shows the unlock banner instead of the sign-in banner', async () => {
+    setup([makeDoc({ state: 'awaiting_login' })], {}, undefined, { proton: 'locked', passkeys: 1, unlockClient: unlockClient() });
+    expect(screen.getByText(/filing is paused until you unlock/i)).toBeInTheDocument();
+    expect(screen.queryByText(/waiting to be filed/i)).toBeNull();
+    await waitFor(() => expect(screen.getByText('Waiting for sign-in')).toBeInTheDocument());
+  });
+
+  it('unlocks from the banner and hands over the new status', async () => {
+    const onUnlocked = vi.fn();
+    setup([], {}, undefined, { proton: 'locked', passkeys: 1, onUnlocked, unlockClient: unlockClient() });
+    fireEvent.click(screen.getByRole('button', { name: 'Unlock' }));
+    await waitFor(() => expect(onUnlocked).toHaveBeenCalledWith(LIVE));
+  });
+
+  it('tells the app when an unlock refusal changed the server state', async () => {
+    const onStatusChanged = vi.fn();
+    const client: UnlockClient = {
+      prepare: vi.fn().mockResolvedValue([]),
+      unlock: vi.fn().mockResolvedValue({ kind: 'failed', code: 'passkeys_stale' }),
+    };
+    setup([], {}, undefined, { proton: 'locked', passkeys: 1, onStatusChanged, unlockClient: client });
+    fireEvent.click(screen.getByRole('button', { name: 'Unlock' }));
+    await waitFor(() => expect(onStatusChanged).toHaveBeenCalled());
+  });
+
+  it('opens the Proton sign-in when no passkey can unlock', async () => {
+    const onSignInToProton = vi.fn();
+    setup([], {}, undefined, { proton: 'locked', passkeys: 0, onSignInToProton });
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in to Proton' }));
+    expect(onSignInToProton).toHaveBeenCalled();
+    await waitFor(() => expect(screen.getByText(/nothing to review/i)).toBeInTheDocument());
+  });
+});
+
+describe('InboxScreen passkey nudge', () => {
+  beforeEach(() => localStorage.clear());
+  const TEXT = 'Add a passkey so a server restart doesn’t need your Proton password.';
+
+  it('suggests adding a passkey, and goes to add one', async () => {
+    const onAddPasskey = vi.fn();
+    setup([], {}, undefined, { showPasskeyNudge: true, onAddPasskey });
+    expect(screen.getByText(TEXT)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Add passkey' }));
+    expect(onAddPasskey).toHaveBeenCalled();
+    await waitFor(() => expect(screen.getByText(/nothing to review/i)).toBeInTheDocument());
+  });
+
+  it('stays dismissed on this device', async () => {
+    const { unmount } = setup([], {}, undefined, { showPasskeyNudge: true });
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
+    expect(screen.queryByText(TEXT)).toBeNull();
+    unmount();
+    setup([], {}, undefined, { showPasskeyNudge: true });
+    expect(screen.queryByText(TEXT)).toBeNull();
+    await waitFor(() => expect(screen.getByText(/nothing to review/i)).toBeInTheDocument());
+  });
+
+  it('is not shown unless asked for', async () => {
+    setup([]);
+    expect(screen.queryByText(TEXT)).toBeNull();
+    await waitFor(() => expect(screen.getByText(/nothing to review/i)).toBeInTheDocument());
   });
 });

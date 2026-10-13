@@ -1,6 +1,7 @@
 import type { ComponentChildren } from 'preact';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
-import { ApiError } from '../../api.js';
+import { ApiError, type ProtonState, type StatusResponse } from '../../api.js';
+import type { UnlockClient } from '../../auth/flows.js';
 import { documentsApi, type DocumentsApi } from '../../documents/api.js';
 import { groupDocuments } from '../../documents/group.js';
 import { useDocuments, type DocumentSync } from '../../documents/sync.js';
@@ -13,6 +14,18 @@ import type { ScansStore } from '../../scanner/scans-store.js';
 import { useUploads, type UploadQueue } from '../../uploads/queue.js';
 import { sendScanToInbox, useDeviceScans } from '../../uploads/scans.js';
 import { DeviceScanRow, UploadRow } from './UploadRows.js';
+import { LockedBanner } from './LockedBanner.js';
+
+/** The passkey nudge, once dismissed, stays dismissed on this device. */
+const NUDGE_DISMISSED_KEY = 'docscanner.passkeyNudgeDismissed';
+
+function nudgeDismissed(): boolean {
+  try {
+    return localStorage.getItem(NUDGE_DISMISSED_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
 
 export interface InboxScreenProps {
   sync: DocumentSync;
@@ -26,6 +39,19 @@ export interface InboxScreenProps {
   uploads: UploadQueue;
   /** Must be stable. Task 6 lists its finished scans; the inbox shares App's open. */
   scans: ScansStore;
+  /** From GET /api/auth/status. `locked` shows the unlock banner (passkey-unlock spec §3). */
+  proton?: ProtonState;
+  passkeys?: number;
+  onUnlocked?: (status: StatusResponse) => void;
+  /** An unlock refusal changed the server's state (spec §3): the app reads its status again. */
+  onStatusChanged?: () => void;
+  /** Opens the sign-in-to-Proton screen; defaults to onSignInAgain. */
+  onSignInToProton?: () => void;
+  /** After a Proton login in header mode with no passkey yet. */
+  showPasskeyNudge?: boolean;
+  /** Defaults to onSettings, where passkeys are added. */
+  onAddPasskey?: () => void;
+  unlockClient?: UnlockClient;
 }
 
 function Section({ id, title, children }: { id: string; title: string; children: ComponentChildren }) {
@@ -46,6 +72,14 @@ export function InboxScreen({
   onSignInAgain,
   uploads,
   scans,
+  proton = 'live',
+  passkeys = 0,
+  onUnlocked = () => {},
+  onStatusChanged = () => {},
+  onSignInToProton = onSignInAgain,
+  showPasskeyNudge = false,
+  onAddPasskey = onSettings,
+  unlockClient,
 }: InboxScreenProps) {
   const { docs, loaded, error } = useDocuments(sync);
   const pending = useUploads(uploads);
@@ -53,6 +87,15 @@ export function InboxScreen({
   const fileInput = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
+  const [nudgeHidden, setNudgeHidden] = useState(nudgeDismissed);
+  const dismissNudge = () => {
+    try {
+      localStorage.setItem(NUDGE_DISMISSED_KEY, '1');
+    } catch {
+      // Storage refused (private browsing): dismissed until the next visit.
+    }
+    setNudgeHidden(true);
+  };
   // The queue keeps why a send failed (uploads.buildErrorOf): the row
   // unmounts while its scan is claimed, and Done in App sends scans too.
   const sendScan = async (id: string) => {
@@ -261,16 +304,42 @@ export function InboxScreen({
             {docs.length > 0 ? "Can't reach the server. Showing what was last loaded." : "Can't reach the server."}
           </p>
         )}
-        {g.awaitingLogin > 0 && (
-          <div class="warn">
-            {g.awaitingLogin === 1 ? '1 document is' : `${g.awaitingLogin} documents are`} waiting to be filed. Sign in again to
-            give the server access to Drive.{' '}
-            <button class="btn btn-secondary btn-small" onClick={onSignInAgain}>
-              Sign in again
-            </button>
-          </div>
+        {proton === 'locked' ? (
+          // Replaces the sign-in banner below: nothing can be filed until the keys are back.
+          <LockedBanner
+            passkeys={passkeys}
+            onUnlocked={onUnlocked}
+            onStatusChanged={onStatusChanged}
+            onSignIn={onSignInToProton}
+            {...(unlockClient ? { client: unlockClient } : {})}
+          />
+        ) : (
+          // Live, yet documents wait: the session's tokens died inside it.
+          g.awaitingLogin > 0 && (
+            <div class="warn">
+              {g.awaitingLogin === 1 ? '1 document is' : `${g.awaitingLogin} documents are`} waiting to be filed. Sign in again to
+              give the server access to Drive.{' '}
+              <button class="btn btn-secondary btn-small" onClick={onSignInAgain}>
+                Sign in again
+              </button>
+            </div>
+          )
         )}
       </div>
+
+      {showPasskeyNudge && !nudgeHidden && (
+        <div class="card nudge" role="note">
+          <p>Add a passkey so a server restart doesn’t need your Proton password.</p>
+          <div class="actions">
+            <button class="btn btn-small" onClick={onAddPasskey}>
+              Add passkey
+            </button>
+            <button class="btn btn-secondary btn-small" onClick={dismissNudge}>
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
 
       {pending.length > 0 && (
         <Section id="uploading" title="Uploading">
