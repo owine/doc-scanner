@@ -6,9 +6,10 @@ import type { SessionStore } from '../auth/session-store.js';
 import { sanitiseName } from '../analyze/resolve.js';
 import type { Pipeline } from '../documents/pipeline.js';
 import { InboxBlobMissingError } from '../documents/inbox-store.js';
-import type { Decision, DocumentRow, DocumentState } from '../documents/types.js';
+import type { Anchor, Decision, DocumentRow, DocumentState } from '../documents/types.js';
 import { intakeMime } from '../documents/extension.js';
 import { possiblyInDrive, toView } from '../documents/view.js';
+import { snapshotAnchor } from '../documents/anchor.js';
 import { combineParts } from '../documents/combine.js';
 import { newDocumentId } from '../documents/repo.js';
 import { folderPath } from '../documents/folders.js';
@@ -61,6 +62,7 @@ function guarded(store: SessionStore): Hono<Env> {
 }
 
 const CombineSchema = z.object({ ids: z.array(z.string().min(1)).min(2).max(10) }).strict();
+const ReanalyzeSchema = z.object({ anchorId: z.string().min(1).optional() }).strict();
 
 const ApproveSchema = z
   .object({
@@ -312,6 +314,58 @@ export function documentRoutes(deps: { store: SessionStore; pipeline: Pipeline }
     if (!moved) return c.json({ error: 'conflict' }, 409);
     void worker.wake();
     return c.json(toView(repo.get(doc.id)!));
+  });
+
+  // Spec §3: analyse a document in review again, optionally "with" another
+  // (filed, or in review), whose folder it then takes.
+  r.post('/:id/reanalyze', async (c) => {
+    // The body first: the row is read after the last await, so the checks
+    // below see what the transition's compare-and-set will.
+    // As for approve: only an empty body means "no anchor".
+    const text = await c.req.text();
+    let raw: unknown = {};
+    if (text.trim()) {
+      try {
+        raw = JSON.parse(text);
+      } catch {
+        return c.json({ error: 'invalid_input' }, 400);
+      }
+    }
+    const body = ReanalyzeSchema.safeParse(raw);
+    if (!body.success) return c.json({ error: 'invalid_input' }, 400);
+    const doc = repo.get(c.req.param('id'));
+    if (!doc) return c.json({ error: 'not_found' }, 404);
+    if (doc.state !== 'needs_review') return c.json({ error: 'not_in_review' }, 409);
+    // Preparing skips a row with a filing target, so re-analysing it would
+    // file the original and miss the earlier upload's SHA-1: a duplicate.
+    if (possiblyInDrive(doc)) return c.json({ error: 'possibly_in_drive' }, 409);
+
+    let anchor: Anchor | null = null;
+    if (body.data.anchorId !== undefined) {
+      const other = body.data.anchorId === doc.id ? null : repo.get(body.data.anchorId);
+      anchor = other ? snapshotAnchor(other) : null;
+      if (!anchor) return c.json({ error: 'invalid_anchor' }, 409);
+    }
+
+    const moved = repo.transition(doc.id, 'needs_review', 'received', {
+      anchor,
+      reanalyzed: true,
+      analysis: null,
+      decision: null,
+      reviewReason: null,
+      preparedMime: null,
+      prepareNote: null,
+      hasThumbnail: false,
+      userEdited: false,
+      attempts: 0,
+      error: null,
+      nextAttemptAt: new Date(),
+    });
+    if (!moved) return c.json({ error: 'conflict' }, 409);
+    logger.info({ documentId: doc.id, anchored: anchor !== null }, 'document re-analysis requested');
+    const view = toView(repo.get(doc.id)!);
+    void worker.wake();
+    return c.json(view);
   });
 
   r.post('/:id/discard', (c) => {

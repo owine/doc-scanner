@@ -91,6 +91,7 @@ describe('document routes', () => {
       ['POST', '/api/documents/some-id/restore'],
       ['POST', '/api/documents/some-id/retry'],
       ['POST', '/api/documents/combine'],
+      ['POST', '/api/documents/some-id/reanalyze'],
       ['GET', '/api/folders'],
       ['POST', '/api/folders/refresh'],
       ['GET', '/api/settings'],
@@ -888,5 +889,103 @@ describe('POST /api/documents/combine', () => {
     expect(res.status).toBe(200);
     expect(pipeline.repo.get(a.id)).toMatchObject({ state: 'needs_review', combinedInto: null });
     await pipeline.worker.wake();
+  });
+});
+
+function reanalyzeReq(app: App, cookie: string, id: string, body?: unknown) {
+  return app.request(`/api/documents/${id}/reanalyze`, {
+    method: 'POST',
+    headers: { cookie, 'content-type': 'application/json' },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+}
+
+function filedLetter(pipeline: Pipeline) {
+  const doc = pipeline.repo.insert({ source: 'scanner', originalName: 'letter.pdf', mime: 'application/pdf', size: 1, sha256: 'letter', sourceContext: null });
+  pipeline.repo.transition(doc.id, 'received', 'filed', {
+    analysis: ANALYSIS,
+    filingTarget: { folderLinkId: 'BILLS', name: 'Certified letter to Northwind.pdf' },
+    filedName: 'Certified letter to Northwind.pdf',
+    filedFolderPath: '/Bills',
+    driveNodeUid: 'N1',
+  });
+  return doc;
+}
+
+describe('POST /api/documents/:id/reanalyze', () => {
+  it('analyses a document in review again from scratch, and reviews the result', async () => {
+    const { app, cookie, pipeline, analyze } = await setup();
+    pipeline.folderCache.save(TREE, new Date());
+    const doc = await reviewPdf(pipeline, 'plain', [100], { decision: { name: 'x', folder: { kind: 'existing', linkId: 'ROOT', path: '/' } }, userEdited: true });
+    const res = await reanalyzeReq(app, cookie, doc.id);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ state: 'received', analysis: null, decision: null, anchorName: null });
+    await pipeline.worker.wake();
+    expect(analyze).toHaveBeenCalledTimes(1);
+    expect(pipeline.repo.get(doc.id)).toMatchObject({ state: 'needs_review', reanalyzed: true, reviewReason: 're-analyzed', userEdited: false });
+  });
+
+  it('files a document with a filed one: same folder, paired name asked for', async () => {
+    const { app, cookie, pipeline, analyze } = await setup();
+    pipeline.folderCache.save(TREE, new Date());
+    const letter = filedLetter(pipeline);
+    const receipt = await reviewPdf(pipeline, 'receipt');
+    analyze.mockResolvedValue(okOutcome({ ...ANALYSIS, name: 'Certified letter to Northwind - return receipt', folder: { kind: 'existing', linkId: 'ROOT', path: '/' } }));
+    const res = await reanalyzeReq(app, cookie, receipt.id, { anchorId: letter.id });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ state: 'received', anchorName: 'Certified letter to Northwind' });
+    await pipeline.worker.wake();
+    expect(analyze.mock.calls.at(-1)![0].anchor).toEqual({ name: 'Certified letter to Northwind', folderPath: '/Bills' });
+    expect(pipeline.repo.get(receipt.id)).toMatchObject({
+      state: 'needs_review',
+      reviewReason: 'filed with another document',
+      analysis: { name: 'Certified letter to Northwind - return receipt', folder: { kind: 'existing', linkId: 'BILLS', path: '/Bills' } },
+    });
+  });
+
+  it('files a document with another in review, using its current proposal', async () => {
+    const { app, cookie, pipeline } = await setup();
+    pipeline.folderCache.save(TREE, new Date());
+    const letter = await reviewPdf(pipeline, 'rl');
+    const receipt = await reviewPdf(pipeline, 'rr');
+    const res = await reanalyzeReq(app, cookie, receipt.id, { anchorId: letter.id });
+    expect(await res.json()).toMatchObject({ anchorName: ANALYSIS.name });
+    expect(pipeline.repo.get(receipt.id)?.anchor).toEqual({ documentId: letter.id, name: ANALYSIS.name, folder: ANALYSIS.folder });
+    await pipeline.worker.wake();
+  });
+
+  it('refuses an anchor that cannot be one', async () => {
+    const { app, cookie, pipeline } = await setup();
+    const doc = await reviewPdf(pipeline, 'ia');
+    const noFolder = await reviewPdf(pipeline, 'ib', [100], { analysis: { ...ANALYSIS, folder: null } });
+    const waiting = pipeline.repo.insert({ source: 'picker', originalName: null, mime: 'application/pdf', size: 1, sha256: 'ic', sourceContext: null });
+    for (const anchorId of [doc.id, noFolder.id, waiting.id, 'nope']) {
+      const res = await reanalyzeReq(app, cookie, doc.id, { anchorId });
+      expect(res.status).toBe(409);
+      expect(await res.json()).toEqual({ error: 'invalid_anchor' });
+    }
+    expect(pipeline.repo.get(doc.id)?.state).toBe('needs_review');
+  });
+
+  it('refuses a document not in review, or one that may already be in Drive', async () => {
+    const { app, cookie, pipeline } = await setup();
+    const waiting = pipeline.repo.insert({ source: 'picker', originalName: null, mime: 'application/pdf', size: 1, sha256: 'na', sourceContext: null });
+    expect(await (await reanalyzeReq(app, cookie, waiting.id)).json()).toEqual({ error: 'not_in_review' });
+    const sent = await reviewPdf(pipeline, 'nb', [100], { filingTarget: { folderLinkId: 'BILLS', name: 'x.pdf' } });
+    const res = await reanalyzeReq(app, cookie, sent.id);
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: 'possibly_in_drive' });
+    expect((await reanalyzeReq(app, cookie, 'nope')).status).toBe(404);
+  });
+
+  it('rejects a malformed body', async () => {
+    const { app, cookie, pipeline } = await setup();
+    const doc = await reviewPdf(pipeline, 'mb');
+    for (const body of [{ anchorId: 5 }, { other: 1 }]) {
+      const res = await reanalyzeReq(app, cookie, doc.id, body);
+      expect(res.status).toBe(400);
+    }
+    const truncated = await app.request(`/api/documents/${doc.id}/reanalyze`, { method: 'POST', headers: { cookie }, body: '{"anchorId":' });
+    expect(truncated.status).toBe(400);
   });
 });
