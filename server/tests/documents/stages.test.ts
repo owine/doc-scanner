@@ -3,6 +3,7 @@ import { makeHarness, okOutcome, ANALYSIS, TREE } from './harness.js';
 import { analyzeStage } from '../../src/documents/stages/analyze.js';
 import { prepareStage } from '../../src/documents/stages/prepare.js';
 import { decideStage, reviewReason } from '../../src/documents/stages/decide.js';
+import type { Anchor } from '../../src/documents/types.js';
 import { logger } from '../../src/logger.js';
 
 let h: ReturnType<typeof makeHarness>;
@@ -259,5 +260,87 @@ describe('decideStage', () => {
     h.db.prepare('UPDATE documents SET discard_requested = 1 WHERE id = ?').run(doc.id);
     decideStage(h.repo.get(doc.id)!, h.ctx);
     expect(h.repo.get(doc.id)?.state).toBe('discarded');
+  });
+});
+
+describe('analyzeStage re-analysis', () => {
+  const BILLS = { kind: 'existing' as const, linkId: 'BILLS', path: '/Bills' };
+  const anchor = (folder: Anchor['folder'] = BILLS): Anchor => ({ documentId: 'letter', name: 'Certified letter to Northwind', folder });
+  const ROOT_ANSWER = okOutcome({ ...ANALYSIS, name: 'Return receipt', folder: { kind: 'existing', linkId: 'ROOT', path: '/' } });
+
+  function reanalysing(a: Anchor | null) {
+    const doc = h.add();
+    h.repo.transition(doc.id, 'received', 'received', { anchor: a, reanalyzed: true });
+    return h.repo.get(doc.id)!;
+  }
+
+  it('files with the anchor: its folder, a paired name asked for, and always reviewed', async () => {
+    h = makeHarness();
+    h.analyze.mockResolvedValue(ROOT_ANSWER);
+    const doc = reanalysing(anchor());
+    await analyzeStage(doc, h.ctx);
+    expect(h.analyze.mock.calls[0][0].anchor).toEqual({ name: 'Certified letter to Northwind', folderPath: '/Bills' });
+    expect(h.repo.get(doc.id)).toMatchObject({
+      state: 'preparing',
+      reviewReason: 'filed with another document',
+      analysis: { name: 'Return receipt', folder: BILLS },
+    });
+  });
+
+  it('uses the anchor folder\'s current path', async () => {
+    h = makeHarness();
+    h.ctx.folderCache.save(TREE.map((f) => (f.linkId === 'BILLS' ? { ...f, path: '/Household/Bills' } : f)), new Date());
+    const doc = reanalysing(anchor());
+    await analyzeStage(doc, h.ctx);
+    expect(h.analyze.mock.calls[0][0].anchor.folderPath).toBe('/Household/Bills');
+    expect(h.repo.get(doc.id)?.analysis?.folder).toEqual({ ...BILLS, path: '/Household/Bills' });
+  });
+
+  it('asks for a folder when the anchor\'s is gone or never-file-here', async () => {
+    h = makeHarness();
+    h.ctx.folderCache.save(TREE.filter((f) => f.linkId !== 'BILLS'), new Date());
+    const gone = reanalysing(anchor());
+    await analyzeStage(gone, h.ctx);
+    // The snapshot's path still helps the name.
+    expect(h.analyze.mock.calls[0][0].anchor.folderPath).toBe('/Bills');
+    expect(h.repo.get(gone.id)).toMatchObject({ reviewReason: "the related document's folder is no longer available", analysis: { folder: null } });
+
+    const excluded = reanalysing(anchor({ kind: 'existing', linkId: 'ARCHIVE', path: '/Archive' }));
+    await analyzeStage(excluded, h.ctx);
+    expect(h.repo.get(excluded.id)?.analysis?.folder).toBeNull();
+  });
+
+  it('keeps an anchor\'s proposed new folder', async () => {
+    h = makeHarness();
+    const NEW = { kind: 'new' as const, parentLinkId: 'BILLS', parentPath: '/Bills', name: 'Certified' };
+    const doc = reanalysing(anchor(NEW));
+    await analyzeStage(doc, h.ctx);
+    expect(h.analyze.mock.calls[0][0].anchor.folderPath).toBe('/Bills/Certified');
+    expect(h.repo.get(doc.id)?.analysis?.folder).toEqual(NEW);
+  });
+
+  it('reviews a plain re-analysis, with no related block', async () => {
+    h = makeHarness();
+    const doc = reanalysing(null);
+    await analyzeStage(doc, h.ctx);
+    expect(h.analyze.mock.calls[0][0]).not.toHaveProperty('anchor');
+    expect(h.repo.get(doc.id)).toMatchObject({ reviewReason: 're-analyzed', analysis: { folder: BILLS } });
+  });
+
+  it('keeps the analyzer\'s reason for an unusable answer', async () => {
+    h = makeHarness();
+    h.analyze.mockResolvedValue({ ...okOutcome(), status: 'refusal', detail: 'declined (cyber)' });
+    const doc = reanalysing(anchor());
+    await analyzeStage(doc, h.ctx);
+    expect(h.repo.get(doc.id)).toMatchObject({ analysis: null, reviewReason: 'analysis refusal: declined (cyber)' });
+  });
+
+  it('then goes to review even when it could auto-file', async () => {
+    h = makeHarness();
+    const doc = reanalysing(anchor());
+    await analyzeStage(doc, h.ctx);
+    await prepareStage(h.repo.get(doc.id)!, h.ctx);
+    decideStage(h.repo.get(doc.id)!, h.ctx);
+    expect(h.repo.get(doc.id)?.state).toBe('needs_review');
   });
 });

@@ -1,6 +1,9 @@
+import type { FolderChoice } from '../../analyze/types.js';
 import { toFolderContexts } from '../../drive/folder-tree.js';
 import { logger } from '../../logger.js';
 import type { StageContext } from '../deps.js';
+import { currentAnchorFolder } from '../anchor.js';
+import { folderPath } from '../folders.js';
 import type { DocumentRow } from '../types.js';
 
 /** How long to wait before looking again when no folder tree has been walked yet. */
@@ -35,6 +38,10 @@ export async function analyzeStage(doc: DocumentRow, ctx: StageContext): Promise
 
   const settings = ctx.settings.get();
   const folders = toFolderContexts(cache.tree, { excludePaths: settings.excludePaths });
+  // "File with" (spec §3): the folder is the anchor's as the tree has it now,
+  // null if it has gone or become never-file-here since.
+  const anchor = doc.anchor;
+  const anchorFolder = anchor ? currentAnchorFolder(anchor, cache.tree, settings.excludePaths) : null;
   const started = Date.now();
   const outcome = await ctx.analyzerFor(settings).analyze(
     {
@@ -43,6 +50,8 @@ export async function analyzeStage(doc: DocumentRow, ctx: StageContext): Promise
       originalName: doc.originalName,
       source: doc.source,
       sourceContext: doc.sourceContext ?? undefined,
+      // The snapshot's path when the folder is gone: the pairing name still helps.
+      ...(anchor ? { anchor: { name: anchor.name, folderPath: folderPath(anchorFolder ?? anchor.folder) } } : {}),
     },
     folders,
   );
@@ -52,6 +61,7 @@ export async function analyzeStage(doc: DocumentRow, ctx: StageContext): Promise
       model: outcome.model,
       status: outcome.status,
       confidence: outcome.status === 'ok' ? outcome.analysis.confidence : undefined,
+      anchored: anchor !== null,
       inputTokens: outcome.usage.input_tokens,
       cacheReadTokens: outcome.usage.cache_read_input_tokens ?? 0,
       cacheCreationTokens: outcome.usage.cache_creation_input_tokens ?? 0,
@@ -64,7 +74,14 @@ export async function analyzeStage(doc: DocumentRow, ctx: StageContext): Promise
   let moved: boolean;
   if (outcome.status === 'ok') {
     const { textSnippet: _unused, ...analysis } = outcome.analysis;
-    moved = ctx.repo.transition(doc.id, 'analyzing', 'preparing', { analysis, reviewReason: null, attempts: 0, error: null });
+    // Pinned in code: the model only names a document filed with another.
+    if (anchor) analysis.folder = anchorFolder;
+    moved = ctx.repo.transition(doc.id, 'analyzing', 'preparing', {
+      analysis,
+      reviewReason: reanalysisReason(doc, anchorFolder),
+      attempts: 0,
+      error: null,
+    });
   } else {
     // Still prepared, so the review card gets a thumbnail and the file its
     // text layer; decideStage then sends it to review with this reason.
@@ -76,4 +93,14 @@ export async function analyzeStage(doc: DocumentRow, ctx: StageContext): Promise
     });
   }
   if (!moved) ctx.repo.applyRequestedDiscard(doc.id);
+}
+
+/**
+ * Why a re-analysed document goes to review whatever its confidence (the
+ * user asked for it from review), or null for an ordinary one. Fixed text:
+ * decideStage logs the reason as it is, and reasons never carry names.
+ */
+function reanalysisReason(doc: DocumentRow, anchorFolder: FolderChoice | null): string | null {
+  if (doc.anchor) return anchorFolder ? 'filed with another document' : "the related document's folder is no longer available";
+  return doc.reanalyzed ? 're-analyzed' : null;
 }
