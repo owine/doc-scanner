@@ -261,6 +261,37 @@ describe('SettingsScreen', () => {
     expect(onLoggedOut).not.toHaveBeenCalled();
   });
 
+  it('hides passkeys, and the sign-out note about them, without unlock', async () => {
+    setup();
+    await screen.findByRole('checkbox', { name: /file automatically/i });
+    expect(screen.queryByRole('heading', { name: 'Passkeys' })).toBeNull();
+    expect(screen.queryByText(/also removes your passkey unlocks/i)).toBeNull();
+  });
+
+  it('shows Settings → Passkeys in header mode', async () => {
+    const passkeysClient = {
+      list: vi.fn().mockResolvedValue({ passkeys: [], notice: null }),
+      remove: vi.fn(),
+      begin: vi.fn(),
+      enrol: vi.fn(),
+    };
+    render(
+      <SettingsScreen
+        email="user@example.test"
+        documents={{ settings: vi.fn().mockResolvedValue(SETTINGS), folders: vi.fn().mockResolvedValue({ walkedAt: '2026-10-10T12:00:00.000Z', folders: FOLDERS }) } as unknown as DocumentsApi}
+        onBack={vi.fn()}
+        onLoggedOut={vi.fn()}
+        unlockAvailable
+        proton="live"
+        passkeysClient={passkeysClient}
+      />,
+    );
+    expect(await screen.findByRole('heading', { name: 'Passkeys' })).toBeInTheDocument();
+    expect(await screen.findByText('No passkeys yet.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add passkey' })).toBeInTheDocument();
+    expect(screen.getByText('Signing out also removes your passkey unlocks.')).toBeInTheDocument();
+  });
+
   it('goes back', async () => {
     const { onBack } = setup();
     await screen.findByRole('checkbox', { name: /file automatically/i });

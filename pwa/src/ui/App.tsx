@@ -176,7 +176,16 @@ export function App() {
         onAddPasskey={() => setRoute({ kind: 'settings' })}
       />;
     case 'settings':
-      return <SettingsScreen email={status.email} onBack={() => setRoute({ kind: 'inbox' })} onLoggedOut={signedOut} />;
+      return (
+        <SettingsScreen
+          email={status.email}
+          unlockAvailable={status.unlockAvailable}
+          proton={status.proton}
+          onPasskeysChanged={() => void refreshStatus()}
+          onBack={() => setRoute({ kind: 'inbox' })}
+          onLoggedOut={signedOut}
+        />
+      );
     case 'scanner':
       return <ScannerScreen
         store={store}

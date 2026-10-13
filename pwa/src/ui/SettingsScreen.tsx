@@ -1,16 +1,24 @@
 import { useEffect, useRef, useState, useLayoutEffect } from 'preact/hooks';
-import { api, ApiError } from '../api.js';
+import { api, ApiError, type ProtonState } from '../api.js';
+import type { PasskeysClient } from '../auth/flows.js';
 import { documentsApi, type DocumentsApi } from '../documents/api.js';
 import type { Settings } from '../documents/types.js';
 import { useFolders } from '../documents/use-folders.js';
 import { useTheme } from '../theme/use-theme.js';
 import { FolderPicker } from './inbox/FolderPicker.js';
+import { PasskeysSection } from './PasskeysSection.js';
 
 export interface SettingsScreenProps {
   email: string;
   documents?: DocumentsApi;
   onBack: () => void;
   onLoggedOut: () => void;
+  /** Header mode: passkeys can unlock, so Settings shows them (passkey-unlock spec §3). */
+  unlockAvailable?: boolean;
+  proton?: ProtonState;
+  /** A passkey was added or removed. */
+  onPasskeysChanged?: () => void;
+  passkeysClient?: PasskeysClient;
 }
 
 /**
@@ -35,7 +43,16 @@ function parseThreshold(input: string): { text: string; value: number } | null {
   return /^(\d+\.?\d*|\.\d+)$/.test(text) ? { text, value: Number(text) } : null;
 }
 
-export function SettingsScreen({ email, documents = documentsApi, onBack, onLoggedOut }: SettingsScreenProps) {
+export function SettingsScreen({
+  email,
+  documents = documentsApi,
+  onBack,
+  onLoggedOut,
+  unlockAvailable = false,
+  proton = 'live',
+  onPasskeysChanged = () => {},
+  passkeysClient,
+}: SettingsScreenProps) {
   const { pref, setPref } = useTheme();
   const folders = useFolders(documents);
   const [saved, setSaved] = useState<Settings | null>(null);
@@ -269,6 +286,15 @@ export function SettingsScreen({ email, documents = documentsApi, onBack, onLogg
         ))}
       </div>
 
+      {unlockAvailable && (
+        <PasskeysSection
+          email={email}
+          live={proton === 'live'}
+          onChanged={onPasskeysChanged}
+          {...(passkeysClient ? { client: passkeysClient } : {})}
+        />
+      )}
+
       <h2>Account</h2>
       <div class="card">
         <p>
@@ -277,6 +303,7 @@ export function SettingsScreen({ email, documents = documentsApi, onBack, onLogg
         <button class="btn btn-secondary" onClick={() => void logout()}>
           Sign out
         </button>
+        {unlockAvailable && <p class="muted">Signing out also removes your passkey unlocks.</p>}
         <p role="status" class="error-text">
           {signOutError}
         </p>
