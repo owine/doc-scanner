@@ -12,7 +12,6 @@ async function pdf(sizes: number[], opts: { encrypt?: boolean } = {}): Promise<U
   return d.save();
 }
 
-
 async function withAcroForm(entries: Record<string, ReturnType<PDFDocument['context']['obj']>>, needsRendering = false): Promise<Uint8Array> {
   const d = await PDFDocument.create();
   d.addPage([100, 100]);

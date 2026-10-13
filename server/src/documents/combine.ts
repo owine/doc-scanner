@@ -110,7 +110,7 @@ function protectionOf(src: PDFDocument): 'signed' | 'dynamic_form' | null {
   const form = src.catalog.lookupMaybe(PDFName.of('AcroForm'), PDFDict);
   if (!form) return null;
   const flags = form.lookupMaybe(PDFName.of('SigFlags'), PDFNumber);
-  // Bit 1 (SignaturesExist): the pages are covered by a signature.
+  // Bit 1 (SignaturesExist): the form has a signature field, possibly signed; ocrmypdf treats it the same way.
   if (flags && (flags.asNumber() & 1) !== 0) return 'signed';
   const needsRendering = src.catalog.lookupMaybe(PDFName.of('NeedsRendering'), PDFBool);
   if (form.has(PDFName.of('XFA')) && needsRendering === PDFBool.True) return 'dynamic_form';
