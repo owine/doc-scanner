@@ -265,9 +265,6 @@ export function documentRoutes(deps: { store: SessionStore; pipeline: Pipeline }
   });
 
   r.post('/:id/approve', async (c) => {
-    const doc = repo.get(c.req.param('id'));
-    if (!doc) return c.json({ error: 'not_found' }, 404);
-    if (doc.state !== 'needs_review') return c.json({ error: 'not_in_review' }, 409);
     // Only an empty body means "as suggested": a truncated one must not file
     // anything, because an upload can't be taken back.
     const text = await c.req.text();
@@ -281,6 +278,11 @@ export function documentRoutes(deps: { store: SessionStore; pipeline: Pipeline }
     }
     const body = ApproveSchema.safeParse(raw);
     if (!body.success) return c.json({ error: 'invalid_input' }, 400);
+    // The row is read after the last await, so these checks see what the
+    // transition's compare-and-set will.
+    const doc = repo.get(c.req.param('id'));
+    if (!doc) return c.json({ error: 'not_found' }, 404);
+    if (doc.state !== 'needs_review') return c.json({ error: 'not_in_review' }, 409);
     const cache = folderCache.load();
     if (!cache) return c.json({ error: 'folders_not_loaded' }, 503);
     const pathOf = new Map(cache.tree.map((f) => [f.linkId, f.path]));
@@ -357,6 +359,7 @@ export function documentRoutes(deps: { store: SessionStore; pipeline: Pipeline }
       prepareNote: null,
       hasThumbnail: false,
       userEdited: false,
+      autoFiled: false,
       attempts: 0,
       error: null,
       nextAttemptAt: new Date(),

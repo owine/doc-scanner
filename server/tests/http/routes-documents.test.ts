@@ -916,10 +916,16 @@ describe('POST /api/documents/:id/reanalyze', () => {
   it('analyses a document in review again from scratch, and reviews the result', async () => {
     const { app, cookie, pipeline, analyze } = await setup();
     pipeline.folderCache.save(TREE, new Date());
-    const doc = await reviewPdf(pipeline, 'plain', [100], { decision: { name: 'x', folder: { kind: 'existing', linkId: 'ROOT', path: '/' } }, userEdited: true });
+    const doc = await reviewPdf(pipeline, 'plain', [100], {
+      decision: { name: 'x', folder: { kind: 'existing', linkId: 'ROOT', path: '/' } },
+      userEdited: true,
+      hasThumbnail: true,
+      prepareNote: 'x',
+      autoFiled: true,
+    });
     const res = await reanalyzeReq(app, cookie, doc.id);
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ state: 'received', analysis: null, decision: null, anchorName: null });
+    expect(await res.json()).toMatchObject({ state: 'received', analysis: null, decision: null, anchorName: null, hasThumbnail: false, prepareNote: null, autoFiled: false });
     await pipeline.worker.wake();
     expect(analyze).toHaveBeenCalledTimes(1);
     expect(pipeline.repo.get(doc.id)).toMatchObject({ state: 'needs_review', reanalyzed: true, reviewReason: 're-analysed', userEdited: false });
@@ -952,6 +958,7 @@ describe('POST /api/documents/:id/reanalyze', () => {
     expect(await res.json()).toMatchObject({ anchorName: ANALYSIS.name });
     expect(pipeline.repo.get(receipt.id)?.anchor).toEqual({ documentId: letter.id, name: ANALYSIS.name, folder: ANALYSIS.folder });
     await pipeline.worker.wake();
+    expect(pipeline.repo.get(receipt.id)).toMatchObject({ reviewReason: 'filed with another document', analysis: { folder: ANALYSIS.folder } });
   });
 
   it('refuses an anchor that cannot be one', async () => {
@@ -981,11 +988,28 @@ describe('POST /api/documents/:id/reanalyze', () => {
   it('rejects a malformed body', async () => {
     const { app, cookie, pipeline } = await setup();
     const doc = await reviewPdf(pipeline, 'mb');
-    for (const body of [{ anchorId: 5 }, { other: 1 }]) {
+    for (const body of [{ anchorId: 5 }, { anchorId: '' }, { other: 1 }]) {
       const res = await reanalyzeReq(app, cookie, doc.id, body);
       expect(res.status).toBe(400);
     }
     const truncated = await app.request(`/api/documents/${doc.id}/reanalyze`, { method: 'POST', headers: { cookie }, body: '{"anchorId":' });
     expect(truncated.status).toBe(400);
+  });
+
+  it('can be approved as suggested once re-analysed with a filed document', async () => {
+    const { app, cookie, pipeline, analyze } = await setup();
+    pipeline.folderCache.save(TREE, new Date());
+    const letter = filedLetter(pipeline);
+    const receipt = await reviewPdf(pipeline, 'e2e');
+    analyze.mockResolvedValue(okOutcome({ ...ANALYSIS, name: 'Return receipt', folder: { kind: 'existing', linkId: 'ROOT', path: '/' } }));
+    expect((await reanalyzeReq(app, cookie, receipt.id, { anchorId: letter.id })).status).toBe(200);
+    await pipeline.worker.wake();
+    expect(pipeline.repo.get(receipt.id)?.state).toBe('needs_review');
+    const res = await app.request(`/api/documents/${receipt.id}/approve`, { method: 'POST', headers: { cookie } });
+    expect(res.status).toBe(200);
+    expect(pipeline.repo.get(receipt.id)).toMatchObject({
+      decision: { name: 'Return receipt', folder: { kind: 'existing', linkId: 'BILLS', path: '/Bills' } },
+      userEdited: false,
+    });
   });
 });
