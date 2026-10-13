@@ -15,6 +15,10 @@ export const autoFileThresholdSchema = z
 // Compose forwards unset optional vars as '', and .default() only fires on undefined.
 const blankToUndefined = (v: unknown) => (typeof v === 'string' && v.trim() === '' ? undefined : v);
 
+// A stray newline from an env file would never match a header: every request a silent 401.
+const noEdgeSpace = (v: string) => v === v.trim();
+const EDGE_SPACE_MESSAGE = 'must not have leading or trailing whitespace';
+
 const ConfigSchema = z.object({
   SESSION_ENCRYPTION_KEY: z
     .string({ message: 'SESSION_ENCRYPTION_KEY is required' })
@@ -54,9 +58,9 @@ const ConfigSchema = z.object({
     .transform((v) => v === 'true' || v === '1'),
   // Header mode (passkey-unlock spec §1): the reverse proxy (Authelia) says who
   // the user is, through Remote-User. Unset: the app's own cookie sign-in.
-  AUTH_PROXY_USER: z.preprocess(blankToUndefined, z.string().min(1).optional()),
+  AUTH_PROXY_USER: z.preprocess(blankToUndefined, z.string().refine(noEdgeSpace, EDGE_SPACE_MESSAGE).optional()),
   // For a published port: the proxy also sends this, so nothing else can claim Remote-User.
-  AUTH_PROXY_SECRET: z.preprocess(blankToUndefined, z.string().min(32, 'must be at least 32 characters').optional()),
+  AUTH_PROXY_SECRET: z.preprocess(blankToUndefined, z.string().refine(noEdgeSpace, EDGE_SPACE_MESSAGE).pipe(z.string().min(32, 'must be at least 32 characters')).optional()),
 }).superRefine((c, ctx) => {
   // Without a proxy user the secret would silently do nothing.
   if (c.AUTH_PROXY_SECRET !== undefined && c.AUTH_PROXY_USER === undefined) {

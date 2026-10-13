@@ -1049,5 +1049,8 @@ describe('header mode', () => {
       expect([path, (await app.request(path, { headers: { 'Remote-User': 'owine' } })).status]).toEqual([path, 200]);
       expect([path, (await app.request(path)).status]).toEqual([path, 401]);
     }
+    // Signed in, but no folder tree walked yet: 503, not 401. (The drive router answers 401 either way without a live session, so it can't tell.)
+    expect((await app.request('/api/folders', { headers: { 'Remote-User': 'owine' } })).status).toBe(503);
+    expect((await app.request('/api/folders')).status).toBe(401);
   });
 });

@@ -79,7 +79,7 @@ describe('sessionMiddleware in header mode', () => {
   it('refuses a state-changing request from another site', async () => {
     const { app } = setup(HEADER);
     const user = { 'Remote-User': 'owine' };
-    for (const method of ['POST', 'PUT', 'DELETE']) {
+    for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) {
       for (const site of ['cross-site', 'same-site', 'none']) {
         const res = await probe(app, method, { ...user, 'Sec-Fetch-Site': site });
         expect([method, site, res.status, res.body]).toEqual([method, site, 403, { error: 'cross_site' }]);
@@ -89,6 +89,19 @@ describe('sessionMiddleware in header mode', () => {
       expect((await probe(app, method, user)).body.auth?.sid).toBe('proxy');
     }
     expect((await probe(app, 'GET', { ...user, 'Sec-Fetch-Site': 'cross-site' })).body.auth?.sid).toBe('proxy');
+  });
+});
+
+describe('header mode ignores other credentials', () => {
+  it('ignores a docscanner_sid cookie without Remote-User', async () => {
+    const { app, store } = setup(HEADER);
+    store.save({ uid: 'u', accessToken: 'a', refreshToken: 'r', email: 'e@x.test' });
+    expect((await probe(app, 'GET', { Cookie: 'docscanner_sid=anything' })).body.auth).toBeNull();
+  });
+
+  it('refuses the right secret with the wrong Remote-User', async () => {
+    const { app } = setup(WITH_SECRET);
+    expect((await probe(app, 'GET', { 'Remote-User': 'mallory', [PROXY_SECRET_HEADER]: SECRET })).body.auth).toBeNull();
   });
 });
 

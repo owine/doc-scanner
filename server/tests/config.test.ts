@@ -87,6 +87,13 @@ describe('loadConfig', () => {
     expect(() => loadConfig({ ...base, AUTH_PROXY_SECRET: 's'.repeat(32) })).toThrow(/AUTH_PROXY_SECRET: needs AUTH_PROXY_USER/);
   });
 
+  it('rejects surrounding whitespace in the proxy settings with a clear error', () => {
+    expect(() => loadConfig({ ...base, AUTH_PROXY_USER: 'owine\n' })).toThrow(/AUTH_PROXY_USER: must not have leading or trailing whitespace/);
+    expect(() => loadConfig({ ...base, AUTH_PROXY_USER: 'owine', AUTH_PROXY_SECRET: ' ' + 's'.repeat(32) })).toThrow(
+      /AUTH_PROXY_SECRET: must not have leading or trailing whitespace/,
+    );
+  });
+
   it('rejects a threshold with more than two decimals', () => {
     expect(() => loadConfig({ ...base, AUTO_FILE_THRESHOLD: '0.875' })).toThrow(/AUTO_FILE_THRESHOLD/);
     expect(loadConfig({ ...base, AUTO_FILE_THRESHOLD: '0.85' }).AUTO_FILE_THRESHOLD).toBe(0.85);
