@@ -981,7 +981,9 @@ const CombineSchema = z.object({ ids: z.array(z.string().min(1)).min(2).max(10) 
           sha256: createHash('sha256').update(result.pdf).digest('hex'),
           sourceContext: `combined from ${parts.length} documents`,
         },
-        parts.map((p) => p.id),
+        // With the seqs as read: a part that changed during the build (even
+        // one that left review and came back) makes the whole combine a conflict.
+        parts.map((p) => ({ id: p.id, seq: p.seq })),
       );
     } catch (err) {
       inbox.deleteAll(id);
@@ -1620,8 +1622,8 @@ const ReanalyzeSchema = z.object({ anchorId: z.string().min(1).optional() }).str
   // Spec §3: analyse a document in review again, optionally "with" another
   // (filed, or in review), whose folder it then takes.
   r.post('/:id/reanalyze', async (c) => {
-    const doc = repo.get(c.req.param('id'));
-    if (!doc) return c.json({ error: 'not_found' }, 404);
+    // The body first: the row is read after the last await, so the checks
+    // below see what the transition's compare-and-set will.
     // As for approve: only an empty body means "no anchor".
     const text = await c.req.text();
     let raw: unknown = {};
@@ -1634,6 +1636,8 @@ const ReanalyzeSchema = z.object({ anchorId: z.string().min(1).optional() }).str
     }
     const body = ReanalyzeSchema.safeParse(raw);
     if (!body.success) return c.json({ error: 'invalid_input' }, 400);
+    const doc = repo.get(c.req.param('id'));
+    if (!doc) return c.json({ error: 'not_found' }, 404);
     if (doc.state !== 'needs_review') return c.json({ error: 'not_in_review' }, 409);
     // Preparing skips a row with a filing target, so re-analysing it would
     // file the original and miss the earlier upload's SHA-1: a duplicate.
