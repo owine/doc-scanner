@@ -10,6 +10,7 @@ import { ProtonApi } from '../auth/proton-api.js';
 import { PasskeyStore } from '../auth/passkey-store.js';
 import { AtRestCipher } from '../crypto/at-rest.js';
 import { authRoutes } from './routes-auth.js';
+import { passkeyRoutes } from './routes-passkeys.js';
 import { driveRoutes } from './routes-drive.js';
 import { documentRoutes, folderRoutes, settingsRoutes } from './routes-documents.js';
 import type { Pipeline } from '../documents/pipeline.js';
@@ -69,6 +70,7 @@ export function createApp(deps: AppDeps): Hono {
     appVersion: deps.appVersion,
     secureCookie: deps.secureCookie,
   }));
+  app.route('/api/passkeys', passkeyRoutes({ db: deps.db, store, passkeys, authMode }));
   app.route('/api/drive', driveRoutes({ db: deps.db, store, authMode }));
   if (deps.pipeline) {
     const pipelineDeps = { store, pipeline: deps.pipeline, authMode };

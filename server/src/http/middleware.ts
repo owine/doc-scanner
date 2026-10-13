@@ -82,6 +82,19 @@ export const sessionMiddleware = (store: SessionStore, mode: AuthMode = COOKIE_M
   await next();
 };
 
+/**
+ * For routes that exist only in header mode (spec §1, Guards): passkeys
+ * unlock after a restart, which only header mode can use. Cookie mode
+ * answers 404; header mode without the proxy user, 401.
+ */
+export function headerOnly(mode: AuthMode): MiddlewareHandler<Env> {
+  return async (c, next) => {
+    if (mode.kind !== 'header') return c.json({ error: 'not_found' }, 404);
+    if (!c.get('auth')) return c.json({ error: 'not_authenticated' }, 401);
+    await next();
+  };
+}
+
 export function issueSession(c: Context<Env>, secureCookie: boolean = true): string {
   const sid = randomBytes(32).toString('base64url');
   liveSids.add(sid);
