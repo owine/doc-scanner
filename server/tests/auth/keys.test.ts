@@ -233,6 +233,23 @@ describe('fetchAndDecryptUserKey', () => {
     })).rejects.toMatchObject({ name: 'KeyDecryptError', reason: 'no_keys' });
   });
 
+  it('says key_unreadable, not user_key, when a user key will not parse', async () => {
+    const fakeApi = {
+      getUser: vi.fn().mockResolvedValue({
+        User: {
+          ID: 'u1', Name: 't', Currency: 'USD', Email: 'test@example.com', DisplayName: 't',
+          Keys: [{ ID: 'k1', Version: 4, Primary: 1, Active: 1, Flags: 3, PrivateKey: 'not an armored key', Fingerprint: 'fp' }],
+        },
+      }),
+      getAddresses: vi.fn(),
+    } as unknown as ProtonApi;
+
+    await expect(fetchAndDecryptUserKey({
+      api: fakeApi, uid: 'u', accessToken: 'a',
+      mailboxPasswordBytes: new TextEncoder().encode('pw'),
+    })).rejects.toMatchObject({ name: 'KeyDecryptError', reason: 'key_unreadable' });
+  });
+
   it('says address_key when no key of an address opens', async () => {
     const passphrase = 'pw';
     const userKeyArmored = await makeUserKey(passphrase);
@@ -281,6 +298,10 @@ describe('fetchAndDecryptUserKey', () => {
       api: fakeApi, uid: 'u', accessToken: 'a',
       mailboxPasswordBytes: new TextEncoder().encode('wrong-password'),
     })).rejects.toMatchObject({ name: 'KeyDecryptError', reason: 'user_key' });
+    await expect(fetchAndDecryptUserKey({
+      api: fakeApi, uid: 'u', accessToken: 'a',
+      mailboxPasswordBytes: new TextEncoder().encode('wrong-password'),
+    })).rejects.toBeInstanceOf(KeyDecryptError);
   });
 
   it('throws KeyDecryptError when user has no active keys', async () => {

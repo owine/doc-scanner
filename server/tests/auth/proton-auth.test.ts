@@ -140,10 +140,64 @@ describe('ProtonAuth.resume', () => {
   });
 });
 
+describe('ProtonAuth.resume edge cases', () => {
+  const SESSION = { uid: 'uid-1', accessToken: 'at-1', refreshToken: 'rt-1', email: 'e@x.test' };
+  const bytes = () => new TextEncoder().encode(passphrase);
+
+  it('refreshes once when the retry is a 401 again, and the 401 propagates', async () => {
+    const getUser = vi.fn().mockRejectedValue(new ProtonApiError('Invalid access token', 401));
+    const refresh = vi.fn().mockResolvedValue({ UID: 'uid-2', AccessToken: 'at-2', RefreshToken: 'rt-2' });
+    const onRefreshed = vi.fn();
+    await expect(new ProtonAuth(fakeApi({ getUser, refresh })).resume(SESSION, bytes(), { onRefreshed })).rejects.toMatchObject({ status: 401 });
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(onRefreshed).toHaveBeenCalledTimes(1);
+  });
+
+  it('passes a network failure from getUser through without refreshing', async () => {
+    const getUser = vi.fn().mockRejectedValue(new TypeError('fetch failed'));
+    const refresh = vi.fn();
+    await expect(new ProtonAuth(fakeApi({ getUser, refresh })).resume(SESSION, bytes(), { onRefreshed: vi.fn() })).rejects.toThrow('fetch failed');
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it('waits for an async onRefreshed before retrying', async () => {
+    const order: string[] = [];
+    const getUser = vi.fn().mockImplementation(async () => {
+      order.push('getUser');
+      if (order.length === 1) throw new ProtonApiError('expired', 401);
+      return { User: user };
+    });
+    const refresh = vi.fn().mockResolvedValue({ UID: 'uid-2', AccessToken: 'at-2', RefreshToken: 'rt-2' });
+    const onRefreshed = async () => {
+      await new Promise((r) => setTimeout(r, 5));
+      order.push('saved');
+    };
+    await new ProtonAuth(fakeApi({ getUser, refresh })).resume(SESSION, bytes(), { onRefreshed });
+    expect(order).toEqual(['getUser', 'saved', 'getUser']);
+  });
+});
+
+describe('ProtonAuth.login key salts', () => {
+  it('fingerprints the primary key\'s salt when it is not the first entry', async () => {
+    const getKeySalts = vi.fn().mockResolvedValue({
+      KeySalts: [{ ID: 'other', KeySalt: Buffer.alloc(16, 9).toString('base64') }, { ID: 'uk1', KeySalt: KEY_SALT }],
+    });
+    const result = await new ProtonAuth(fakeApi({ getKeySalts })).login('e@x.test', PASSWORD);
+    expect(result.keySaltFingerprint).toBe(keySaltFingerprint(KEY_SALT));
+    result.mailboxSecret.dispose();
+  });
+});
+
 describe('isTransientProtonError', () => {
+  it('is false for a TypeError whose cause is not a network error', () => {
+    expect(isTransientProtonError(Object.assign(new TypeError('x'), { cause: 'text' }))).toBe(false);
+    expect(isTransientProtonError(Object.assign(new TypeError('x'), { cause: new Error('plain') }))).toBe(false);
+    expect(isTransientProtonError(Object.assign(new TypeError('x'), { cause: Object.assign(new Error('r'), { code: 'ECONNRESET' }) }))).toBe(true);
+  });
+
   it('is true for no answer, a timeout, rate limiting and server errors only', () => {
     expect(isTransientProtonError(new TypeError('fetch failed'))).toBe(true);
-    expect(isTransientProtonError(Object.assign(new TypeError('terminated'), { cause: new Error('other side closed') }))).toBe(true);
+    expect(isTransientProtonError(Object.assign(new TypeError('terminated'), { cause: Object.assign(new Error('other side closed'), { code: 'UND_ERR_SOCKET' }) }))).toBe(true);
     expect(isTransientProtonError(new DOMException('The operation was aborted due to timeout', 'TimeoutError'))).toBe(true);
     expect(isTransientProtonError(new DOMException('This operation was aborted', 'AbortError'))).toBe(true);
     // A bug, not the network: it must reach the error report.

@@ -64,7 +64,7 @@ const SESSION_ENDED = new Set([400, 401, 422]);
  */
 export function isTransientProtonError(error: unknown): boolean {
   if (error instanceof ProtonApiError) return error.status === 429 || error.status >= 500;
-  if (error instanceof TypeError) return error.message === 'fetch failed' || 'cause' in error;
+  if (error instanceof TypeError) return error.message === 'fetch failed' || (error.cause instanceof Error && 'code' in error.cause);
   const name = typeof error === 'object' && error !== null && 'name' in error ? error.name : undefined;
   return name === 'TimeoutError' || name === 'AbortError';
 }
@@ -193,7 +193,7 @@ export class ProtonAuth {
   async resume(
     session: ProtonSession,
     passphraseBytes: Uint8Array,
-    opts: { onRefreshed: (session: ProtonSession) => void },
+    opts: { onRefreshed: (session: ProtonSession) => void | Promise<void> },
   ): Promise<ResumeResult> {
     try {
       return await this.openKeys(session, passphraseBytes);
@@ -207,7 +207,7 @@ export class ProtonAuth {
       if (error instanceof ProtonApiError && SESSION_ENDED.has(error.status)) throw new SessionEndedError(error);
       throw error;
     }
-    opts.onRefreshed(refreshed);
+    await opts.onRefreshed(refreshed);
     return this.openKeys(refreshed, passphraseBytes);
   }
 

@@ -33,11 +33,11 @@ export interface DecryptedUserKey {
 }
 
 /**
- * Why the keys would not open. Only `user_key` (the passphrase no longer opens
- * a user key) means the passphrase is wrong, so only it makes passkey
+ * Why the keys would not open. Only `user_key` (the key parsed, but the
+ * passphrase did not decrypt it) means the passphrase is wrong, so only it makes passkey
  * unlocks stale (passkey-unlock spec §2).
  */
-export type KeyDecryptReason = 'user_key' | 'no_keys' | 'no_addresses' | 'address_key';
+export type KeyDecryptReason = 'user_key' | 'key_unreadable' | 'no_keys' | 'no_addresses' | 'address_key';
 
 export class KeyDecryptError extends Error {
   constructor(message: string, public readonly reason: KeyDecryptReason, public readonly cause?: unknown) {
@@ -91,8 +91,13 @@ export async function fetchAndDecryptUserKey(params: FetchAndDecryptParams): Pro
   const decryptedUserKeys: { id: string; primary: number; key: openpgp.PrivateKey }[] = [];
   for (const k of User.Keys) {
     if (!k.Active) continue;
+    let armored: openpgp.PrivateKey;
     try {
-      const armored = await openpgp.readPrivateKey({ armoredKey: k.PrivateKey });
+      armored = await openpgp.readPrivateKey({ armoredKey: k.PrivateKey });
+    } catch (e) {
+      throw new KeyDecryptError(`Failed to read user key ${k.ID}`, 'key_unreadable', e);
+    }
+    try {
       const key = await openpgp.decryptKey({ privateKey: armored, passphrase });
       decryptedUserKeys.push({ id: k.ID, primary: k.Primary, key });
     } catch (e) {
