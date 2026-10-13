@@ -858,6 +858,27 @@ describe('POST /api/documents/combine', () => {
     expect(pipeline.inbox.listIds().sort()).toEqual([a.id, b.id].sort());
   });
 
+  it('409s a part with a discard pending, before building', async () => {
+    const { app, cookie, pipeline } = await setup();
+    const a = await reviewPdf(pipeline, 'pda');
+    const b = await reviewPdf(pipeline, 'pdb', [100], { discardRequested: true });
+    const res = await combineReq(app, cookie, [a.id, b.id]);
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: 'not_in_review' });
+  });
+
+  it('removes the new blob and answers 500 when the insert throws', async () => {
+    const { app, cookie, pipeline } = await setup();
+    const a = await reviewPdf(pipeline, 'xa');
+    const b = await reviewPdf(pipeline, 'xb');
+    vi.spyOn(pipeline.repo, 'insertCombined').mockImplementation(() => {
+      throw new Error('boom');
+    });
+    const res = await combineReq(app, cookie, [a.id, b.id]);
+    expect(res.status).toBe(500);
+    expect(pipeline.inbox.listIds().sort()).toEqual([a.id, b.id].sort());
+  });
+
   it('restoring a part puts it back in review and forgets what it was combined into', async () => {
     const { app, cookie, pipeline } = await setup();
     const a = await reviewPdf(pipeline, 'sa');

@@ -168,7 +168,7 @@ export function documentRoutes(deps: { store: SessionStore; pipeline: Pipeline }
       if (!part) return c.json({ error: 'not_found' }, 404);
       parts.push(part);
     }
-    if (parts.some((p) => p.state !== 'needs_review')) return c.json({ error: 'not_in_review' }, 409);
+    if (parts.some((p) => p.state !== 'needs_review' || p.discardRequested)) return c.json({ error: 'not_in_review' }, 409);
     // Combining one that may already be in Drive could put its pages there twice.
     if (parts.some(possiblyInDrive)) return c.json({ error: 'possibly_in_drive' }, 409);
 
@@ -176,7 +176,10 @@ export function documentRoutes(deps: { store: SessionStore; pipeline: Pipeline }
     const usePrepared = (p: DocumentRow) => p.preparedMime === 'application/pdf' && inbox.has(p.id, 'prepared');
     // Checked before any blob is loaded, so ten large parts are never in memory together.
     const inputBytes = parts.reduce((n, p) => n + (usePrepared(p) ? inbox.size(p.id, 'prepared') : p.size), 0);
-    if (inputBytes > MAX_UPLOAD_BYTES) return c.json({ error: 'cannot_combine', reason: 'too_large' }, 422);
+    if (inputBytes > MAX_UPLOAD_BYTES) {
+      logger.info({ parts: parts.length, reason: 'too_large' }, 'combine refused');
+      return c.json({ error: 'cannot_combine', reason: 'too_large' }, 422);
+    }
 
     const result = await combineParts(
       parts.map((p) =>
@@ -186,8 +189,14 @@ export function documentRoutes(deps: { store: SessionStore; pipeline: Pipeline }
       ),
       MAX_UPLOAD_BYTES,
     );
-    if (result.kind === 'too_large') return c.json({ error: 'cannot_combine', reason: 'too_large' }, 422);
-    if (result.kind === 'refused') return c.json({ error: 'cannot_combine', documentId: result.documentId, reason: result.reason }, 422);
+    if (result.kind === 'too_large') {
+      logger.info({ parts: parts.length, reason: 'too_large' }, 'combine refused');
+      return c.json({ error: 'cannot_combine', reason: 'too_large' }, 422);
+    }
+    if (result.kind === 'refused') {
+      logger.info({ documentId: result.documentId, reason: result.reason }, 'combine refused');
+      return c.json({ error: 'cannot_combine', documentId: result.documentId, reason: result.reason }, 422);
+    }
 
     const id = newDocumentId();
     inbox.put(id, 'original', result.pdf);
