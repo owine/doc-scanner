@@ -2,7 +2,7 @@ import { sanitiseName } from '../analyze/resolve.js';
 import type { FolderChoice } from '../analyze/types.js';
 import { isUnderAny, stripExtension } from '../drive/folder-tree.js';
 import { folderPath } from './folders.js';
-import type { Anchor, Decision, DocumentRow } from './types.js';
+import type { Anchor, DocumentRow } from './types.js';
 
 /**
  * What "File with" pairs a document with (spec §3), or null when `a` can't
