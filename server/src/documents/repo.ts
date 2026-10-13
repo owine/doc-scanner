@@ -35,8 +35,11 @@ const COLUMN: Record<keyof DocumentPatch, string> = {
   userEdited: 'user_edited',
   discardRequested: 'discard_requested',
   discardedAt: 'discarded_at',
+  combinedInto: 'combined_into',
+  anchor: 'anchor',
+  reanalyzed: 'reanalyzed',
 };
-const JSON_FIELDS = new Set<keyof DocumentPatch>(['analysis', 'decision', 'filingTarget']);
+const JSON_FIELDS = new Set<keyof DocumentPatch>(['analysis', 'decision', 'filingTarget', 'anchor']);
 
 /**
  * Columns sealed at rest: everything that can hold a document's or folder's
@@ -56,6 +59,7 @@ const SEALED_COLUMNS = [
   'filing_target',
   'filed_name',
   'filed_folder_path',
+  'anchor',
 ] as const;
 type SealedColumn = (typeof SEALED_COLUMNS)[number];
 const SEALED = new Set<string>(SEALED_COLUMNS);
@@ -128,6 +132,9 @@ function fromRow(r: Raw, unseal: Unseal): DocumentRow {
     discardRequested: r.discard_requested === 1,
     discardedAt: r.discarded_at as string | null,
     uploadUnverified: r.upload_unverified === 1,
+    combinedInto: r.combined_into as string | null,
+    anchor: json('anchor'),
+    reanalyzed: r.reanalyzed === 1,
   };
 }
 

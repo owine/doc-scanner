@@ -302,6 +302,16 @@ describe('DocumentRepo', () => {
     expect(r.get(a.id)).toMatchObject({ state: 'needs_review', discardedAt: null });
   });
 
+  it('round-trips combinedInto and reanalyzed as plaintext, defaulting to null and false', () => {
+    const r = repo();
+    const a = r.insert(doc());
+    expect(r.get(a.id)).toMatchObject({ combinedInto: null, anchor: null, reanalyzed: false });
+    r.transition(a.id, 'received', 'received', { combinedInto: 'XYZ', reanalyzed: true });
+    expect(r.get(a.id)).toMatchObject({ combinedInto: 'XYZ', reanalyzed: true });
+    const raw = db.prepare('SELECT combined_into, reanalyzed FROM documents WHERE id = ?').get(a.id);
+    expect(raw).toEqual({ combined_into: 'XYZ', reanalyzed: 1 });
+  });
+
   describe('metadata at rest', () => {
     // Fictional values, each containing a marker the raw row must never show.
     const MARK = 'Northwind';
@@ -321,9 +331,10 @@ describe('DocumentRepo', () => {
       filedFolderPath: `/Bills/${MARK} Energy`,
       reviewReason: `analysis invalid: ${MARK}`,
       error: `upload of ${MARK} Energy Sep 2026.pdf failed`,
+      anchor: { documentId: 'other', name: `${MARK} Letter`, folder: { kind: 'existing', linkId: 'BILLS', path: `/Bills/${MARK}` } },
     };
     const rawRow = (id: string) => db.prepare('SELECT * FROM documents WHERE id = ?').get(id) as Record<string, unknown>;
-    const SEALED = ['original_name', 'source_context', 'analysis', 'decision', 'filing_target', 'filed_name', 'filed_folder_path', 'review_reason', 'error'];
+    const SEALED = ['original_name', 'source_context', 'analysis', 'decision', 'filing_target', 'filed_name', 'filed_folder_path', 'review_reason', 'error', 'anchor'];
 
     it('keeps no plaintext name, path or text in the raw row', () => {
       const r = repo();
@@ -406,11 +417,20 @@ describe('DocumentRepo', () => {
         decision: null,
         filingTarget: null,
         filedName: null,
+        anchor: null,
       });
       expect(got.error).toMatch(/^stored document details could not be decrypted/);
       // Clients polling by seq see the change.
       expect(got.seq).toBeGreaterThan(seqBefore);
       for (const col of SEALED.filter((c) => c !== 'error')) expect([col, rawRow(a.id)[col]]).toEqual([col, null]);
+    });
+
+    it('quarantines a row whose anchor won\'t decrypt', () => {
+      const r = repo();
+      const a = r.insert(named());
+      r.transition(a.id, 'received', 'needs_review', everything);
+      db.prepare('UPDATE documents SET anchor = ? WHERE id = ?').run(new Uint8Array(40), a.id);
+      expect(r.get(a.id)).toMatchObject({ state: 'failed', anchor: null, analysis: null });
     });
 
     it('keeps the upload warning when quarantining a row whose upload may have happened', () => {
