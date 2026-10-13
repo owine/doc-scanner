@@ -207,7 +207,7 @@ export function InboxScreen({
       throw err;
     }
     // The parts are discarded now: read them back so they leave review.
-    for (const id of ids) await readBack(id);
+    await Promise.all(ids.map(readBack));
   };
   const reanalyze = async (id: string, anchorId?: string) => {
     try {

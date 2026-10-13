@@ -68,4 +68,12 @@ describe('documentsApi', () => {
       body: { error: 'cannot_combine', documentId: 'd2', reason: 'encrypted' },
     });
   });
+
+  it.each([['an array', '[1,2]'], ['null', 'null'], ['a string', '"oops"'], ['not JSON', '<html>502</html>']])(
+    'has an empty error body for %s',
+    async (_name, text) => {
+      vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => new Response(text, { status: 502 })));
+      await expect(documentsApi.combine(['a', 'b'])).rejects.toMatchObject({ status: 502, code: undefined, body: {} });
+    },
+  );
 });
