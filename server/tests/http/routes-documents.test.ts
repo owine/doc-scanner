@@ -1025,3 +1025,25 @@ describe('POST /api/documents/:id/reanalyze', () => {
     });
   });
 });
+
+describe('header mode', () => {
+  it('signs every router in by the proxy user', async () => {
+    const { db, cleanup } = createTestDb();
+    const dir = mkdtempSync(join(tmpdir(), 'routes-docs-'));
+    cleanups.push(cleanup, () => rmSync(dir, { recursive: true, force: true }));
+    const pipeline = createPipeline({
+      db,
+      dataDir: dir,
+      encryptionKey: KEY,
+      defaults: { model: 'm', effort: 'medium', autoFileThreshold: 0.8, autoFileEnabled: false, excludePaths: [] },
+      analyzerFor: () => ({ analyze: vi.fn() }),
+      liveSession: () => undefined,
+      prepare: fakePrepare(),
+    });
+    const app = createApp({ db, encryptionKey: KEY, pipeline, authMode: { kind: 'header', user: 'owine', secret: null } });
+    for (const path of ['/api/documents?since=0', '/api/settings', '/api/auth/status']) {
+      expect([path, (await app.request(path, { headers: { 'Remote-User': 'owine' } })).status]).toEqual([path, 200]);
+      expect([path, (await app.request(path)).status]).toEqual([path, 401]);
+    }
+  });
+});

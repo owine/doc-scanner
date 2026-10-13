@@ -11,6 +11,7 @@ import { authRoutes } from './routes-auth.js';
 import { driveRoutes } from './routes-drive.js';
 import { documentRoutes, folderRoutes, settingsRoutes } from './routes-documents.js';
 import type { Pipeline } from '../documents/pipeline.js';
+import { COOKIE_MODE, type AuthMode } from './middleware.js';
 import { logger } from '../logger.js';
 import { errorName } from '../observability/error-name.js';
 
@@ -23,10 +24,13 @@ export interface AppDeps {
   secureCookie?: boolean;
   pwaDistPath?: string;
   pipeline?: Pipeline;
+  /** Header mode signs requests in by the proxy's Remote-User; cookie mode by default. */
+  authMode?: AuthMode;
 }
 
 export function createApp(deps: AppDeps): Hono {
   const store = new SessionStore(deps.db, deps.encryptionKey);
+  const authMode = deps.authMode ?? COOKIE_MODE;
   const protonAuth = deps.protonAuth ?? new ProtonAuth(
     new ProtonApi(deps.protonApiBaseUrl ?? 'https://mail.proton.me/api', deps.appVersion ?? 'external-drive-docscanner@0.1.0'),
   );
@@ -51,10 +55,10 @@ export function createApp(deps: AppDeps): Hono {
     return c.json({ error: 'internal' }, 500);
   });
   app.get('/api/health', (c) => c.json({ ok: true }));
-  app.route('/api/auth', authRoutes({ store, protonAuth, db: deps.db, encryptionKey: deps.encryptionKey, appVersion: deps.appVersion, secureCookie: deps.secureCookie }));
-  app.route('/api/drive', driveRoutes({ db: deps.db, store }));
+  app.route('/api/auth', authRoutes({ store, protonAuth, db: deps.db, encryptionKey: deps.encryptionKey, authMode, appVersion: deps.appVersion, secureCookie: deps.secureCookie }));
+  app.route('/api/drive', driveRoutes({ db: deps.db, store, authMode }));
   if (deps.pipeline) {
-    const pipelineDeps = { store, pipeline: deps.pipeline };
+    const pipelineDeps = { store, pipeline: deps.pipeline, authMode };
     app.route('/api/documents', documentRoutes(pipelineDeps));
     app.route('/api/folders', folderRoutes(pipelineDeps));
     app.route('/api/settings', settingsRoutes(pipelineDeps));

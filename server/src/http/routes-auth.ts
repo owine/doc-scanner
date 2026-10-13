@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { TwoFactorRequiredError, type ProtonAuth } from '../auth/srp.js';
 import type { SessionStore } from '../auth/session-store.js';
-import { issueSession, revokeAllSessions, sessionMiddleware, type AuthContext } from './middleware.js';
+import { issueSession, revokeAllSessions, sessionMiddleware, type AuthContext, type AuthMode } from './middleware.js';
 import { logger } from '../logger.js';
 import { captureAuthFailure } from '../observability/report.js';
 import { DriveClient } from '../drive/client.js';
@@ -22,11 +22,12 @@ export function authRoutes(deps: {
   protonAuth: ProtonAuth;
   db: DB;
   encryptionKey: string;
+  authMode: AuthMode;
   appVersion?: string;
   secureCookie?: boolean;
 }) {
   const r = new Hono<Env>();
-  r.use('*', sessionMiddleware(deps.store));
+  r.use('*', sessionMiddleware(deps.store, deps.authMode));
 
   r.post('/login', async (c) => {
     const parseResult = LoginSchema.safeParse(await c.req.json().catch(() => ({})));

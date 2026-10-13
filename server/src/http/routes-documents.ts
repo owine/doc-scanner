@@ -16,7 +16,7 @@ import { folderPath } from '../documents/folders.js';
 import { isUnderAny } from '../drive/folder-tree.js';
 import { logger } from '../logger.js';
 import { errorName } from '../observability/error-name.js';
-import { sessionMiddleware, type AuthContext } from './middleware.js';
+import { sessionMiddleware, type AuthContext, type AuthMode } from './middleware.js';
 
 type Env = { Variables: { auth?: AuthContext } };
 
@@ -55,9 +55,9 @@ const requireAuth: MiddlewareHandler<Env> = async (c, next) => {
 };
 
 /** A sub-app whose every route needs a login. Mount at its own prefix (see the routing trap). */
-function guarded(store: SessionStore): Hono<Env> {
+function guarded(store: SessionStore, mode: AuthMode): Hono<Env> {
   const r = new Hono<Env>();
-  r.use('*', sessionMiddleware(store), requireAuth);
+  r.use('*', sessionMiddleware(store, mode), requireAuth);
   return r;
 }
 
@@ -100,9 +100,9 @@ function restartState(d: DocumentRow): DocumentState {
   return d.decision ? 'filing' : d.analysis ? 'preparing' : 'received';
 }
 
-export function documentRoutes(deps: { store: SessionStore; pipeline: Pipeline }) {
+export function documentRoutes(deps: { store: SessionStore; pipeline: Pipeline; authMode: AuthMode }) {
   const { repo, inbox, folderCache, worker } = deps.pipeline;
-  const r = guarded(deps.store);
+  const r = guarded(deps.store, deps.authMode);
 
   r.post(
     '/',
@@ -434,8 +434,8 @@ export function documentRoutes(deps: { store: SessionStore; pipeline: Pipeline }
   return r;
 }
 
-export function folderRoutes(deps: { store: SessionStore; pipeline: Pipeline }) {
-  const r = guarded(deps.store);
+export function folderRoutes(deps: { store: SessionStore; pipeline: Pipeline; authMode: AuthMode }) {
+  const r = guarded(deps.store, deps.authMode);
   // On-demand re-walk (spec §4), e.g. after reorganising folders in Drive.
   r.post('/refresh', async (c) => {
     if (!c.get('auth')?.liveSession) return c.json({ error: 'not_logged_in' }, 409);
@@ -464,8 +464,8 @@ export function folderRoutes(deps: { store: SessionStore; pipeline: Pipeline }) 
   return r;
 }
 
-export function settingsRoutes(deps: { store: SessionStore; pipeline: Pipeline }) {
-  const r = guarded(deps.store);
+export function settingsRoutes(deps: { store: SessionStore; pipeline: Pipeline; authMode: AuthMode }) {
+  const r = guarded(deps.store, deps.authMode);
   r.get('/', (c) => c.json(deps.pipeline.settings.get()));
   r.put('/', async (c) => {
     try {

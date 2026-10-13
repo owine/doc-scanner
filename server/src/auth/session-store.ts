@@ -36,6 +36,15 @@ export class SessionStore {
     this.db.prepare('DELETE FROM sessions WHERE id = 1').run();
   }
 
+  /**
+   * The stored session's email, or null when none is stored. Read from the
+   * plaintext column, without decrypting: header mode asks on every request.
+   */
+  storedEmail(): string | null {
+    const row = this.db.prepare('SELECT email FROM sessions WHERE id = 1').get() as { email: string } | undefined;
+    return row?.email ?? null;
+  }
+
   private encrypt(plaintext: string): Buffer {
     const iv = randomBytes(IV_LEN);
     const cipher = createCipheriv(ALGO, this.key, iv);
