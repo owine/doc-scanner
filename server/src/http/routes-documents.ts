@@ -8,7 +8,10 @@ import type { Pipeline } from '../documents/pipeline.js';
 import { InboxBlobMissingError } from '../documents/inbox-store.js';
 import type { Decision, DocumentRow, DocumentState } from '../documents/types.js';
 import { intakeMime } from '../documents/extension.js';
-import { toView } from '../documents/view.js';
+import { possiblyInDrive, toView } from '../documents/view.js';
+import { combineParts } from '../documents/combine.js';
+import { newDocumentId } from '../documents/repo.js';
+import { folderPath } from '../documents/folders.js';
 import { isUnderAny } from '../drive/folder-tree.js';
 import { logger } from '../logger.js';
 import { errorName } from '../observability/error-name.js';
@@ -57,6 +60,8 @@ function guarded(store: SessionStore): Hono<Env> {
   return r;
 }
 
+const CombineSchema = z.object({ ids: z.array(z.string().min(1)).min(2).max(10) }).strict();
+
 const ApproveSchema = z
   .object({
     name: z.string().optional(),
@@ -85,12 +90,6 @@ function currentFolder(want: FolderWant, pathOf: ReadonlyMap<string, string>): D
   const parentPath = pathOf.get(want.parentLinkId);
   const name = sanitiseName(want.name, '');
   return parentPath && name ? { kind: 'new', parentLinkId: want.parentLinkId, parentPath, name } : null;
-}
-
-/** The folder's own path; for a new folder, the one it will have once created (so it is under its parent's). */
-function folderPath(folder: Decision['folder']): string {
-  if (folder.kind === 'existing') return folder.path;
-  return `${folder.parentPath === '/' ? '' : folder.parentPath}/${folder.name}`;
 }
 
 /** Where a failed document picks up on retry: as late as what it already has allows. */
@@ -158,6 +157,69 @@ export function documentRoutes(deps: { store: SessionStore; pipeline: Pipeline }
       return c.json({ id: doc.id }, 202);
     },
   );
+
+  // Spec §2: several documents in review become one PDF, analysed and filed once.
+  r.post('/combine', async (c) => {
+    const body = CombineSchema.safeParse(await c.req.json().catch(() => null));
+    if (!body.success || new Set(body.data.ids).size !== body.data.ids.length) return c.json({ error: 'invalid_input' }, 400);
+    const parts: DocumentRow[] = [];
+    for (const id of body.data.ids) {
+      const part = repo.get(id);
+      if (!part) return c.json({ error: 'not_found' }, 404);
+      parts.push(part);
+    }
+    if (parts.some((p) => p.state !== 'needs_review')) return c.json({ error: 'not_in_review' }, 409);
+    // Combining one that may already be in Drive could put its pages there twice.
+    if (parts.some(possiblyInDrive)) return c.json({ error: 'possibly_in_drive' }, 409);
+
+    // A prepared PDF already has its text layer, so OCR skips those pages later.
+    const usePrepared = (p: DocumentRow) => p.preparedMime === 'application/pdf' && inbox.has(p.id, 'prepared');
+    // Checked before any blob is loaded, so ten large parts are never in memory together.
+    const inputBytes = parts.reduce((n, p) => n + (usePrepared(p) ? inbox.size(p.id, 'prepared') : p.size), 0);
+    if (inputBytes > MAX_UPLOAD_BYTES) return c.json({ error: 'cannot_combine', reason: 'too_large' }, 422);
+
+    const result = await combineParts(
+      parts.map((p) =>
+        usePrepared(p)
+          ? { id: p.id, bytes: inbox.get(p.id, 'prepared'), mime: 'application/pdf' }
+          : { id: p.id, bytes: inbox.get(p.id, 'original'), mime: p.mime },
+      ),
+      MAX_UPLOAD_BYTES,
+    );
+    if (result.kind === 'too_large') return c.json({ error: 'cannot_combine', reason: 'too_large' }, 422);
+    if (result.kind === 'refused') return c.json({ error: 'cannot_combine', documentId: result.documentId, reason: result.reason }, 422);
+
+    const id = newDocumentId();
+    inbox.put(id, 'original', result.pdf);
+    let created: DocumentRow | null;
+    try {
+      created = repo.insertCombined(
+        id,
+        {
+          source: parts[0]!.source,
+          originalName: null,
+          mime: 'application/pdf',
+          size: result.pdf.byteLength,
+          sha256: createHash('sha256').update(result.pdf).digest('hex'),
+          sourceContext: `combined from ${parts.length} documents`,
+        },
+        // With the seqs as read: a part that changed during the build (even
+        // one that left review and came back) makes the whole combine a conflict.
+        parts.map((p) => ({ id: p.id, seq: p.seq })),
+      );
+    } catch (err) {
+      inbox.deleteAll(id);
+      throw err;
+    }
+    if (!created) {
+      inbox.deleteAll(id);
+      return c.json({ error: 'conflict' }, 409);
+    }
+    logger.info({ documentId: id, parts: parts.length }, 'documents combined');
+    const view = toView(created);
+    void worker.wake();
+    return c.json(view, 201);
+  });
 
   r.get('/', (c) => {
     const since = Number(c.req.query('since') ?? '0');
@@ -263,6 +325,7 @@ export function documentRoutes(deps: { store: SessionStore; pipeline: Pipeline }
     const to: DocumentState = !doc.analysis ? 'received' : unprepared ? 'preparing' : 'needs_review';
     const moved = repo.transition(doc.id, 'discarded', to, {
       discardedAt: null,
+      combinedInto: null,
       // decideStage keeps a recorded reason, so a restored document is always reviewed.
       reviewReason: doc.analysis ? 'restored after discard' : null,
       error: null,

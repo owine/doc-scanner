@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as openpgp from 'openpgp';
+import { PDFDocument } from '@cantoo/pdf-lib';
 import { createApp } from '../../src/http/server.js';
 import { createTestDb } from '../helpers/test-db.js';
 import type { ProtonAuth } from '../../src/auth/srp.js';
@@ -13,6 +14,7 @@ import { MailboxSecret } from '../../src/auth/secrets/mailbox-password.js';
 import type { DecryptedUserKey } from '../../src/auth/keys.js';
 import { createPipeline, type Pipeline } from '../../src/documents/pipeline.js';
 import { ANALYSIS, TREE, okOutcome, fakePrepare } from '../documents/harness.js';
+import type { DocumentPatch } from '../../src/documents/types.js';
 import { logger } from '../../src/logger.js';
 
 const KEY = Buffer.alloc(32, 1).toString('base64');
@@ -88,6 +90,7 @@ describe('document routes', () => {
       ['POST', '/api/documents/some-id/discard'],
       ['POST', '/api/documents/some-id/restore'],
       ['POST', '/api/documents/some-id/retry'],
+      ['POST', '/api/documents/combine'],
       ['GET', '/api/folders'],
       ['POST', '/api/folders/refresh'],
       ['GET', '/api/settings'],
@@ -241,6 +244,28 @@ function approve(app: App, cookie: string, id: string, body?: string) {
     headers: { cookie, 'content-type': 'application/json' },
     ...(body === undefined ? {} : { body }),
   });
+}
+
+async function pdfPages(sizes: number[], opts: { encrypt?: boolean } = {}): Promise<Uint8Array> {
+  const d = await PDFDocument.create();
+  for (const s of sizes) d.addPage([s, s]);
+  if (opts.encrypt) d.encrypt({ ownerPassword: 'o', userPassword: '' });
+  return d.save();
+}
+
+/** A PDF in review with its original in the inbox (no prepared blob unless a test adds one). */
+async function reviewPdf(pipeline: Pipeline, sha256: string, sizes: number[] = [100], over: DocumentPatch = {}, bytes?: Uint8Array) {
+  const body = bytes ?? (await pdfPages(sizes));
+  const doc = pipeline.repo.insert({ source: 'scanner', originalName: `${sha256}.pdf`, mime: 'application/pdf', size: body.length, sha256, sourceContext: null });
+  pipeline.inbox.put(doc.id, 'original', body);
+  pipeline.repo.transition(doc.id, 'received', 'needs_review', { analysis: ANALYSIS, preparedMime: 'application/pdf', ...over });
+  return doc;
+}
+
+const widthsOf = async (bytes: Uint8Array) => (await PDFDocument.load(bytes)).getPages().map((p) => Math.round(p.getWidth()));
+
+function combineReq(app: App, cookie: string, ids: unknown) {
+  return app.request('/api/documents/combine', { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ ids }) });
 }
 
 describe('approve', () => {
@@ -742,5 +767,105 @@ describe('thumbnail', () => {
       expect([id, res.status]).toEqual([id, 404]);
       expect(await res.json()).toEqual({ error: 'not_found' });
     }
+  });
+});
+
+describe('POST /api/documents/combine', () => {
+  it('combines the parts in the order given and discards them into the new document', async () => {
+    const { app, cookie, pipeline } = await setup();
+    const a = await reviewPdf(pipeline, 'ca', [100]);
+    const b = await reviewPdf(pipeline, 'cb', [200, 210]);
+    const res = await combineReq(app, cookie, [b.id, a.id]);
+    expect(res.status).toBe(201);
+    const view = (await res.json()) as { id: string };
+    expect(view).toMatchObject({ state: 'received', source: 'scanner', originalName: null, mime: 'application/pdf' });
+    expect(await widthsOf(pipeline.inbox.get(view.id, 'original'))).toEqual([200, 210, 100]);
+    expect(pipeline.repo.get(view.id)?.sourceContext).toBe('combined from 2 documents');
+    for (const p of [a, b]) expect(pipeline.repo.get(p.id)).toMatchObject({ state: 'discarded', combinedInto: view.id });
+    await pipeline.worker.wake();
+  });
+
+  it('uses a part\'s prepared PDF when it has one', async () => {
+    const { app, cookie, pipeline } = await setup();
+    const a = await reviewPdf(pipeline, 'pa', [100]);
+    pipeline.inbox.put(a.id, 'prepared', await pdfPages([300]));
+    const b = await reviewPdf(pipeline, 'pb', [150]);
+    const res = await combineReq(app, cookie, [a.id, b.id]);
+    const view = (await res.json()) as { id: string };
+    expect(await widthsOf(pipeline.inbox.get(view.id, 'original'))).toEqual([300, 150]);
+    await pipeline.worker.wake();
+  });
+
+  it('rejects bad input', async () => {
+    const { app, cookie, pipeline } = await setup();
+    const a = await reviewPdf(pipeline, 'ia');
+    for (const ids of [[a.id], [a.id, a.id], Array.from({ length: 11 }, (_, i) => `x${i}`), 'nope']) {
+      const res = await combineReq(app, cookie, ids);
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ error: 'invalid_input' });
+    }
+  });
+
+  it('404s an unknown part and 409s one not in review', async () => {
+    const { app, cookie, pipeline } = await setup();
+    const a = await reviewPdf(pipeline, 'na');
+    expect((await combineReq(app, cookie, [a.id, 'nope'])).status).toBe(404);
+    const r = pipeline.repo.insert({ source: 'picker', originalName: null, mime: 'application/pdf', size: 1, sha256: 'nr', sourceContext: null });
+    const res = await combineReq(app, cookie, [a.id, r.id]);
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: 'not_in_review' });
+  });
+
+  it('refuses a part that may already be in Drive', async () => {
+    const { app, cookie, pipeline } = await setup();
+    const a = await reviewPdf(pipeline, 'da');
+    const b = await reviewPdf(pipeline, 'db', [100], { filingTarget: { folderLinkId: 'BILLS', name: 'x.pdf' } });
+    const res = await combineReq(app, cookie, [a.id, b.id]);
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: 'possibly_in_drive' });
+  });
+
+  it('names a part that cannot be combined', async () => {
+    const { app, cookie, pipeline } = await setup();
+    const a = await reviewPdf(pipeline, 'ea');
+    const b = await reviewPdf(pipeline, 'eb', [], {}, await pdfPages([100], { encrypt: true }));
+    const res = await combineReq(app, cookie, [a.id, b.id]);
+    expect(res.status).toBe(422);
+    expect(await res.json()).toEqual({ error: 'cannot_combine', documentId: b.id, reason: 'encrypted' });
+    expect(pipeline.repo.get(a.id)?.state).toBe('needs_review');
+  });
+
+  it('refuses parts too large together before reading them', async () => {
+    const { app, cookie, pipeline } = await setup();
+    const a = await reviewPdf(pipeline, 'la');
+    const big = pipeline.repo.insert({ source: 'picker', originalName: null, mime: 'application/pdf', size: 50 * 1024 * 1024, sha256: 'lb', sourceContext: null });
+    pipeline.repo.transition(big.id, 'received', 'needs_review', { analysis: ANALYSIS });
+    const get = vi.spyOn(pipeline.inbox, 'get');
+    const res = await combineReq(app, cookie, [a.id, big.id]);
+    expect(res.status).toBe(422);
+    expect(await res.json()).toEqual({ error: 'cannot_combine', reason: 'too_large' });
+    expect(get).not.toHaveBeenCalled();
+  });
+
+  it('leaves no blob behind when a part moved on meanwhile', async () => {
+    const { app, cookie, pipeline } = await setup();
+    const a = await reviewPdf(pipeline, 'ra');
+    const b = await reviewPdf(pipeline, 'rb');
+    vi.spyOn(pipeline.repo, 'insertCombined').mockReturnValue(null);
+    const res = await combineReq(app, cookie, [a.id, b.id]);
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: 'conflict' });
+    expect(pipeline.inbox.listIds().sort()).toEqual([a.id, b.id].sort());
+  });
+
+  it('restoring a part puts it back in review and forgets what it was combined into', async () => {
+    const { app, cookie, pipeline } = await setup();
+    const a = await reviewPdf(pipeline, 'sa');
+    const b = await reviewPdf(pipeline, 'sb');
+    await combineReq(app, cookie, [a.id, b.id]);
+    const res = await app.request(`/api/documents/${a.id}/restore`, { method: 'POST', headers: { cookie } });
+    expect(res.status).toBe(200);
+    expect(pipeline.repo.get(a.id)).toMatchObject({ state: 'needs_review', combinedInto: null });
+    await pipeline.worker.wake();
   });
 });
