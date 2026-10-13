@@ -1,7 +1,13 @@
 import { useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { api, ApiError } from '../api.js';
 
-export function LoginScreen({ onLoggedIn }: { onLoggedIn: (email: string) => void }) {
+export interface LoginScreenProps {
+  onLoggedIn: (email: string) => void;
+  /** Shown over a signed-in app (sign in to Proton): back to the inbox without signing in. */
+  onCancel?: () => void;
+}
+
+export function LoginScreen({ onLoggedIn, onCancel }: LoginScreenProps) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [totp, setTotp] = useState('');
@@ -52,6 +58,11 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: (email: string) => voi
         )}
         {error && <p class="error-text">{error}</p>}
         <button class="btn btn-block" type="submit" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
+        {onCancel && (
+          <button class="btn btn-secondary btn-block" type="button" onClick={onCancel} style={{ marginTop: 8 }}>
+            Cancel
+          </button>
+        )}
       </form>
     </main>
   );

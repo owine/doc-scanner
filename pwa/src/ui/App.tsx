@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useState } from 'preact/hooks';
-import { api, ApiError } from '../api.js';
+import { api, ApiError, type StatusResponse } from '../api.js';
 import { documentsApi } from '../documents/api.js';
 import { DocumentSync } from '../documents/sync.js';
 import { LoginScreen } from './LoginScreen.js';
@@ -16,16 +16,20 @@ import { captureRequestFailure } from '../observability/sentry.js';
 type Route =
   | { kind: 'inbox' }
   | { kind: 'settings' }
-  | { kind: 'scanner'; resumeScanId?: string };
+  | { kind: 'scanner'; resumeScanId?: string }
+  /** LoginScreen over the signed-in app, with Cancel back to the inbox (passkey-unlock spec §3). */
+  | { kind: 'proton-login' };
 
 export function App() {
-  const [email, setEmail] = useState<string | null>(null);
+  const [status, setStatus] = useState<StatusResponse | null>(null);
   const [loaded, setLoaded] = useState(false);
+  // A Proton login in this tab: the passkey nudge follows only that.
+  const [justSignedIn, setJustSignedIn] = useState(false);
   const [route, setRoute] = useState<Route>({ kind: 'inbox' });
   const [store] = useState(() => new ScansStore());
   const [resume, setResume] = useState<Scan | null>(null);
   const [sync] = useState(
-    () => new DocumentSync({ list: documentsApi.list, onUnauthorized: () => { setEmail(null); setRoute({ kind: 'inbox' }); } }),
+    () => new DocumentSync({ list: documentsApi.list, onUnauthorized: () => { setStatus(null); setRoute({ kind: 'inbox' }); } }),
   );
   const [uploads] = useState(
     () =>
@@ -44,7 +48,7 @@ export function App() {
           }
         },
         onUnauthorized: () => {
-          setEmail(null);
+          setStatus(null);
           setRoute({ kind: 'inbox' });
         },
         // Status and error code only (the code is the error's message); never the file's name.
@@ -58,8 +62,12 @@ export function App() {
       }),
   );
 
+  // Signed in with a Proton session stored or live. With none, the login
+  // screen shows and nothing polls or uploads, as when signed out.
+  const email = status && status.proton !== 'none' ? status.email : null;
+
   useEffect(() => {
-    api.status().then((s) => setEmail(s.email))
+    api.status().then(setStatus)
       .catch((e) => { if (!(e instanceof ApiError && e.status === 401)) console.error(e); })
       .finally(() => setLoaded(true));
     // Opened once at start and shared; a failed open is tried again by the next caller.
@@ -94,12 +102,35 @@ export function App() {
     void import('../pdf/build.js').catch(() => {});
   }, [email]);
 
+  /** Reads the status again: a 401 signs out; any other failure keeps what is shown. */
+  async function refreshStatus(): Promise<void> {
+    try {
+      setStatus(await api.status());
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 401) setStatus(null);
+      else console.error('could not refresh the sign-in status', (e as Error)?.name);
+    }
+  }
+
   function signedOut() {
-    setEmail(null);
+    setStatus(null);
     setRoute({ kind: 'inbox' });
   }
 
+  function loggedIn(signedInEmail: string) {
+    // Live at once; the refresh brings the passkey count and the mode.
+    setStatus((s) => ({ email: signedInEmail, proton: 'live', passkeys: s?.passkeys ?? 0, unlockAvailable: s?.unlockAvailable ?? false }));
+    setRoute({ kind: 'inbox' });
+    setJustSignedIn(true);
+    void refreshStatus();
+  }
+
   async function signInAgain() {
+    // Header mode: sign in to Proton over the app. A logout would remove the passkeys too.
+    if (status?.unlockAvailable) {
+      setRoute({ kind: 'proton-login' });
+      return;
+    }
     // The session's Drive access is gone; a fresh login restores it and
     // releases the documents waiting for it.
     //
@@ -114,7 +145,8 @@ export function App() {
   }
 
   if (!loaded) return <main class="auth-screen">Loading…</main>;
-  if (!email) return <LoginScreen onLoggedIn={setEmail} />;
+  if (!status || status.proton === 'none') return <LoginScreen onLoggedIn={loggedIn} />;
+  if (route.kind === 'proton-login') return <LoginScreen onLoggedIn={loggedIn} onCancel={() => setRoute({ kind: 'inbox' })} />;
 
   if (resume && route.kind === 'inbox') {
     return (
@@ -135,9 +167,16 @@ export function App() {
         scans={store}
         onSettings={() => setRoute({ kind: 'settings' })}
         onSignInAgain={() => void signInAgain()}
+        proton={status.proton}
+        passkeys={status.passkeys}
+        onUnlocked={setStatus}
+        onStatusChanged={() => void refreshStatus()}
+        onSignInToProton={() => setRoute({ kind: 'proton-login' })}
+        showPasskeyNudge={justSignedIn && status.unlockAvailable && status.passkeys === 0}
+        onAddPasskey={() => setRoute({ kind: 'settings' })}
       />;
     case 'settings':
-      return <SettingsScreen email={email} onBack={() => setRoute({ kind: 'inbox' })} onLoggedOut={signedOut} />;
+      return <SettingsScreen email={status.email} onBack={() => setRoute({ kind: 'inbox' })} onLoggedOut={signedOut} />;
     case 'scanner':
       return <ScannerScreen
         store={store}

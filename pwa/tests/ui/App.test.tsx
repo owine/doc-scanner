@@ -3,6 +3,8 @@ import { cleanup, render, screen, fireEvent, waitFor } from '@testing-library/pr
 import { UploadStore } from '../../src/uploads/upload-store.js';
 import { ScansStore } from '../../src/scanner/scans-store.js';
 import { FakeXhr } from '../uploads/fake-xhr.js';
+import { toBase64url } from '../../src/auth/passkeys.js';
+import { fakeCredential, installCredentials, removeCredentials } from '../auth/fake-webauthn.js';
 
 const { App } = await import('../../src/ui/App.js');
 const { makeDoc } = await import('../documents/fixtures.js');
@@ -124,6 +126,100 @@ describe('App', () => {
         expect(fetch).toHaveBeenCalledWith('/api/auth/logout', expect.objectContaining({ method: 'POST' }));
       });
     }
+
+    const status = (proton: 'live' | 'locked' | 'none', passkeys: number) => json({ email: 'user@example.test', proton, passkeys, unlockAvailable: true });
+    const inbox = {
+      'GET /api/documents': json({ documents: [], cursor: 0 }),
+      'GET /api/folders': json({ error: 'folders_not_loaded' }, 503),
+      'GET /api/settings': json(SETTINGS),
+      'GET /api/passkeys': json({ passkeys: [], notice: null }),
+    };
+    const calledLogout = (fetch: ReturnType<typeof server>) => fetch.mock.calls.some(([url]) => url === '/api/auth/logout');
+
+    it('shows the login screen when no Proton session is stored', async () => {
+      server({ 'GET /api/auth/status': status('none', 0), ...inbox });
+      render(<App />);
+      expect(await screen.findByRole('button', { name: /^sign in$/i })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull();
+      expect(screen.queryByRole('heading', { name: 'Inbox' })).toBeNull();
+    });
+
+    it('opens the inbox while locked and unlocks it with a tap', async () => {
+      const id = toBase64url(new Uint8Array(16).fill(1));
+      const prf = new Uint8Array(32).fill(7);
+      const fetch = server({
+        'GET /api/auth/status': status('locked', 1),
+        ...inbox,
+        'POST /api/auth/unlock/begin': json({ credentials: [{ credentialId: id, salt: toBase64url(new Uint8Array(32).fill(3)) }] }),
+        'POST /api/auth/unlock': status('live', 1),
+      });
+      installCredentials().get.mockResolvedValue(fakeCredential(id, prf));
+      try {
+        render(<App />);
+        expect(await screen.findByRole('heading', { name: 'Inbox' })).toBeInTheDocument();
+        fireEvent.click(await screen.findByRole('button', { name: 'Unlock' }));
+        await waitFor(() => expect(screen.queryByText(/filing is paused/i)).toBeNull());
+        const sent = fetch.mock.calls.find(([url]) => url === '/api/auth/unlock')!;
+        expect(JSON.parse(String(sent[1]!.body))).toEqual({ credentialId: id, prf: toBase64url(prf) });
+      } finally {
+        removeCredentials();
+      }
+    });
+
+    it('reads the status again after an unlock refusal that changed it', async () => {
+      const id = toBase64url(new Uint8Array(16).fill(1));
+      const routes: Record<string, () => Response> = {
+        'GET /api/auth/status': status('locked', 1),
+        ...inbox,
+        'POST /api/auth/unlock/begin': json({ credentials: [{ credentialId: id, salt: toBase64url(new Uint8Array(32).fill(3)) }] }),
+        'POST /api/auth/unlock': json({ error: 'passkeys_stale' }, 409),
+      };
+      const fetch = server(routes);
+      installCredentials().get.mockResolvedValue(fakeCredential(id, new Uint8Array(32).fill(7)));
+      const statusReads = () => fetch.mock.calls.filter(([url]) => url === '/api/auth/status').length;
+      try {
+        render(<App />);
+        const unlockButton = await screen.findByRole('button', { name: 'Unlock' });
+        // The server removed the passkeys while refusing.
+        routes['GET /api/auth/status'] = status('locked', 0);
+        fireEvent.click(unlockButton);
+        expect(
+          await screen.findByText('Your Proton password changed. Sign in again, then add your passkey again in Settings.'),
+        ).toBeInTheDocument();
+        await waitFor(() => expect(statusReads()).toBe(2));
+      } finally {
+        removeCredentials();
+      }
+    });
+
+    it('signs in to Proton over the inbox from the locked banner, and Cancel goes back', async () => {
+      const fetch = server({ 'GET /api/auth/status': status('locked', 0), ...inbox });
+      render(<App />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Sign in to Proton' }));
+      expect(await screen.findByRole('button', { name: /^sign in$/i })).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+      expect(await screen.findByRole('heading', { name: 'Inbox' })).toBeInTheDocument();
+      expect(calledLogout(fetch)).toBe(false);
+    });
+
+    it('in header mode, "Sign in again" never logs out, and suggests a passkey after the login', async () => {
+      localStorage.clear();
+      const fetch = server({
+        'GET /api/auth/status': status('live', 0),
+        ...inbox,
+        'GET /api/documents': json({ documents: [makeDoc({ state: 'awaiting_login' })], cursor: 1 }),
+        'POST /api/auth/login': json({ ok: true, email: 'user@example.test' }),
+      });
+      render(<App />);
+      fireEvent.click(await screen.findByRole('button', { name: /sign in again/i }));
+      fireEvent.input(await screen.findByLabelText('Email'), { target: { value: 'user@example.test' } });
+      fireEvent.input(screen.getByLabelText('Password'), { target: { value: 'correct horse' } });
+      fireEvent.click(screen.getByRole('button', { name: /^sign in$/i }));
+      expect(await screen.findByText('Add a passkey so a server restart doesn’t need your Proton password.')).toBeInTheDocument();
+      expect(calledLogout(fetch)).toBe(false);
+      fireEvent.click(screen.getByRole('button', { name: 'Add passkey' }));
+      expect(await screen.findByRole('heading', { name: 'Settings' })).toBeInTheDocument();
+    });
   });
 
   describe('uploads', () => {

@@ -18,6 +18,16 @@ describe('LoginScreen', () => {
     expect(container.querySelector('input[type="password"]')).not.toBeNull();
   });
 
+  it('offers Cancel only over a signed-in app', () => {
+    const { unmount } = render(<LoginScreen onLoggedIn={() => {}} />);
+    expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull();
+    unmount();
+    const onCancel = vi.fn();
+    render(<LoginScreen onLoggedIn={() => {}} onCancel={onCancel} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(onCancel).toHaveBeenCalled();
+  });
+
   it('moves focus to the 2FA code field when it appears', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{"error":"totp_required"}', { status: 422 })));
     const { container } = render(<LoginScreen onLoggedIn={() => {}} />);
