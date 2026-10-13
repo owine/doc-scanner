@@ -158,7 +158,7 @@ the same conventions, saying what this document is.
 
 - Overwrite `analysis.folder` with the anchor's folder, refreshed from the cache.
 - If that folder (for a `new` folder, its parent) is no longer in the cache, or is now under an excluded path, set it to `null`. The card asks for a folder, and the reason is `'the related document's folder is no longer available'`.
-- Otherwise record `reviewReason: 'filed with another document'`. With no anchor, record `'re-analyzed'`.
+- Otherwise record `reviewReason: 'filed with another document'`. With no anchor, record `'re-analysed'`.
 - Reasons are fixed text: `decideStage` logs the recorded reason verbatim (`decide.ts:45`), and reasons never carry names. The card shows the anchor's name from `anchorName`.
 - `decideStage` already keeps a recorded reason, so the document always goes to review.
 - An unusable outcome keeps today's behaviour: no analysis, and the analyzer's reason.

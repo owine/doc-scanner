@@ -36,7 +36,7 @@ export interface AnalyzeInput {
    * A document the user says this one belongs with ("File with"): the prompt
    * asks for a filename that pairs with its name. The caller pins the folder.
    */
-  anchor?: { name: string; folderPath: string };
+  anchor?: { name: string; folderPath: string | null };
 }
 
 export type FolderChoice =

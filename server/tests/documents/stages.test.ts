@@ -301,13 +301,14 @@ describe('analyzeStage re-analysis', () => {
     h.ctx.folderCache.save(TREE.filter((f) => f.linkId !== 'BILLS'), new Date());
     const gone = reanalysing(anchor());
     await analyzeStage(gone, h.ctx);
-    // The snapshot's path still helps the name.
-    expect(h.analyze.mock.calls[0][0].anchor.folderPath).toBe('/Bills');
+    // No path: the snapshot's could be a hidden one.
+    expect(h.analyze.mock.calls[0][0].anchor.folderPath).toBeNull();
     expect(h.repo.get(gone.id)).toMatchObject({ reviewReason: "the related document's folder is no longer available", analysis: { folder: null } });
 
     const excluded = reanalysing(anchor({ kind: 'existing', linkId: 'ARCHIVE', path: '/Archive' }));
     await analyzeStage(excluded, h.ctx);
     expect(h.repo.get(excluded.id)?.analysis?.folder).toBeNull();
+    expect(h.repo.get(excluded.id)?.reviewReason).toBe("the related document's folder is no longer available");
   });
 
   it('keeps an anchor\'s proposed new folder', async () => {
@@ -324,7 +325,7 @@ describe('analyzeStage re-analysis', () => {
     const doc = reanalysing(null);
     await analyzeStage(doc, h.ctx);
     expect(h.analyze.mock.calls[0][0]).not.toHaveProperty('anchor');
-    expect(h.repo.get(doc.id)).toMatchObject({ reviewReason: 're-analyzed', analysis: { folder: BILLS } });
+    expect(h.repo.get(doc.id)).toMatchObject({ reviewReason: 're-analysed', analysis: { folder: BILLS } });
   });
 
   it('keeps the analyzer\'s reason for an unusable answer', async () => {

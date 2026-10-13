@@ -50,8 +50,8 @@ export async function analyzeStage(doc: DocumentRow, ctx: StageContext): Promise
       originalName: doc.originalName,
       source: doc.source,
       sourceContext: doc.sourceContext ?? undefined,
-      // The snapshot's path when the folder is gone: the pairing name still helps.
-      ...(anchor ? { anchor: { name: anchor.name, folderPath: folderPath(anchorFolder ?? anchor.folder) } } : {}),
+      // No path when the folder is gone or never-file-here: the snapshot's could be one the model must not see.
+      ...(anchor ? { anchor: { name: anchor.name, folderPath: anchorFolder ? folderPath(anchorFolder) : null } } : {}),
     },
     folders,
   );
@@ -102,5 +102,5 @@ export async function analyzeStage(doc: DocumentRow, ctx: StageContext): Promise
  */
 function reanalysisReason(doc: DocumentRow, anchorFolder: FolderChoice | null): string | null {
   if (doc.anchor) return anchorFolder ? 'filed with another document' : "the related document's folder is no longer available";
-  return doc.reanalyzed ? 're-analyzed' : null;
+  return doc.reanalyzed ? 're-analysed' : null;
 }

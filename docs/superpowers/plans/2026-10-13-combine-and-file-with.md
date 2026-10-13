@@ -14,7 +14,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-13-combine-and-file-with-design.md`.
 
-**Deviation from the spec:** migration `008` also adds `reanalyzed INTEGER` (0/1). A plain re-analyze has no anchor, and `analyzeStage` needs a marker to record `'re-analyzed'`. Reusing `review_reason` would break the rule that a fresh analysis clears a stale reason (existing test "clears a review reason an earlier, unusable answer left"). Task 15 updates the spec to match.
+**Deviation from the spec:** migration `008` also adds `reanalyzed INTEGER` (0/1). A plain re-analyze has no anchor, and `analyzeStage` needs a marker to record `'re-analysed'`. Reusing `review_reason` would break the rule that a fresh analysis clears a stale reason (existing test "clears a review reason an earlier, unusable answer left"). Task 15 updates the spec to match.
 
 ---
 
@@ -1365,7 +1365,7 @@ describe('analyzeStage re-analysis', () => {
     const doc = reanalysing(null);
     await analyzeStage(doc, h.ctx);
     expect(h.analyze.mock.calls[0][0]).not.toHaveProperty('anchor');
-    expect(h.repo.get(doc.id)).toMatchObject({ reviewReason: 're-analyzed', analysis: { folder: BILLS } });
+    expect(h.repo.get(doc.id)).toMatchObject({ reviewReason: 're-analysed', analysis: { folder: BILLS } });
   });
 
   it('keeps the analyzer\'s reason for an unusable answer', async () => {
@@ -1470,7 +1470,7 @@ import { folderPath } from '../folders.js';
  */
 function reanalysisReason(doc: DocumentRow, anchorFolder: FolderChoice | null): string | null {
   if (doc.anchor) return anchorFolder ? 'filed with another document' : "the related document's folder is no longer available";
-  return doc.reanalyzed ? 're-analyzed' : null;
+  return doc.reanalyzed ? 're-analysed' : null;
 }
 ```
 
@@ -1530,7 +1530,7 @@ describe('POST /api/documents/:id/reanalyze', () => {
     expect(await res.json()).toMatchObject({ state: 'received', analysis: null, decision: null, anchorName: null });
     await pipeline.worker.wake();
     expect(analyze).toHaveBeenCalledTimes(1);
-    expect(pipeline.repo.get(doc.id)).toMatchObject({ state: 'needs_review', reanalyzed: true, reviewReason: 're-analyzed', userEdited: false });
+    expect(pipeline.repo.get(doc.id)).toMatchObject({ state: 'needs_review', reanalyzed: true, reviewReason: 're-analysed', userEdited: false });
   });
 
   it('files a document with a filed one: same folder, paired name asked for', async () => {
@@ -2381,12 +2381,12 @@ describe('ReviewCard more menu', () => {
     return { onCombine, onReanalyze };
   }
 
-  it('offers Combine with…, File with… and Re-analyze', async () => {
+  it('offers Combine with…, File with… and Re-analyse', async () => {
     const { onReanalyze } = renderWithMenu();
     fireEvent.click(screen.getByRole('button', { name: 'More' }));
     expect(screen.getByRole('button', { name: 'Combine with…' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'File with…' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Re-analyze' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Re-analyse' }));
     await waitFor(() => expect(onReanalyze).toHaveBeenCalledWith());
   });
 
@@ -2396,7 +2396,7 @@ describe('ReviewCard more menu', () => {
     fireEvent.click(screen.getByRole('button', { name: 'More' }));
     expect(screen.queryByRole('button', { name: 'Combine with…' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'File with…' })).toBeNull();
-    expect(screen.getByRole('button', { name: 'Re-analyze' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Re-analyse' })).toBeInTheDocument();
   });
 
   it('has no menu for a document that may already be in Drive', () => {
@@ -2469,7 +2469,7 @@ Update the existing type import to include `DocumentView`; it already does.
     try {
       await onReanalyze();
     } catch {
-      setError('Could not re-analyze. Try again.');
+      setError('Could not re-analyse. Try again.');
     } finally {
       setBusy(false);
     }
@@ -2520,7 +2520,7 @@ Update the existing type import to include `DocumentView`; it already does.
             </button>
           )}
           <button class="btn btn-secondary btn-small" disabled={busy} onClick={() => void reanalyze()}>
-            Re-analyze
+            Re-analyse
           </button>
         </div>
       )}
@@ -2681,7 +2681,7 @@ ALTER TABLE documents ADD COLUMN reanalyzed INTEGER NOT NULL DEFAULT 0 CHECK (re
 ```
 
 2. Add `reanalyzed: boolean` to the `DocumentRow`/`DocumentPatch` bullet.
-3. In §3 **Transition**, add `reanalyzed: true` to the patch. Add one sentence: "`analyzeStage` records `'re-analyzed'` from this flag; reusing `review_reason` would break the rule that a fresh analysis clears a stale reason."
+3. In §3 **Transition**, add `reanalyzed: true` to the patch. Add one sentence: "`analyzeStage` records `'re-analysed'` from this flag; reusing `review_reason` would break the rule that a fresh analysis clears a stale reason."
 4. In §4, change "listed with thumbnail and proposed name" to "listed with proposed name and folder". The chooser shows no thumbnails; the review cards above it already do.
 5. In §5's network-failure row, change "An error in the sheet with Retry" to "An error in the chooser; pressing the action again retries".
 

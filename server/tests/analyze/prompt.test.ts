@@ -40,6 +40,24 @@ describe('formatArrival', () => {
     );
   });
 
+  it('asks for a paired name without a folder when the related folder is unavailable', () => {
+    const text = formatArrival({ ...input, originalName: null, anchor: { name: 'Certified letter', folderPath: null } }, null);
+    expect(text).toBe(
+      [
+        '<arrival>',
+        'source: picker',
+        'type: application/pdf',
+        'size: 10 bytes',
+        '</arrival>',
+        '<related>',
+        'The user says this document belongs with one named "Certified letter".',
+        'Choose a filename that pairs with that name: the same conventions, saying what this document is.',
+        '</related>',
+        'File this document.',
+      ].join('\n'),
+    );
+  });
+
   it('asks for a name that pairs with the related document, after the arrival', () => {
     const text = formatArrival({ ...input, originalName: null, anchor: { name: 'Certified letter "A"', folderPath: '/Legal/Acme' } }, null);
     expect(text).toBe(

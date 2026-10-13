@@ -922,7 +922,7 @@ describe('POST /api/documents/:id/reanalyze', () => {
     expect(await res.json()).toMatchObject({ state: 'received', analysis: null, decision: null, anchorName: null });
     await pipeline.worker.wake();
     expect(analyze).toHaveBeenCalledTimes(1);
-    expect(pipeline.repo.get(doc.id)).toMatchObject({ state: 'needs_review', reanalyzed: true, reviewReason: 're-analyzed', userEdited: false });
+    expect(pipeline.repo.get(doc.id)).toMatchObject({ state: 'needs_review', reanalyzed: true, reviewReason: 're-analysed', userEdited: false });
   });
 
   it('files a document with a filed one: same folder, paired name asked for', async () => {
