@@ -68,7 +68,7 @@ describe('formatArrival', () => {
         'size: 10 bytes',
         '</arrival>',
         '<related>',
-        `The user says this document belongs with one filed as "Certified letter 'A'" in /Legal/Acme.`,
+        `The user says this document belongs with one named "Certified letter 'A'", filed or to be filed in /Legal/Acme.`,
         'It will be filed in that same folder. Choose a filename that pairs with that name: the same conventions, saying what this document is.',
         '</related>',
         'File this document.',
