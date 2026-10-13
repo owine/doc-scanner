@@ -262,16 +262,23 @@ export class DocumentRepo {
   /**
    * Combine (spec §2): inserts the combined document under a pre-made id (its
    * blob is already in the inbox) and discards every part into it, all or
-   * nothing. Null, with nothing changed, when a part has left review since
-   * the caller read it. Every step is synchronous, so nothing interleaves.
+   * nothing. Null, with nothing changed, when a part has changed since the
+   * caller read it (seq), which covers leaving review and coming back. Every
+   * step is synchronous, so nothing interleaves. Not reentrant: BEGIN throws
+   * if a transaction is already open, and the null path rolls back, so it must
+   * never join a caller's transaction.
    */
-  insertCombined(id: string, d: NewDocument, partIds: readonly string[]): DocumentRow | null {
+  insertCombined(id: string, d: NewDocument, parts: readonly { id: string; seq: number }[]): DocumentRow | null {
+    if (parts.length < 2 || new Set(parts.map((p) => p.id)).size !== parts.length) {
+      throw new Error('insertCombined needs two or more distinct parts');
+    }
     this.db.exec('BEGIN');
     try {
       this.insertRow(id, d);
       const discardedAt = this.now();
-      for (const partId of partIds) {
-        if (!this.transition(partId, 'needs_review', 'discarded', { combinedInto: id, discardedAt })) {
+      for (const part of parts) {
+        const row = this.get(part.id);
+        if (!row || row.seq !== part.seq || !this.transition(part.id, 'needs_review', 'discarded', { combinedInto: id, discardedAt })) {
           this.db.exec('ROLLBACK');
           return null;
         }

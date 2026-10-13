@@ -1,6 +1,6 @@
 import type { DocumentRow } from './types.js';
 
-/** An upload was started: the document may already be in Drive (it can't be filed, combined or re-analysed safely). */
+/** An upload was started: the document may already be in Drive, so it can't be combined or re-analysed safely, and discarding it may leave a copy there. */
 export function possiblyInDrive(d: DocumentRow): boolean {
   return d.state !== 'filed' && (d.filingTarget !== null || d.uploadUnverified);
 }

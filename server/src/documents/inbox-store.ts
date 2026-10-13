@@ -72,7 +72,7 @@ export class InboxStore {
   }
 
   /**
-   * The blob's size on disk: the sealed bytes, a fixed few dozen over the
+   * The blob's size on disk: the sealed bytes, under 64 bytes over the
    * plaintext. Close enough for a size check before loading blobs.
    */
   size(id: string, kind: BlobKind): number {
