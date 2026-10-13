@@ -274,7 +274,7 @@ export class DocumentRepo {
     }
     this.db.exec('BEGIN');
     try {
-      this.insertRow(id, d);
+      this.insertRow(id, d, { reanalyzed: true });
       const discardedAt = this.now();
       for (const part of parts) {
         const row = this.get(part.id);
@@ -291,13 +291,13 @@ export class DocumentRepo {
     return this.get(id);
   }
 
-  private insertRow(id: string, d: NewDocument): void {
+  private insertRow(id: string, d: NewDocument, opts: { reanalyzed?: boolean } = {}): void {
     const t = iso(this.now());
     this.db
       .prepare(
         `INSERT INTO documents (id, seq, created_at, updated_at, source, original_name, mime, size, sha256,
-                                source_context, state, next_attempt_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'received', ?)`,
+                                source_context, state, next_attempt_at, reanalyzed)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'received', ?, ?)`,
       )
       .run(
         id,
@@ -311,6 +311,7 @@ export class DocumentRepo {
         d.sha256,
         this.seal(id, 'source_context', d.sourceContext),
         t,
+        opts.reanalyzed ? 1 : 0,
       );
   }
 

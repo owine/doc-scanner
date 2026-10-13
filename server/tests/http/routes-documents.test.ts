@@ -836,6 +836,18 @@ describe('POST /api/documents/combine', () => {
     expect(pipeline.repo.get(a.id)?.state).toBe('needs_review');
   });
 
+  it('names a part whose blob is gone', async () => {
+    const { app, cookie, pipeline } = await setup();
+    const a = await reviewPdf(pipeline, 'ma');
+    const b = await reviewPdf(pipeline, 'mb');
+    pipeline.inbox.deleteAll(b.id);
+    const res = await combineReq(app, cookie, [a.id, b.id]);
+    expect(res.status).toBe(422);
+    expect(await res.json()).toEqual({ error: 'cannot_combine', documentId: b.id, reason: 'unreadable' });
+    expect(pipeline.repo.get(a.id)?.state).toBe('needs_review');
+    expect(pipeline.repo.get(b.id)?.state).toBe('needs_review');
+  });
+
   it('refuses parts too large together before reading them', async () => {
     const { app, cookie, pipeline } = await setup();
     const a = await reviewPdf(pipeline, 'la');
@@ -928,7 +940,7 @@ describe('POST /api/documents/:id/reanalyze', () => {
     expect(await res.json()).toMatchObject({ state: 'received', analysis: null, decision: null, anchorName: null, hasThumbnail: false, prepareNote: null, autoFiled: false });
     await pipeline.worker.wake();
     expect(analyze).toHaveBeenCalledTimes(1);
-    expect(pipeline.repo.get(doc.id)).toMatchObject({ state: 'needs_review', reanalyzed: true, reviewReason: 're-analysed', userEdited: false });
+    expect(pipeline.repo.get(doc.id)).toMatchObject({ state: 'needs_review', reanalyzed: true, reviewReason: 'requested from review', userEdited: false });
   });
 
   it('files a document with a filed one: same folder, paired name asked for', async () => {

@@ -96,11 +96,11 @@ export async function analyzeStage(doc: DocumentRow, ctx: StageContext): Promise
 }
 
 /**
- * Why a re-analysed document goes to review whatever its confidence (the
+ * Why a re-analysed or combined document goes to review whatever its confidence (the
  * user asked for it from review), or null for an ordinary one. Fixed text:
  * decideStage logs the reason as it is, and reasons never carry names.
  */
 function reanalysisReason(doc: DocumentRow, anchorFolder: FolderChoice | null): string | null {
-  if (doc.anchor) return anchorFolder ? 'filed with another document' : "the related document's folder is no longer available";
-  return doc.reanalyzed ? 're-analysed' : null;
+  if (doc.anchor) return anchorFolder ? 'filed with another document' : "the related document's folder can't be used";
+  return doc.reanalyzed ? 'requested from review' : null;
 }

@@ -4,6 +4,7 @@ import { analyzeStage } from '../../src/documents/stages/analyze.js';
 import { prepareStage } from '../../src/documents/stages/prepare.js';
 import { decideStage, reviewReason } from '../../src/documents/stages/decide.js';
 import type { Anchor } from '../../src/documents/types.js';
+import { newDocumentId } from '../../src/documents/repo.js';
 import { logger } from '../../src/logger.js';
 
 let h: ReturnType<typeof makeHarness>;
@@ -303,12 +304,12 @@ describe('analyzeStage re-analysis', () => {
     await analyzeStage(gone, h.ctx);
     // No path: the snapshot's could be a hidden one.
     expect(h.analyze.mock.calls[0][0].anchor.folderPath).toBeNull();
-    expect(h.repo.get(gone.id)).toMatchObject({ reviewReason: "the related document's folder is no longer available", analysis: { folder: null } });
+    expect(h.repo.get(gone.id)).toMatchObject({ reviewReason: "the related document's folder can't be used", analysis: { folder: null } });
 
     const excluded = reanalysing(anchor({ kind: 'existing', linkId: 'ARCHIVE', path: '/Archive' }));
     await analyzeStage(excluded, h.ctx);
     expect(h.repo.get(excluded.id)?.analysis?.folder).toBeNull();
-    expect(h.repo.get(excluded.id)?.reviewReason).toBe("the related document's folder is no longer available");
+    expect(h.repo.get(excluded.id)?.reviewReason).toBe("the related document's folder can't be used");
   });
 
   it('keeps an anchor\'s proposed new folder', async () => {
@@ -325,7 +326,23 @@ describe('analyzeStage re-analysis', () => {
     const doc = reanalysing(null);
     await analyzeStage(doc, h.ctx);
     expect(h.analyze.mock.calls[0][0]).not.toHaveProperty('anchor');
-    expect(h.repo.get(doc.id)).toMatchObject({ reviewReason: 're-analysed', analysis: { folder: BILLS } });
+    expect(h.repo.get(doc.id)).toMatchObject({ reviewReason: 'requested from review', analysis: { folder: BILLS } });
+  });
+
+  it('reviews a combined, confident row even with auto-filing on', async () => {
+    h = makeHarness({ settings: { autoFileEnabled: true } });
+    const parts = [h.add(), h.add()].map((d) => {
+      h.repo.transition(d.id, 'received', 'needs_review');
+      return h.repo.get(d.id)!;
+    });
+    const cid = newDocumentId();
+    h.ctx.inbox.put(cid, 'original', new TextEncoder().encode('Northwind Energy statement'));
+    const combined = h.repo.insertCombined(cid, { source: 'picker', originalName: null, mime: 'application/pdf', size: 1, sha256: 'comb', sourceContext: null }, parts.map((p) => ({ id: p.id, seq: p.seq })))!;
+    await analyzeStage(combined, h.ctx);
+    expect(h.repo.get(combined.id)).toMatchObject({ state: 'preparing', reviewReason: 'requested from review' });
+    h.repo.transition(combined.id, 'preparing', 'ready');
+    decideStage(h.repo.get(combined.id)!, h.ctx);
+    expect(h.repo.get(combined.id)).toMatchObject({ state: 'needs_review', reviewReason: 'requested from review', autoFiled: false });
   });
 
   it('keeps the analyzer\'s reason for an unusable answer', async () => {

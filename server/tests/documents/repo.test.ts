@@ -561,7 +561,7 @@ describe('insertCombined', () => {
     const b = inReview(r, 'b'.repeat(64));
     const id = newDocumentId();
     const made = r.insertCombined(id, doc({ sha256: 'c'.repeat(64), originalName: null, sourceContext: 'combined from 2 documents' }), [ref(a), ref(b)]);
-    expect(made).toMatchObject({ id, state: 'received', sourceContext: 'combined from 2 documents' });
+    expect(made).toMatchObject({ id, state: 'received', reanalyzed: true, sourceContext: 'combined from 2 documents' });
     for (const p of [a, b]) {
       expect(r.get(p.id)).toMatchObject({ state: 'discarded', combinedInto: id, discardedAt: '2026-10-10T12:00:00.000Z' });
     }
