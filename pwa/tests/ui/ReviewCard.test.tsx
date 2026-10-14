@@ -195,6 +195,8 @@ describe('ReviewCard', () => {
     const meter = container.querySelector('.meter')!;
     expect(meter).toHaveAttribute('aria-hidden', 'true');
     expect(meter).toHaveClass('meter--low');
+    expect((meter as HTMLElement).style.getPropertyValue('--value')).toBe('60%');
+    expect((meter as HTMLElement).style.getPropertyValue('--threshold')).toBe('80%');
     expect(meter.querySelector('.meter-tick')).not.toBeNull();
   });
 
@@ -203,6 +205,13 @@ describe('ReviewCard', () => {
     expect(screen.getByText(/60% confident/)).not.toHaveTextContent(/auto-file threshold/);
     expect(container.querySelector('.meter')).toHaveClass('meter--unknown');
     expect(container.querySelector('.meter-tick')).toBeNull();
+    expect((container.querySelector('.meter') as HTMLElement).style.getPropertyValue('--threshold')).toBe('');
+  });
+
+  it('clamps a confidence above 1 to 100%', () => {
+    const { container } = renderCard(makeDoc({ analysis: { ...makeDoc().analysis!, confidence: 1.4 } }));
+    expect(screen.getByText(/100% confident/)).toBeInTheDocument();
+    expect((container.querySelector('.meter') as HTMLElement).style.getPropertyValue('--value')).toBe('100%');
   });
 
   it('shows a confidence at or above the threshold as confident', () => {

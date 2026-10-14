@@ -24,7 +24,9 @@
 /* Review card */
 .review-card { margin-bottom: var(--sp-3); display: flex; flex-direction: column; gap: var(--sp-3); }
 .review-card .field { margin-bottom: 0; }
-.review-card p { margin: 0; }
+.review-card > p, .review-card .confidence p { margin: 0; }
+.review-card .field-head { min-height: 44px; }
+.review-card .doc-chooser { margin-top: 0; }
 .review-top { display: flex; gap: var(--sp-3); align-items: flex-start; }
 .review-thumb {
   flex: none; width: 88px; aspect-ratio: 3 / 4; object-fit: cover; object-position: top;
@@ -41,7 +43,7 @@
 .meter-fill { position: absolute; inset: 0 auto 0 0; width: var(--value); border-radius: 2px; background: var(--ink-3); }
 .meter--low .meter-fill { background: var(--warning); }
 .meter--ok .meter-fill { background: var(--accent); }
-.meter-tick { position: absolute; top: -3px; bottom: -3px; left: var(--threshold); width: 1px; background: var(--ink-3); }
+.meter-tick { position: absolute; top: -3px; bottom: -3px; left: var(--threshold); width: 1px; background: var(--ink-3); transform: translateX(-50%); }
 .review-card .rationale {
   padding-top: var(--sp-3); border-top: 1px solid var(--line);
   color: var(--ink-2); font-size: var(--fs-14); line-height: 1.5;

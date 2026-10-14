@@ -125,7 +125,7 @@ export function ReviewCard({ doc, folders, onApprove, onDiscard, review = [], fi
     </>
   );
 
-  const percent = suggested ? Math.round(suggested.confidence * 100) : 0;
+  const percent = suggested ? Math.min(100, Math.max(0, Math.round(suggested.confidence * 100) || 0)) : 0;
   const tone = threshold === null || !suggested ? 'unknown' : suggested.confidence >= threshold ? 'ok' : 'low';
   const meterStyle: Record<string, string> = {
     '--value': `${percent}%`,
