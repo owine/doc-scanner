@@ -46,4 +46,13 @@ describe('EditCornersScreen', () => {
     fireEvent.click(screen.getAllByRole('button', { name: /cancel/i })[0]!);
     expect(onCancel).toHaveBeenCalled();
   });
+
+  it('draws the corners as styled handles positioned inline', () => {
+    render(<EditCornersScreen canvas={fakeCanvas()} initialQuad={VALID_QUAD} onCancel={() => {}} onApply={() => {}} />);
+    for (const k of ['tl', 'tr', 'bl', 'br']) {
+      const handle = screen.getByLabelText(`Corner ${k}`) as HTMLElement;
+      expect(handle).toHaveClass('corner-handle');
+      expect(handle.style.left).toMatch(/px$/);
+    }
+  });
 });

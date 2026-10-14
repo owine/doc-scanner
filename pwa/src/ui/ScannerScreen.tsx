@@ -153,51 +153,31 @@ export function ScannerScreen({ store, resumeScanId, onBack, onDone }: ScannerSc
     'Capturing…';
 
   return (
-    <main style={{
-      display: 'flex', flexDirection: 'column', height: '100dvh', background: '#000',
-      paddingTop: 'env(safe-area-inset-top)',
-      paddingBottom: 'env(safe-area-inset-bottom)',
-    }}>
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, padding: 8, color: '#fff' }}>
-        <button class="btn btn-secondary" onClick={cancel} style={{ background: 'rgba(255,255,255,0.1)', borderColor: '#444', color: '#fff' }}>← Cancel</button>
-        <div style={{ fontWeight: 600 }}>Page {pageCount + 1}</div>
-        <button
-          class={autoCapture ? 'btn' : 'btn btn-secondary'}
-          onClick={toggleAuto}
-          aria-pressed={autoCapture}
-          style={autoCapture ? {} : { background: 'rgba(255,255,255,0.1)', borderColor: '#444', color: '#fff' }}
-        >Auto {autoCapture ? 'on' : 'off'}</button>
+    <main class="camera">
+      <header class="camera-bar">
+        <button class="btn btn-secondary" onClick={cancel}>← Cancel</button>
+        <div class="camera-title">Page {pageCount + 1}</div>
+        <button class={autoCapture ? 'btn btn-small' : 'btn btn-secondary btn-small'} onClick={toggleAuto} aria-pressed={autoCapture}>
+          Auto {autoCapture ? 'on' : 'off'}
+        </button>
       </header>
-      <div style={{ flex: 1, position: 'relative', overflow: 'hidden', minHeight: 0 }}>
-        <video ref={videoRef} playsInline muted autoPlay style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-        <div style={{
-          position: 'absolute', top: 12, left: 0, right: 0, textAlign: 'center',
-          color: stability === 'stable' ? '#4ade80' : '#fbbf24', fontWeight: 600,
-          textShadow: '0 1px 3px rgba(0,0,0,0.7)',
-        }}>
-          {stabilityMsg}
-        </div>
+      <div class="camera-view">
+        <video ref={videoRef} class="camera-video" playsInline muted autoPlay />
+        <div class={stability === 'stable' ? 'camera-hint camera-hint--stable' : 'camera-hint'}>{stabilityMsg}</div>
         {SHOW_DIAGNOSTICS && (
-          <div style={{
-            position: 'absolute', bottom: 8, left: 8, right: 8,
-            background: 'rgba(0,0,0,0.7)', color: '#aaffaa',
-            fontFamily: 'monospace', fontSize: 11, padding: 6, borderRadius: 4,
-            lineHeight: 1.4,
-          }}>
+          <div class="camera-diag">
             <div>frames: {diag.frames} · stab: {stability} · canvas: {diag.canvasW}×{diag.canvasH}</div>
             <div>contour pts: {diag.contourPts} · quad: {diag.lastQuad ? 'detected' : 'none'}</div>
-            {diag.lastErr && <div style={{ color: '#ff8888' }}>err: {diag.lastErr}</div>}
+            {diag.lastErr && <div class="camera-diag-err">err: {diag.lastErr}</div>}
           </div>
         )}
       </div>
-      <footer style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', alignItems: 'center', padding: 12, background: '#111', color: '#fff' }}>
-        <span class="muted">Pages: {pageCount}</span>
-        <button
-          aria-label="Capture"
-          onClick={shutter}
-          style={{ width: 64, height: 64, borderRadius: '50%', border: '4px solid #fff', background: 'rgba(255,255,255,0.18)', justifySelf: 'center' }}
-        />
-        <button class="btn" onClick={done} disabled={pageCount === 0} style={{ justifySelf: 'end' }}>Done →</button>
+      <footer class="camera-foot">
+        <span class="muted camera-count">Pages: {pageCount}</span>
+        <button aria-label="Capture" class="shutter" onClick={shutter}>
+          <span class="shutter-dot" aria-hidden="true" />
+        </button>
+        <button class="btn" onClick={done} disabled={pageCount === 0}>Done →</button>
       </footer>
     </main>
   );
