@@ -103,6 +103,15 @@ function setup(docs: DocumentView[], over: Partial<DocumentsApi> = {}, send?: Se
 }
 
 describe('InboxScreen', () => {
+  it('shows the mark in the header and keeps Settings named', async () => {
+    const { props } = setup([]);
+    const header = document.querySelector('.inbox-header')!;
+    expect(header.querySelector('svg.mark')).toHaveAttribute('aria-hidden', 'true');
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    expect(props.onSettings).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Inbox' })).toBeInTheDocument());
+  });
+
   it('names the auto-file threshold on review cards once settings load', async () => {
     const { api } = setup([makeDoc()]);
     await waitFor(() => expect(screen.getByText(/60% confident/)).toHaveTextContent(/auto-file threshold 80%/));

@@ -1,6 +1,7 @@
 import { useState } from 'preact/hooks';
 import { MAX_UPLOAD_BYTES, type UploadQueue } from '../../uploads/queue.js';
 import type { UploadItem } from '../../uploads/types.js';
+import { StateDot } from './StateDot.js';
 import type { Scan } from '../../scanner/types.js';
 
 /** The item's state, announced when it changes. Never the percentage: that would be read out on every step. */
@@ -17,6 +18,7 @@ export function UploadRow({ item, queue }: { item: UploadItem; queue: UploadQueu
   const progress = queue.progressOf(item.id) ?? 0;
   return (
     <li class="doc-row">
+      <StateDot state={item.state === 'failed' ? 'bad' : 'work'} />
       <div class="doc-main">
         <div class="doc-name" id={nameId}>
           {item.name}
@@ -88,6 +90,7 @@ export function DeviceScanRow({ scan, onSend, onDelete, error = null }: DeviceSc
   }
   return (
     <li class="doc-row">
+      <StateDot state="idle" />
       <div class="doc-main">
         <div class="doc-name" id={nameId}>
           Scan · {scan.pageCount} {scan.pageCount === 1 ? 'page' : 'pages'}

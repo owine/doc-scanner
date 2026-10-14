@@ -1,6 +1,7 @@
 import { useState } from 'preact/hooks';
 import { DISCARD_RETENTION_MS } from '../../documents/group.js';
 import type { DocumentView } from '../../documents/types.js';
+import { StateDot } from './StateDot.js';
 import { WAITING_LABEL, displayName, safeDriveUrl } from './labels.js';
 
 const nameId = (doc: DocumentView) => `doc-name-${doc.id}`;
@@ -39,6 +40,7 @@ function ActionButton({
 export function WaitingRow({ doc, onDiscard }: { doc: DocumentView; onDiscard: () => Promise<void> }) {
   return (
     <li class="doc-row">
+      <StateDot state="work" />
       <div class="doc-main">
         <div class="doc-name" id={nameId(doc)}>{displayName(doc)}</div>
         <div class="muted">{doc.discardRequested ? 'Discarding…' : (WAITING_LABEL[doc.state] ?? doc.state)}</div>
@@ -57,6 +59,7 @@ export function FiledRow({ doc }: { doc: DocumentView }) {
   const url = safeDriveUrl(doc.filed?.driveUrl);
   return (
     <li class="doc-row">
+      <StateDot state="ok" />
       <div class="doc-main">
         <div class="doc-name" id={nameId(doc)}>{displayName(doc)}</div>
         <div class="muted">{doc.filed?.folderPath ?? ''}</div>
@@ -75,6 +78,7 @@ export function FiledRow({ doc }: { doc: DocumentView }) {
 export function FailedRow({ doc, onRetry, onDiscard }: { doc: DocumentView; onRetry: () => Promise<void>; onDiscard: () => Promise<void> }) {
   return (
     <li class="doc-row">
+      <StateDot state="bad" />
       <div class="doc-main">
         <div class="doc-name" id={nameId(doc)}>{displayName(doc)}</div>
         <div class="error-text">{doc.error ?? 'Failed'}</div>
@@ -90,6 +94,7 @@ export function DiscardedRow({ doc, now, onRestore }: { doc: DocumentView; now: 
   const days = Math.max(1, Math.ceil(left / 86_400_000));
   return (
     <li class="doc-row">
+      <StateDot state="idle" />
       <div class="doc-main">
         <div class="doc-name" id={nameId(doc)}>{displayName(doc)}</div>
         <div class="muted">

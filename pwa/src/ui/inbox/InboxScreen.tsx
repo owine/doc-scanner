@@ -7,6 +7,8 @@ import { groupDocuments } from '../../documents/group.js';
 import { useDocuments, type DocumentSync } from '../../documents/sync.js';
 import type { ApproveBody, DocumentView } from '../../documents/types.js';
 import { useFolders } from '../../documents/use-folders.js';
+import { Mark } from '../Mark.js';
+import { SettingsIcon } from '../icons.js';
 import { DiscardedRow, FailedRow, FiledRow, WaitingRow } from './DocumentRows.js';
 import { confirmDiscard } from './labels.js';
 import { ReviewCard } from './ReviewCard.js';
@@ -285,6 +287,7 @@ export function InboxScreen({
     <main class="inbox">
       {dragging && (
         <div class="drop-overlay" aria-hidden="true">
+          <Mark size={64} />
           Drop files to add them
         </div>
       )}
@@ -302,18 +305,19 @@ export function InboxScreen({
         }}
       />
       <header class="inbox-header">
+        <Mark size={22} />
         <h1 ref={headingRef} tabIndex={-1}>
           Inbox
         </h1>
         <div class="actions">
-          <button class="btn btn-secondary" onClick={() => fileInput.current?.click()}>
+          <button class="btn btn-secondary btn-small" onClick={() => fileInput.current?.click()}>
             Add
           </button>
-          <button class="btn" onClick={onScan}>
+          <button class="btn btn-small" onClick={onScan}>
             Scan
           </button>
-          <button class="btn btn-secondary" onClick={onSettings}>
-            Settings
+          <button class="btn btn-secondary btn-small btn-icon" aria-label="Settings" onClick={onSettings}>
+            <SettingsIcon />
           </button>
         </div>
       </header>
