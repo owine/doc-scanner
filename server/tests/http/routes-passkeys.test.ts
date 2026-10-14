@@ -126,6 +126,16 @@ describe('passkey enrolment', () => {
     expect(await expired.json()).toEqual({ error: 'invalid_enrolment' });
   });
 
+  it('keeps at most 16 pending salts, forgetting the oldest first', async () => {
+    const c = await live();
+    const salts: string[] = [];
+    for (let i = 0; i < 17; i++) salts.push((await begin(c)).salt);
+    const oldest = await add(c, { credentialId: CRED, salt: salts[0], prf: PRF_B64 });
+    expect(await oldest.json()).toEqual({ error: 'invalid_enrolment' });
+    expect((await add(c, { credentialId: CRED, salt: salts[1], prf: PRF_B64 })).status).toBe(201);
+    expect((await add(c, { credentialId: CRED_2, salt: salts[16], prf: PRF_B64 })).status).toBe(201);
+  });
+
   it('loses a pending salt to a restart', async () => {
     const c = await live();
     const { salt } = await begin(c);

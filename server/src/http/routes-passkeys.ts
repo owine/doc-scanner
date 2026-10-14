@@ -12,6 +12,8 @@ type Env = { Variables: { auth?: AuthContext } };
 
 /** How long a salt from /begin can be used. */
 const PENDING_MS = 5 * 60 * 1000;
+/** Enough for any real enrolment; bounds the map against a client calling /begin in a loop. */
+const MAX_PENDING = 16;
 const MAX_LABEL_CHARS = 60;
 
 const AddSchema = z
@@ -53,6 +55,8 @@ export function passkeyRoutes(deps: { db: DB; store: SessionStore; passkeys: Pas
     const now = Date.now();
     prune(now);
     const salt = randomBytes(PRF_BYTES).toString('base64url');
+    // A Map iterates in insertion order: the first key is the oldest.
+    while (pending.size >= MAX_PENDING) pending.delete(pending.keys().next().value!);
     pending.set(salt, now + PENDING_MS);
     return c.json({
       salt,
