@@ -68,6 +68,7 @@ function drag(target: Element | Window, type: 'dragEnter' | 'dragOver' | 'dragLe
 const fileInput = () => document.querySelector<HTMLInputElement>('input[type="file"][multiple]')!;
 
 const NOW = new Date('2026-10-10T12:00:00.000Z');
+const SETTINGS = { model: 'claude-haiku-5-5', effort: 'medium' as const, autoFileThreshold: 0.8, autoFileEnabled: false, excludePaths: [] };
 
 /** Waits until the inbox's folder load has finished and its re-render has flushed. */
 async function folderLoad(api: DocumentsApi) {
@@ -90,6 +91,7 @@ function setup(docs: DocumentView[], over: Partial<DocumentsApi> = {}, send?: Se
     get: vi.fn(async (id: string) => ({ ...docs.find((d) => d.id === id)!, state: 'discarded' as const, seq: 999, discardedAt: NOW.toISOString() })),
     restore: vi.fn(async (id: string) => ({ ...docs.find((d) => d.id === id)!, state: 'needs_review' as const, seq: 999, discardedAt: null })),
     retry: vi.fn(async (id: string) => ({ ...docs.find((d) => d.id === id)!, state: 'received' as const, seq: 999 })),
+    settings: vi.fn().mockResolvedValue(SETTINGS),
     ...over,
   } as unknown as DocumentsApi;
   const uploads = makeQueue(send);
@@ -101,6 +103,20 @@ function setup(docs: DocumentView[], over: Partial<DocumentsApi> = {}, send?: Se
 }
 
 describe('InboxScreen', () => {
+  it('names the auto-file threshold on review cards once settings load', async () => {
+    const { api } = setup([makeDoc()]);
+    await waitFor(() => expect(screen.getByText(/60% confident/)).toHaveTextContent(/auto-file threshold 80%/));
+    expect(api.settings).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows review cards without the threshold when settings fail to load', async () => {
+    const { api } = setup([makeDoc()], { settings: vi.fn().mockRejectedValue(new Error('offline')) });
+    await waitFor(() => expect(api.settings).toHaveBeenCalledTimes(1));
+    await act(async () => {});
+    expect(screen.getByText(/60% confident/)).not.toHaveTextContent(/auto-file threshold/);
+    expect(screen.getByRole('button', { name: 'Approve' })).toBeEnabled();
+  });
+
   it('says when there is nothing to review', async () => {
     setup([]);
     expect(screen.getByText(/nothing to review/i)).toBeInTheDocument();
@@ -241,7 +257,7 @@ describe('InboxScreen', () => {
       const sync = new DocumentSync({ list: vi.fn().mockResolvedValue({ documents: [], cursor: 0 }) });
       sync.loaded = true;
       sync.upsert(makeDoc({ state: 'discarded', discardedAt: '2026-10-04T12:00:00.000Z' }));
-      const api = { folders: vi.fn().mockResolvedValue({ walkedAt: NOW.toISOString(), folders: FOLDERS }), refreshFolders: vi.fn() } as unknown as DocumentsApi;
+      const api = { folders: vi.fn().mockResolvedValue({ walkedAt: NOW.toISOString(), folders: FOLDERS }), refreshFolders: vi.fn(), settings: vi.fn().mockResolvedValue(SETTINGS) } as unknown as DocumentsApi;
       render(<InboxScreen sync={sync} documents={api} now={() => new Date(clock)} onScan={vi.fn()} uploads={makeQueue()} scans={new ScansStore()} onSettings={vi.fn()} onSignInAgain={vi.fn()} />);
       expect(screen.getByRole('region', { name: 'Discarded' })).toBeInTheDocument();
       // Let the mount's own re-renders and the folder load settle first.
@@ -263,7 +279,7 @@ describe('InboxScreen', () => {
     const sync = new DocumentSync({ list: vi.fn().mockResolvedValue({ documents: [], cursor: 0 }) });
     sync.loaded = true;
     sync.error = new Error('offline');
-    const api = { folders: vi.fn().mockResolvedValue({ walkedAt: NOW.toISOString(), folders: FOLDERS }), refreshFolders: vi.fn() } as unknown as DocumentsApi;
+    const api = { folders: vi.fn().mockResolvedValue({ walkedAt: NOW.toISOString(), folders: FOLDERS }), refreshFolders: vi.fn(), settings: vi.fn().mockResolvedValue(SETTINGS) } as unknown as DocumentsApi;
     render(<InboxScreen sync={sync} documents={api} now={() => NOW} onScan={vi.fn()} uploads={makeQueue()} scans={new ScansStore()} onSettings={vi.fn()} onSignInAgain={vi.fn()} />);
     expect(screen.getByRole('status')).toHaveTextContent("Can't reach the server.");
     expect(screen.queryByText(/nothing to review/i)).toBeNull();
@@ -284,7 +300,7 @@ describe('InboxScreen', () => {
     sync.loaded = true;
     sync.upsert(makeDoc());
     sync.error = new Error('offline');
-    const api = { folders: vi.fn().mockResolvedValue({ walkedAt: NOW.toISOString(), folders: FOLDERS }), refreshFolders: vi.fn() } as unknown as DocumentsApi;
+    const api = { folders: vi.fn().mockResolvedValue({ walkedAt: NOW.toISOString(), folders: FOLDERS }), refreshFolders: vi.fn(), settings: vi.fn().mockResolvedValue(SETTINGS) } as unknown as DocumentsApi;
     render(<InboxScreen sync={sync} documents={api} now={() => NOW} onScan={vi.fn()} uploads={makeQueue()} scans={new ScansStore()} onSettings={vi.fn()} onSignInAgain={vi.fn()} />);
     expect(screen.getByText(/showing what was last loaded/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument();

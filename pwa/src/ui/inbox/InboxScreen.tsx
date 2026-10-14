@@ -96,6 +96,26 @@ export function InboxScreen({
   useLayoutEffect(() => {
     if (focusHeading) headingRef.current?.focus();
   }, []);
+  // The auto-file threshold, for the review cards' meters. Best effort: without it they show no tick.
+  const [threshold, setThreshold] = useState<number | null>(null);
+  const mounted = useRef(true);
+  // A layout effect: Preact 11 runs useEffect cleanups after paint.
+  useLayoutEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  useEffect(() => {
+    void (async () => {
+      try {
+        const settings = await documents.settings();
+        if (mounted.current) setThreshold(settings.autoFileThreshold);
+      } catch {
+        // Offline, or signed out: the meters show without the threshold.
+      }
+    })();
+  }, [documents]);
   // The queue keeps why a send failed (uploads.buildErrorOf): the row
   // unmounts while its scan is claimed, and Done in App sends scans too.
   const sendScan = async (id: string) => {
@@ -387,6 +407,7 @@ export function InboxScreen({
           g.review.map((d) => (
             <ReviewCard
               key={d.id}
+              threshold={threshold}
               doc={d}
               folders={folders}
               review={g.review}

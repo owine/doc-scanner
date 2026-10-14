@@ -17,6 +17,8 @@ export interface ReviewCardProps {
   onCombine?: (ids: string[]) => Promise<void>;
   /** Re-analyze, or with an anchor id, File with. */
   onReanalyze?: (anchorId?: string) => Promise<void>;
+  /** The auto-file threshold (0.5–1), once settings have loaded; the meter marks it. */
+  threshold?: number | null;
 }
 
 const ACTION_ERRORS: Record<string, string> = {
@@ -51,7 +53,7 @@ function bodyFolder(f: FolderRef): NonNullable<ApproveBody['folder']> {
   return f.kind === 'existing' ? { kind: 'existing', linkId: f.linkId } : { kind: 'new', parentLinkId: f.parentLinkId, name: f.name };
 }
 
-export function ReviewCard({ doc, folders, onApprove, onDiscard, review = [], filed = [], onCombine, onReanalyze }: ReviewCardProps) {
+export function ReviewCard({ doc, folders, onApprove, onDiscard, review = [], filed = [], onCombine, onReanalyze, threshold = null }: ReviewCardProps) {
   const suggested = doc.analysis;
   const [name, setName] = useState(suggested?.name ?? '');
   const [folder, setFolder] = useState<FolderRef | null>(suggested?.folder ?? null);
@@ -174,8 +176,9 @@ export function ReviewCard({ doc, folders, onApprove, onDiscard, review = [], fi
         )}
       </div>
       {suggested && (
-        <p class="muted">
+        <p class="muted confidence-line">
           {Math.round(suggested.confidence * 100)}% confident{doc.reviewReason ? ` · ${doc.reviewReason}` : ''}
+          {threshold !== null && <span class="visually-hidden"> (auto-file threshold {Math.round(threshold * 100)}%)</span>}
         </p>
       )}
       {doc.anchorName && <p class="muted">Paired with “{doc.anchorName}”</p>}
