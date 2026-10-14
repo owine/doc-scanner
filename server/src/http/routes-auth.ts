@@ -99,6 +99,8 @@ export function authRoutes(deps: AuthRoutesDeps) {
     keySaltFingerprint: string | null;
     /** Another Proton account: clear the entities and event-id caches before the session can use them. */
     clearDriveCaches?: boolean;
+    /** Runs after the caches are cleared and before the session goes live; a throw keeps it from going live. */
+    beforeRegister?: () => void;
   }): Promise<void> {
     try {
       await registerNewSession(s);
@@ -134,6 +136,7 @@ export function authRoutes(deps: AuthRoutesDeps) {
     });
     // They are not account-scoped; the new client clears the shared tables.
     if (s.clearDriveCaches) await driveClient.clearCaches();
+    s.beforeRegister?.();
     registerLiveSession({
       sid: s.sid,
       session: s.session,
@@ -204,12 +207,14 @@ export function authRoutes(deps: AuthRoutesDeps) {
           userId: result.userId,
           keySaltFingerprint: result.keySaltFingerprint,
           clearDriveCaches: otherAccount,
+          // After the clearing, so a failure before it leaves the old id and
+          // the next login clears again; before the session goes live, so a
+          // failed write never leaves this account live under the old id.
+          beforeRegister: () => writeSetting(deps.db, SETTING.protonUserId, result.userId),
         });
         secret = undefined;
         // Cookie mode: signed in only now, so a failed start leaves no cookie without a session.
         if (!header) issueSession(c, sid, deps.secureCookie ?? true);
-        // Last: if anything above failed, the next login still sees the old account and clears again.
-        writeSetting(deps.db, SETTING.protonUserId, result.userId);
         logger.info({ email, remoteUser }, 'login succeeded');
         return c.json({ ok: true, email: result.session.email });
       } catch (e) {

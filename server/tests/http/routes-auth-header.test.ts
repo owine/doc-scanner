@@ -176,6 +176,18 @@ describe('signing in again', () => {
       });
     }
 
+    it('on storing the new account id, and leaves the new account locked rather than live under the old id', async () => {
+      const c = setup({ pipeline: true });
+      await signIn(c, keys, { userId: 'user-A' });
+      failSql(c, /^INSERT INTO app_settings/);
+      const second = loginResult(keys, { userId: 'user-B' });
+      c.auth.login.mockResolvedValueOnce(second);
+      expect((await post(c.app, '/api/auth/login', { email: 'b@x.test', password: 'p' })).status).toBe(500);
+      expect(getLiveSession('proxy')).toBeUndefined();
+      expect(readSetting(c.db, SETTING.protonUserId)).toBe('user-A');
+      await expect(second.mailboxSecret.use(() => 1)).rejects.toThrow('already disposed');
+    });
+
     it('on checking for a changed key salt', async () => {
       const c = setup();
       writeSetting(c.db, SETTING.keySaltFingerprint, 'fp-old');
