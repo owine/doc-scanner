@@ -40,7 +40,7 @@ const SIGN_IN_ONLY = new Set<Problem>(['login_required', 'stale', 'unreadable'])
 const SIGN_IN_TEXT = {
   login_required: 'Filing is paused. Sign in to Proton to resume.',
   stale: 'Your Proton password changed. Sign in again, then add your passkey again in Settings.',
-  unreadable: 'That passkey can no longer unlock. Sign in to Proton, then remove it and add it again in Settings.',
+  unreadable: 'That passkey can no longer unlock. Sign in to Proton, then add a passkey again in Settings.',
 } as const;
 
 /**

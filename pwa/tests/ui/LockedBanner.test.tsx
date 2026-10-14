@@ -91,7 +91,7 @@ describe('LockedBanner', () => {
     ['proton_login_required', 'Filing is paused. Sign in to Proton to resume.'],
     ['no_passkeys', 'Filing is paused. Sign in to Proton to resume.'],
     ['passkeys_stale', 'Your Proton password changed. Sign in again, then add your passkey again in Settings.'],
-    ['passkey_unreadable', 'That passkey can no longer unlock. Sign in to Proton, then remove it and add it again in Settings.'],
+    ['passkey_unreadable', 'That passkey can no longer unlock. Sign in to Proton, then add a passkey again in Settings.'],
   ] as const) {
     it(`sends the user to sign in after ${code}, focused, and tells the app its status changed`, async () => {
       const { client, onSignIn, onStatusChanged } = setup({ kind: 'failed', code });
