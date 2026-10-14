@@ -108,7 +108,11 @@ export function authRoutes(deps: AuthRoutesDeps) {
   }
 
   async function registerNewSession(s: Parameters<typeof startLiveSession>[0]): Promise<void> {
-    const driveClient = new DriveClient({
+    // The worker can hold a client through a long job after a login replaced
+    // it or a logout forgot it. Only the registered client speaks for the
+    // stored session. (False until registration, which follows clearCaches.)
+    const isLive = () => getLiveSession(s.sid)?.driveClient === driveClient;
+    const driveClient: DriveClient = new DriveClient({
       db: deps.db,
       encryptionKey: deps.encryptionKey,
       appVersion: deps.appVersion ?? 'external-drive-docscanner@0.1.0',
@@ -117,8 +121,10 @@ export function authRoutes(deps: AuthRoutesDeps) {
       protonAuth: deps.protonAuth,
       // The SDK's HTTP adapter refreshes the access token on a 401. Persist
       // the rotated tokens, or the next process restart resumes with a
-      // refresh token Proton has already invalidated.
+      // refresh token Proton has already invalidated. A replaced client's
+      // tokens would overwrite the newer login's, or undo a logout.
       onSessionRefreshed: (session) => {
+        if (!isLive()) return;
         deps.store.save(session);
         logger.info({ email: session.email }, 'proton session refreshed');
       },
