@@ -287,6 +287,7 @@ export function authRoutes(deps: AuthRoutesDeps) {
     if (!prf || prf.length !== PRF_BYTES) return c.json({ error: 'invalid_input' }, 400);
     const { credentialId } = body.data;
     const credential = shortId(credentialId);
+    // Zeroed once the turn is over, whatever its outcome.
     return mutex.run(async (): Promise<Response> => {
       // Checked in turn: an unlock queued behind another finds the work done.
       if (getLiveSession(PROXY_SID)) return c.json(status(auth.email, PROXY_SID));
@@ -359,7 +360,7 @@ export function authRoutes(deps: AuthRoutesDeps) {
       }
       logger.info({ credential }, 'unlocked with a passkey');
       return c.json(status(auth.email, PROXY_SID));
-    });
+    }).finally(() => prf.fill(0));
   });
 
   return r;

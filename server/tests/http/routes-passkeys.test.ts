@@ -3,6 +3,7 @@ import { _resetSids, COOKIE_MODE } from '../../src/http/middleware.js';
 import { _resetLiveSessions, registerLiveSession } from '../../src/auth/live-session.js';
 import { MailboxSecret } from '../../src/auth/secrets/mailbox-password.js';
 import type { DriveClient } from '../../src/drive/client.js';
+import { PasskeyStore } from '../../src/auth/passkey-store.js';
 import { SETTING, readSetting, writeSetting } from '../../src/auth/app-settings.js';
 import type { DecryptedUserKey } from '../../src/auth/keys.js';
 import {
@@ -124,6 +125,18 @@ describe('passkey enrolment', () => {
     vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 6 * 60 * 1000);
     const expired = await add(c, { credentialId: CRED_2, salt: late.salt, prf: PRF_B64 });
     expect(await expired.json()).toEqual({ error: 'invalid_enrolment' });
+  });
+
+  it('zeroes the decoded PRF output after adding, and after a failed add', async () => {
+    const c = await live();
+    const added = vi.spyOn(PasskeyStore.prototype, 'add');
+    expect((await add(c, { credentialId: CRED, salt: (await begin(c)).salt, prf: PRF_B64 })).status).toBe(201);
+    added.mockImplementationOnce(() => {
+      throw new Error('disk I/O error');
+    });
+    expect((await add(c, { credentialId: CRED_2, salt: (await begin(c)).salt, prf: PRF_B64 })).status).toBe(500);
+    expect(added).toHaveBeenCalledTimes(2);
+    for (const [entry] of added.mock.calls) expect(entry.prf.every((b) => b === 0)).toBe(true);
   });
 
   it('keeps at most 16 pending salts, forgetting the oldest first', async () => {

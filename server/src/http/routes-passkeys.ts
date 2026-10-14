@@ -3,7 +3,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import type { DB } from '../db.js';
 import type { SessionStore } from '../auth/session-store.js';
-import { CREDENTIAL_ID, PRF_BYTES, decodeBase64url, shortId, type PasskeyStore } from '../auth/passkey-store.js';
+import { CREDENTIAL_ID, PRF_BYTES, decodeBase64url, shortId, type PasskeyEntry, type PasskeyStore } from '../auth/passkey-store.js';
 import { SETTING, readSetting, takeSetting, writeSetting } from '../auth/app-settings.js';
 import { logger } from '../logger.js';
 import { headerOnly, sessionMiddleware, type AuthContext, type AuthMode } from './middleware.js';
@@ -76,10 +76,15 @@ export function passkeyRoutes(deps: { db: DB; store: SessionStore; passkeys: Pas
     if (!pending.has(salt)) return c.json({ error: 'invalid_enrolment' }, 400);
     const prf = decodeBase64url(body.data.prf);
     if (!prf || prf.length !== PRF_BYTES) return c.json({ error: 'invalid_input' }, 400);
-    const entry = await live.mailboxSecret.use((passphrase) =>
-      // The salt is one this server made, so it decodes.
-      deps.passkeys.add({ credentialId, label: cleanLabel(label), salt: decodeBase64url(salt)!, prf, passphrase }),
-    );
+    let entry: PasskeyEntry;
+    try {
+      entry = await live.mailboxSecret.use((passphrase) =>
+        // The salt is one this server made, so it decodes.
+        deps.passkeys.add({ credentialId, label: cleanLabel(label), salt: decodeBase64url(salt)!, prf, passphrase }),
+      );
+    } finally {
+      prf.fill(0);
+    }
     pending.delete(salt);
     // What a later password login compares, to tell the password changed (spec §2).
     // An unlocked session with none known leaves the recorded one in place.

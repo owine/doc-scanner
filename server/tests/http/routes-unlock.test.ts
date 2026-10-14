@@ -225,6 +225,16 @@ describe('POST /api/auth/unlock', () => {
     });
   }
 
+  it('zeroes the decoded PRF output once done, whatever the outcome', async () => {
+    const c = locked();
+    const unwrap = vi.spyOn(PasskeyStore.prototype, 'unwrap');
+    c.auth.resume.mockResolvedValue(resumeResult(keys));
+    expect((await unlock(c, { credentialId: CRED, prf: Buffer.alloc(32, 8).toString('base64url') })).status).toBe(401);
+    expect((await unlock(c)).status).toBe(200);
+    expect(unwrap).toHaveBeenCalledTimes(2);
+    for (const [, prf] of unwrap.mock.calls) expect((prf as Uint8Array).every((b) => b === 0)).toBe(true);
+  });
+
   it('zeroes the passphrase when reading the recorded fingerprint fails', async () => {
     const c = locked();
     c.auth.resume.mockResolvedValue(resumeResult(keys));
