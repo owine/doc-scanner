@@ -5,6 +5,7 @@ import { SETTING, readSetting, writeSetting } from '../../src/auth/app-settings.
 import type { DecryptedUserKey } from '../../src/auth/keys.js';
 import { DriveClient } from '../../src/drive/client.js';
 import { SessionStore } from '../../src/auth/session-store.js';
+import { TwoFactorRequiredError } from '../../src/auth/srp.js';
 import { PasskeyStore } from '../../src/auth/passkey-store.js';
 import { TREE } from '../documents/harness.js';
 import { SESSION, authApp, get, loginResult, makeKeys, post, seedPasskey, signIn, type AuthApp } from '../helpers/auth-app.js';
@@ -52,6 +53,29 @@ describe('POST /api/auth/login in header mode', () => {
     expect(getLiveSession('proxy')).toMatchObject({ userId: 'user-1', keySaltFingerprint: 'fp-1' });
     await vi.waitFor(() => expect(registered).toHaveBeenCalledWith(expect.objectContaining({ sid: 'proxy' })));
   });
+});
+
+describe('a failed login in header mode', () => {
+  for (const [label, error, status] of [
+    ['a wrong password', Object.assign(new Error('bad'), { status: 401 }), 401],
+    ['a missing TOTP code', new TwoFactorRequiredError({} as never), 422],
+  ] as const) {
+    it(`leaves the stored session, the live session and the passkeys alone on ${label}`, async () => {
+      const c = setup({ pipeline: true });
+      await signIn(c, keys, { userId: 'user-A' });
+      seedPasskey(c.passkeys);
+      writeSetting(c.db, SETTING.keySaltFingerprint, 'fp-1');
+      const live = getLiveSession('proxy');
+      c.auth.login.mockRejectedValueOnce(error);
+      expect((await post(c.app, '/api/auth/login', { email: 'e@x.test', password: 'wrong' })).status).toBe(status);
+      expect(getLiveSession('proxy')).toBe(live);
+      await expect(live!.mailboxSecret.use(() => 1)).resolves.toBe(1);
+      expect(c.store.load()).toEqual(SESSION);
+      expect(c.passkeys.count()).toBe(1);
+      expect(readSetting(c.db, SETTING.keySaltFingerprint)).toBe('fp-1');
+      expect(readSetting(c.db, SETTING.protonUserId)).toBe('user-A');
+    });
+  }
 });
 
 describe('request size', () => {
@@ -107,6 +131,13 @@ describe('POST /api/auth/logout in header mode', () => {
     expect(getLiveSession('proxy')).toBeUndefined();
     expect(await (await get(c.app, '/api/auth/status')).json()).toMatchObject({ proton: 'none', passkeys: 0 });
   });
+
+  it('keeps the Proton account id, so the next login can tell another account', async () => {
+    const c = setup();
+    await signIn(c, keys, { userId: 'user-A' });
+    expect((await post(c.app, '/api/auth/logout')).status).toBe(200);
+    expect(readSetting(c.db, SETTING.protonUserId)).toBe('user-A');
+  });
 });
 
 describe('signing in again', () => {
@@ -130,6 +161,8 @@ describe('signing in again', () => {
     await signIn(c, keys, { userId: 'user-A' });
     c.pipeline!.folderCache.save(TREE, new Date());
     seedPasskey(c.passkeys);
+    writeSetting(c.db, SETTING.keySaltFingerprint, 'fp-A');
+    writeSetting(c.db, SETTING.removedNotice, 'password_changed');
     const seen: (string | undefined)[] = [];
     vi.spyOn(DriveClient.prototype, 'clearCaches').mockImplementation(async () => {
       seen.push(getLiveSession('proxy')?.userId);
@@ -140,6 +173,8 @@ describe('signing in again', () => {
     expect(getLiveSession('proxy')?.userId).toBe('user-B');
     expect(c.pipeline!.folderCache.load()).toBeNull();
     expect(c.passkeys.count()).toBe(0);
+    expect(readSetting(c.db, SETTING.keySaltFingerprint)).toBeNull();
+    expect(readSetting(c.db, SETTING.removedNotice)).toBeNull();
     expect(readSetting(c.db, SETTING.protonUserId)).toBe('user-B');
   });
 
