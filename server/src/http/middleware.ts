@@ -95,13 +95,17 @@ export function headerOnly(mode: AuthMode): MiddlewareHandler<Env> {
   };
 }
 
-export function issueSession(c: Context<Env>, secureCookie: boolean = true): string {
-  const sid = randomBytes(32).toString('base64url');
+/** A new cookie-mode session id, not yet signed in. */
+export function mintSid(): string {
+  return randomBytes(32).toString('base64url');
+}
+
+/** Signs `sid` in and sets its cookie: only once its live session has started. */
+export function issueSession(c: Context<Env>, sid: string, secureCookie: boolean = true): void {
   liveSids.add(sid);
   setCookie(c, COOKIE_NAME, sid, {
     httpOnly: true, sameSite: 'Strict', secure: secureCookie, path: '/',
   });
-  return sid;
 }
 
 /**

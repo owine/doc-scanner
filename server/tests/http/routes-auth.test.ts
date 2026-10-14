@@ -111,6 +111,25 @@ describe('POST /api/auth/login', () => {
     expect(await res.json()).toMatchObject({ error: 'totp_required' });
   });
 
+  it('issues no cookie when the live session fails to start', async () => {
+    const { app, fakeAuth } = setup();
+    const login = () =>
+      app.request('/api/auth/login', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email: 'e@x.test', password: 'p' }),
+      });
+    (fakeAuth.login as any).mockResolvedValueOnce({ ...makeLoginSuccess(), userId: 'user-A' });
+    expect((await login()).status).toBe(200);
+    // Another account: the new client clears the caches first, and that fails.
+    vi.spyOn(DriveClient.prototype, 'clearCaches').mockRejectedValue(new Error('disk full'));
+    (fakeAuth.login as any).mockResolvedValueOnce({ ...makeLoginSuccess(), userId: 'user-B' });
+    const res = await login();
+    expect(res.status).toBe(500);
+    const cookie = res.headers.get('set-cookie');
+    expect(cookie).toBeNull();
+  });
+
   it('rejects malformed input with 400', async () => {
     const { app } = setup();
     const res = await app.request('/api/auth/login', {

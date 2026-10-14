@@ -19,6 +19,7 @@ import {
   forgetAllSessions,
   headerOnly,
   issueSession,
+  mintSid,
   revokeAllSessions,
   sessionMiddleware,
   type AuthContext,
@@ -194,7 +195,7 @@ export function authRoutes(deps: AuthRoutesDeps) {
         }
         deps.store.save(result.session);
         // Header mode keeps one live session, which each login replaces; no cookie.
-        const sid = header ? PROXY_SID : issueSession(c, deps.secureCookie ?? true);
+        const sid = header ? PROXY_SID : mintSid();
         await startLiveSession({
           sid,
           session: result.session,
@@ -205,6 +206,8 @@ export function authRoutes(deps: AuthRoutesDeps) {
           clearDriveCaches: otherAccount,
         });
         secret = undefined;
+        // Cookie mode: signed in only now, so a failed start leaves no cookie without a session.
+        if (!header) issueSession(c, sid, deps.secureCookie ?? true);
         // Last: if anything above failed, the next login still sees the old account and clears again.
         writeSetting(deps.db, SETTING.protonUserId, result.userId);
         logger.info({ email, remoteUser }, 'login succeeded');
