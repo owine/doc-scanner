@@ -317,6 +317,16 @@ describe('POST /api/auth/unlock', () => {
   });
 });
 
+const PRF_2_B64 = Buffer.alloc(32, 4).toString('base64url');
+const LABEL_2 = 'Contoso tablet';
+
+/** Enrols a second passkey on the live session. */
+async function begin2(c: AuthApp): Promise<{ salt: string }> {
+  const { salt } = (await (await post(c.app, '/api/passkeys/begin')).json()) as { salt: string };
+  expect((await post(c.app, '/api/passkeys', { credentialId: CRED_2, salt, prf: PRF_2_B64, label: LABEL_2 })).status).toBe(201);
+  return { salt };
+}
+
 describe('enrolling, then unlocking after a restart', () => {
   it('gets the same passphrase back, and logs no secret', async () => {
     const spies = (['debug', 'info', 'warn', 'error'] as const).map((level) => vi.spyOn(logger, level));
@@ -334,10 +344,40 @@ describe('enrolling, then unlocking after a restart', () => {
     expect((await unlock(c)).status).toBe(200);
     expect(new TextDecoder().decode(c.auth.resume.mock.calls[0]![1] as Uint8Array)).toBe(PASSPHRASE);
 
+    // A transient Proton failure, a refresh during the resume, and a wrap that won't open: their log lines too.
+    _resetLiveSessions();
+    c.auth.resume.mockRejectedValueOnce(new ProtonApiError('HTTP 503', 503));
+    expect((await unlock(c)).status).toBe(503);
+    const refreshed = { ...SESSION, accessToken: 'access-token-Northwind', refreshToken: 'refresh-token-Northwind' };
+    c.auth.resume.mockImplementationOnce(async (_s: unknown, _p: unknown, opts: { onRefreshed: (s: typeof SESSION) => void }) => {
+      opts.onRefreshed(refreshed);
+      return resumeResult(keys, { session: refreshed });
+    });
+    expect((await unlock(c)).status).toBe(200);
+    expect(c.store.load()).toEqual(refreshed);
+    const second = await begin2(c);
+    _resetLiveSessions();
+    c.db.prepare('UPDATE passkey_unlocks SET wrapped = ? WHERE credential_id = ?').run(new Uint8Array(60), CRED_2);
+    expect(await (await unlock(c, { credentialId: CRED_2, prf: PRF_2_B64 })).json()).toEqual({ error: 'passkey_unreadable' });
+
     const logged = JSON.stringify(spies.map((s) => s.mock.calls));
-    for (const secret of [PRF_B64, Buffer.alloc(32, 8).toString('base64url'), LABEL, PASSPHRASE, salt, CRED]) {
+    for (const secret of [
+      PRF_B64,
+      Buffer.alloc(32, 8).toString('base64url'),
+      LABEL,
+      PASSPHRASE,
+      salt,
+      CRED,
+      PRF_2_B64,
+      LABEL_2,
+      second.salt,
+      CRED_2,
+      refreshed.accessToken,
+      refreshed.refreshToken,
+    ]) {
       expect(logged).not.toContain(secret);
     }
     expect(logged).toContain(CRED.slice(0, 8));
+    expect(logged).toContain(CRED_2.slice(0, 8));
   });
 });
