@@ -210,6 +210,8 @@ export function PasskeysSection({ email, live, onChanged, focusAdd = false, clie
       removing.current = false;
       if (mounted.current) setRemovingId(null);
     }
+    // The server no longer holds it, so it can't unlock: the password manager may hide it. Best effort.
+    client.forget(credentialId).catch(() => {});
     if (!mounted.current) return;
     setPasskeys((list) => (list ?? []).filter((p) => p.credentialId !== credentialId));
     // Its Remove button is gone.

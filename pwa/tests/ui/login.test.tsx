@@ -28,6 +28,14 @@ describe('LoginScreen', () => {
     expect(onCancel).toHaveBeenCalled();
   });
 
+  it('says why when Proton ended the session', () => {
+    const { unmount } = render(<LoginScreen onLoggedIn={() => {}} />);
+    expect(screen.queryByText('Proton ended the session. Sign in again to resume filing.')).toBeNull();
+    unmount();
+    render(<LoginScreen onLoggedIn={() => {}} reason="proton_ended" />);
+    expect(screen.getByText('Proton ended the session. Sign in again to resume filing.')).toBeInTheDocument();
+  });
+
   async function failWith(response: () => Response | Promise<Response>) {
     vi.stubGlobal('fetch', vi.fn(async () => response()));
     const { container } = render(<LoginScreen onLoggedIn={() => {}} />);
@@ -52,6 +60,23 @@ describe('LoginScreen', () => {
       expect(shown).toBe(text);
     });
   }
+
+  for (const [label, response] of [
+    ['the server', () => new Response('{"error":"not_authenticated"}', { status: 401 })],
+    ['a proxy, with no code of the app', () => new Response('<html>401 Unauthorized</html>', { status: 401 })],
+  ] as const) {
+    it(`offers Reload when ${label} says this browser isn’t signed in`, async () => {
+      const reload = vi.spyOn(window.location, 'reload').mockImplementation(() => {});
+      expect(await failWith(response)).toBe('This browser isn’t signed in to the server. Reload the page and try again.');
+      fireEvent.click(screen.getByRole('button', { name: 'Reload' }));
+      expect(reload).toHaveBeenCalledTimes(1);
+    });
+  }
+
+  it('offers no Reload for other failures', async () => {
+    await failWith(() => new Response('{"error":"invalid_input"}', { status: 400 }));
+    expect(screen.queryByRole('button', { name: 'Reload' })).toBeNull();
+  });
 
   it('moves focus to the 2FA code field when it appears', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{"error":"totp_required"}', { status: 422 })));

@@ -15,17 +15,7 @@ import { useUploads, type UploadQueue } from '../../uploads/queue.js';
 import { sendScanToInbox, useDeviceScans } from '../../uploads/scans.js';
 import { DeviceScanRow, UploadRow } from './UploadRows.js';
 import { LockedBanner } from './LockedBanner.js';
-
-/** The passkey nudge, once dismissed, stays dismissed on this device. */
-const NUDGE_DISMISSED_KEY = 'docscanner.passkeyNudgeDismissed';
-
-function nudgeDismissed(): boolean {
-  try {
-    return localStorage.getItem(NUDGE_DISMISSED_KEY) === '1';
-  } catch {
-    return false;
-  }
-}
+import { nudgeDismissed, storeNudgeDismissal } from './nudge.js';
 
 export interface InboxScreenProps {
   sync: DocumentSync;
@@ -43,8 +33,8 @@ export interface InboxScreenProps {
   proton?: ProtonState;
   passkeys?: number;
   onUnlocked?: (status: StatusResponse) => void;
-  /** An unlock refusal changed the server's state (spec §3): the app reads its status again. */
-  onStatusChanged?: () => void;
+  /** An unlock refusal changed the server's state (spec §3), with its code: the app reads its status again. */
+  onStatusChanged?: (code: string) => void;
   /** Opens the sign-in-to-Proton screen; defaults to onSignInAgain. */
   onSignInToProton?: () => void;
   /** After a Proton login in header mode with no passkey yet. */
@@ -93,14 +83,12 @@ export function InboxScreen({
   const fileInput = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
-  const [nudgeHidden, setNudgeHidden] = useState(nudgeDismissed);
+  const [dismissedHere, setDismissedHere] = useState(false);
+  // Stored dismissals are read as the nudge shows: the app clears them once no passkey is left.
+  const nudgeHidden = dismissedHere || (showPasskeyNudge && nudgeDismissed());
   const dismissNudge = () => {
-    try {
-      localStorage.setItem(NUDGE_DISMISSED_KEY, '1');
-    } catch {
-      // Storage refused (private browsing): dismissed until the next visit.
-    }
-    setNudgeHidden(true);
+    storeNudgeDismissal();
+    setDismissedHere(true);
     onNudgeDismissed();
   };
   const headingRef = useRef<HTMLHeadingElement>(null);
@@ -315,7 +303,11 @@ export function InboxScreen({
         {addError && <p class="warn">{addError}</p>}
         {Boolean(error) && loaded && (
           <p class="warn">
-            {docs.length > 0 ? "Can't reach the server. Showing what was last loaded." : "Can't reach the server."}
+            {docs.length > 0 ? "Can't reach the server. Showing what was last loaded." : "Can't reach the server."}{' '}
+            {/* An expired proxy sign-in answered with a redirect reads as no answer: a reload goes through it. */}
+            <button class="btn btn-secondary btn-small" onClick={() => location.reload()}>
+              Reload
+            </button>
           </p>
         )}
         {proton === 'locked' ? (

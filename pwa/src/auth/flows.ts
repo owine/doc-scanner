@@ -39,7 +39,8 @@ export async function unlock(prepared: UnlockCredential[] | null = null): Promis
     const credentials = prepared && prepared.length > 0 ? prepared : (await api.unlock.begin()).credentials;
     const result = await unlockWithPasskey(credentials);
     if (result.kind === 'cancelled') return { kind: 'cancelled' };
-    if (result.kind === 'no_prf') return { kind: 'failed', code: 'unlock_failed' };
+    // A passkey without PRF (or not this one's): nothing the server could unwrap.
+    if (result.kind === 'no_prf') return { kind: 'failed', code: 'no_prf' };
     if (result.kind === 'failed') return { kind: 'failed', code: result.code };
     try {
       return { kind: 'unlocked', status: await api.unlock({ credentialId: result.credentialId, prf: result.prf }) };
@@ -99,6 +100,8 @@ async function settle(result: EnrolResult, salt: string, label: string): Promise
         // No answer, a 5xx, or an answer without a code (a proxy's HTML 502)
         // may have come after the server stored it: keep that passkey.
         if (!(e instanceof ApiError && e.code !== undefined && e.status >= 400 && e.status < 500)) return failed(e);
+        // The server holds this credential already: it can unlock, so keep it.
+        if (e.code === 'already_enrolled') return { kind: 'already_added' };
         // The server refused it, so it will never unlock: ask the password manager to hide it.
         const forgotten = await forgetCredential(result.credentialId);
         if (e.code === 'invalid_enrolment') return { kind: 'expired', forgotten };
@@ -126,6 +129,8 @@ export interface PasskeysClient {
   /** Fetched when Add passkey is tapped, before the prompt's own tap. */
   begin: () => Promise<PasskeyBegin>;
   enrol: (label: string, email: string, begin?: PasskeyBegin) => Promise<EnrolOutcome>;
+  /** After a removal: asks the password manager to hide a passkey that can no longer unlock. */
+  forget: (credentialId: string) => Promise<boolean>;
 }
 
 export const passkeysClient: PasskeysClient = {
@@ -133,4 +138,5 @@ export const passkeysClient: PasskeysClient = {
   remove: (credentialId) => api.passkeys.remove(credentialId),
   begin: () => api.passkeys.begin(),
   enrol,
+  forget: forgetCredential,
 };

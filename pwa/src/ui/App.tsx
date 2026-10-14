@@ -1,8 +1,8 @@
-import { useEffect, useLayoutEffect, useState } from 'preact/hooks';
+import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { api, ApiError, type StatusResponse } from '../api.js';
 import { documentsApi } from '../documents/api.js';
 import { DocumentSync } from '../documents/sync.js';
-import { LoginScreen } from './LoginScreen.js';
+import { LoginScreen, type LoginReason } from './LoginScreen.js';
 import { InboxScreen } from './inbox/InboxScreen.js';
 import { SettingsScreen } from './SettingsScreen.js';
 import { ScannerScreen } from './ScannerScreen.js';
@@ -12,6 +12,8 @@ import type { Scan } from '../scanner/types.js';
 import { sendScanToInbox } from '../uploads/scans.js';
 import { UploadQueue } from '../uploads/queue.js';
 import { captureRequestFailure } from '../observability/sentry.js';
+import { watchStatus } from './status-watch.js';
+import { clearNudgeDismissal } from './inbox/nudge.js';
 
 type Route =
   /** `focusHeading`: back from a screen whose button had focus, which is gone now. */
@@ -31,17 +33,28 @@ type AppStatus = Omit<StatusResponse, 'unlockAvailable'> & { unlockAvailable: bo
 
 export function App() {
   const [status, setStatus] = useState<AppStatus | null>(null);
+  // For listeners, which outlive the render that made them.
+  const statusRef = useRef(status);
+  statusRef.current = status;
+  // Bumped by every status read and every status set from an answer: only the
+  // latest may apply, so a read begun before a login can't undo it.
+  const statusGeneration = useRef(0);
   const [loaded, setLoaded] = useState(false);
   // The first status read got no usable answer (network, 5xx): neither signed in nor out.
   const [unreachable, setUnreachable] = useState(false);
   const [retrying, setRetrying] = useState(false);
+  // Header mode, and the proxy no longer signs this browser in (its session
+  // expired): only a reload goes through the proxy's sign-in again.
+  const [expired, setExpired] = useState(false);
   // A Proton login in this tab: the passkey nudge follows only that.
   const [justSignedIn, setJustSignedIn] = useState(false);
+  // Why the next sign-in screen shows, when the app knows (spec §3).
+  const [loginReason, setLoginReason] = useState<LoginReason | undefined>(undefined);
   const [route, setRoute] = useState<Route>({ kind: 'inbox' });
   const [store] = useState(() => new ScansStore());
   const [resume, setResume] = useState<Scan | null>(null);
   const [sync] = useState(
-    () => new DocumentSync({ list: documentsApi.list, onUnauthorized: () => { setStatus(null); setRoute({ kind: 'inbox' }); } }),
+    () => new DocumentSync({ list: documentsApi.list, onUnauthorized: () => unauthorized() }),
   );
   const [uploads] = useState(
     () =>
@@ -59,10 +72,7 @@ export function App() {
             void sync.poll();
           }
         },
-        onUnauthorized: () => {
-          setStatus(null);
-          setRoute({ kind: 'inbox' });
-        },
+        onUnauthorized: () => unauthorized(),
         // Status and error code only (the code is the error's message); never the file's name.
         report: (err) =>
           captureRequestFailure(err, {
@@ -80,6 +90,7 @@ export function App() {
 
   /** The first read, and Retry: only a 401 means signed out. */
   async function readStatus(): Promise<void> {
+    statusGeneration.current++;
     try {
       setStatus(await api.status());
       setUnreachable(false);
@@ -136,30 +147,89 @@ export function App() {
     void import('../pdf/build.js').catch(() => {});
   }, [email]);
 
-  /** Reads the status again: a 401 signs out; any other failure keeps what is shown. */
-  async function refreshStatus(): Promise<void> {
+  /**
+   * Reads the status again: a 401 signs out; any other failure keeps what is
+   * shown. Returns the status applied, `unauthorized` after a 401, or null
+   * when nothing was applied (a failure, or a newer read or answer won).
+   */
+  async function refreshStatus(): Promise<StatusResponse | 'unauthorized' | null> {
+    const mine = ++statusGeneration.current;
     try {
-      setStatus(await api.status());
+      const next = await api.status();
+      if (mine !== statusGeneration.current) return null;
+      takeStatus(next);
+      return next;
     } catch (e) {
-      if (e instanceof ApiError && e.status === 401) setStatus(null);
-      else console.error('could not refresh the sign-in status', (e as Error)?.name);
+      if (mine !== statusGeneration.current) return null;
+      if (e instanceof ApiError && e.status === 401) {
+        unauthorized();
+        return 'unauthorized';
+      }
+      console.error('could not refresh the sign-in status', (e as Error)?.name);
+      return null;
     }
   }
 
+  /** A status from an answer (unlock): any read still in flight is older. */
+  function statusFromAnswer(next: StatusResponse) {
+    statusGeneration.current++;
+    takeStatus(next);
+  }
+
+  /**
+   * Applies a status read or answered after the first. The last passkey gone
+   * (removed, or by a login after a password change): the nudge may show again
+   * after the next login.
+   */
+  function takeStatus(next: StatusResponse) {
+    if ((statusRef.current?.passkeys ?? 0) > 0 && next.passkeys === 0) clearNudgeDismissal();
+    setStatus(next);
+  }
+
+  // A warm app never hears of a server restart on its own (spec §3): read the
+  // status again when it may have changed. A layout effect, so the listeners
+  // stop at sign-out and unmount, not after paint.
+  useLayoutEffect(() => {
+    if (!email) return;
+    return watchStatus({ sync, refresh: refreshStatus, isLive: () => statusRef.current?.proton === 'live' });
+  }, [email]);
+
   function signedOut() {
+    statusGeneration.current++;
     setStatus(null);
+    setLoginReason(undefined);
     setRoute({ kind: 'inbox' });
+  }
+
+  /**
+   * A request found the session gone. In header mode that is the proxy's
+   * sign-in (Authelia's session expired, or its 401 page): a Proton login
+   * can't help, so the app asks for a reload. Uses only refs and setters: the
+   * sync and the queue keep the first render's.
+   */
+  function unauthorized() {
+    if (statusRef.current?.unlockAvailable === true) setExpired(true);
+    signedOut();
   }
 
   function loggedIn(signedInEmail: string) {
     // Live at once; the refresh brings the passkey count and the mode.
+    statusGeneration.current++;
     setStatus((s) => ({ email: signedInEmail, proton: 'live', passkeys: s?.passkeys ?? 0, unlockAvailable: s?.unlockAvailable }));
     setRoute({ kind: 'inbox' });
+    setLoginReason(undefined);
     setJustSignedIn(true);
     void refreshStatus();
   }
 
   async function signInAgain() {
+    // In header mode the server may have restarted since the status was read:
+    // locked, the inbox's unlock banner is the way back, not a password.
+    if (status?.unlockAvailable === true) {
+      const now = await refreshStatus();
+      // Signed out: the screen that says so is already showing.
+      if (now === 'unauthorized' || now?.proton === 'locked') return;
+    }
     // Header mode, or a mode not known yet: sign in to Proton over the app. In
     // header mode a logout would remove the passkeys too, so only a server that
     // has said it is in cookie mode gets one.
@@ -181,6 +251,18 @@ export function App() {
   }
 
   if (!loaded) return <main class="auth-screen">Loading…</main>;
+  if (expired) {
+    return (
+      <main class="auth-screen">
+        <h1>doc-scanner</h1>
+        <p class="warn" role="alert">Your sign-in has expired.</p>
+        {/* An installed iOS app has no reload control of its own. */}
+        <button class="btn btn-block" onClick={() => location.reload()}>
+          Reload
+        </button>
+      </main>
+    );
+  }
   if (unreachable) {
     return (
       <main class="auth-screen">
@@ -189,11 +271,27 @@ export function App() {
         <button class="btn btn-block" disabled={retrying} onClick={() => void retry()}>
           Retry
         </button>
+        {/* In every mode: an expired proxy sign-in answered with a cross-origin
+            redirect reads as no answer, and only a reload goes through it. */}
+        <button class="btn btn-secondary btn-block" onClick={() => location.reload()} style={{ marginTop: 8 }}>
+          Reload
+        </button>
       </main>
     );
   }
-  if (!status || status.proton === 'none') return <LoginScreen onLoggedIn={loggedIn} />;
-  if (route.kind === 'proton-login') return <LoginScreen onLoggedIn={loggedIn} onCancel={() => setRoute({ kind: 'inbox', focusHeading: true })} />;
+  if (!status || status.proton === 'none') return <LoginScreen onLoggedIn={loggedIn} reason={loginReason} />;
+  if (route.kind === 'proton-login') {
+    return (
+      <LoginScreen
+        onLoggedIn={loggedIn}
+        reason={loginReason}
+        onCancel={() => {
+          setLoginReason(undefined);
+          setRoute({ kind: 'inbox', focusHeading: true });
+        }}
+      />
+    );
+  }
 
   if (resume && route.kind === 'inbox') {
     return (
@@ -216,8 +314,11 @@ export function App() {
         onSignInAgain={() => void signInAgain()}
         proton={status.proton}
         passkeys={status.passkeys}
-        onUnlocked={setStatus}
-        onStatusChanged={() => void refreshStatus()}
+        onUnlocked={statusFromAnswer}
+        onStatusChanged={(code) => {
+          if (code === 'proton_login_required') setLoginReason('proton_ended');
+          void refreshStatus();
+        }}
         onSignInToProton={() => setRoute({ kind: 'proton-login' })}
         showPasskeyNudge={justSignedIn && status.unlockAvailable === true && status.passkeys === 0}
         // Done with for this sign-in: removing the last passkey later must not bring it back.
@@ -238,7 +339,11 @@ export function App() {
             void refreshStatus();
           }}
           onBack={() => setRoute({ kind: 'inbox' })}
-          onLoggedOut={signedOut}
+          onLoggedOut={() => {
+            // A sign-out removes every passkey too.
+            if (status.passkeys > 0) clearNudgeDismissal();
+            signedOut();
+          }}
         />
       );
     case 'scanner':

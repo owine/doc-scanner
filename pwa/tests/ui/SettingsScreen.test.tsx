@@ -274,6 +274,7 @@ describe('SettingsScreen', () => {
       remove: vi.fn(),
       begin: vi.fn(),
       enrol: vi.fn(),
+      forget: vi.fn(),
     };
     render(
       <SettingsScreen

@@ -8,12 +8,12 @@ export interface LockedBannerProps {
   onUnlocked: (status: StatusResponse) => void;
   /** Opens the sign-in-to-Proton screen. */
   onSignIn: () => void;
-  /** The server changed the Proton state or the passkeys (a refusal that cleared something). */
-  onStatusChanged?: () => void;
+  /** The server changed the Proton state or the passkeys (a refusal that cleared something), with its code. */
+  onStatusChanged?: (code: string) => void;
   client?: UnlockClient;
 }
 
-type Problem = 'retry' | 'unavailable' | 'login_required' | 'stale' | 'unreadable';
+type Problem = 'retry' | 'unavailable' | 'no_prf' | 'login_required' | 'stale' | 'unreadable';
 
 function problemOf(code: string): Problem {
   switch (code) {
@@ -26,6 +26,8 @@ function problemOf(code: string): Problem {
       return 'unreadable';
     case 'proton_unavailable':
       return 'unavailable';
+    case 'no_prf':
+      return 'no_prf';
     default:
       return 'retry';
   }
@@ -112,7 +114,7 @@ export function LockedBanner({ passkeys, onUnlocked, onSignIn, onStatusChanged =
     // gets fresh salts. Not when only Sign in to Proton is left.
     else prefetch();
     setProblem(next);
-    if (outcome.kind === 'failed' && STATUS_CHANGING.has(outcome.code)) onStatusChanged();
+    if (outcome.kind === 'failed' && STATUS_CHANGING.has(outcome.code)) onStatusChanged(outcome.code);
   }
 
   const signInOnly = problem && SIGN_IN_ONLY.has(problem) ? (problem as keyof typeof SIGN_IN_TEXT) : passkeys === 0 ? 'login_required' : null;
@@ -132,8 +134,13 @@ export function LockedBanner({ passkeys, onUnlocked, onSignIn, onStatusChanged =
       <button class="btn btn-small" disabled={busy || preparing} onClick={() => void tap()}>
         {busy ? 'Unlocking…' : 'Unlock'}
       </button>
+      {/* A lost device, a passkey without PRF, a server error: a way out that keeps the passkeys. */}{' '}
+      <button class="btn btn-secondary btn-small" onClick={onSignIn}>
+        Sign in with password instead
+      </button>
       {problem === 'retry' && <p class="error-text">Couldn’t unlock. Try again.</p>}
       {problem === 'unavailable' && <p class="error-text">Proton isn’t reachable right now. Try again in a moment.</p>}
+      {problem === 'no_prf' && <p class="error-text">That passkey can’t unlock here. Try another, or sign in with your password.</p>}
     </div>
   );
 }

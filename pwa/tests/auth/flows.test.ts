@@ -87,10 +87,11 @@ describe('unlock', () => {
     expect(await unlock([{ credentialId: ID, salt: SALT }])).toEqual({ kind: 'failed', code: 'passkeys_stale' });
   });
 
-  it('fails as unlock_failed when the passkey gives no PRF output', async () => {
-    server({});
+  it('fails as no_prf when the passkey gives no PRF output, sending nothing', async () => {
+    const fetch = server({});
     installCredentials().get.mockResolvedValue(fakeCredential(ID, null));
-    expect(await unlock([{ credentialId: ID, salt: SALT }])).toEqual({ kind: 'failed', code: 'unlock_failed' });
+    expect(await unlock([{ credentialId: ID, salt: SALT }])).toEqual({ kind: 'failed', code: 'no_prf' });
+    expect(fetch).not.toHaveBeenCalled();
   });
 });
 
@@ -171,6 +172,16 @@ describe('enrol', () => {
     vi.stubGlobal('PublicKeyCredential', { signalUnknownCredential });
     expect(await enrol('Phone', 'user@example.test', BEGIN)).toEqual({ kind: 'failed', code: 'proton_not_live', forgotten: true });
     expect(signalUnknownCredential).toHaveBeenCalledWith({ rpId: location.hostname, credentialId: ID });
+  });
+
+  it('keeps a passkey the server already holds, and says it is already added', async () => {
+    server({ 'POST /api/passkeys': json({ error: 'already_enrolled' }, 409) });
+    installCredentials().create.mockResolvedValue(fakeCredential(ID, PRF));
+    const signalUnknownCredential = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('PublicKeyCredential', { signalUnknownCredential });
+    const outcome = await enrol('Phone', 'user@example.test', BEGIN);
+    expect(outcome).toEqual({ kind: 'already_added' });
+    expect(signalUnknownCredential).not.toHaveBeenCalled();
   });
 
   for (const [label, response] of [

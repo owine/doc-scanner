@@ -268,6 +268,14 @@ describe('InboxScreen', () => {
     expect(screen.getByRole('status')).toHaveTextContent("Can't reach the server.");
     expect(screen.queryByText(/nothing to review/i)).toBeNull();
     expect(screen.queryByText(/showing what was last loaded/i)).toBeNull();
+    // An expired proxy sign-in answered with a redirect looks like this too: a reload goes through it.
+    const reload = vi.spyOn(window.location, 'reload').mockImplementation(() => {});
+    try {
+      fireEvent.click(screen.getByRole('button', { name: 'Reload' }));
+      expect(reload).toHaveBeenCalledTimes(1);
+    } finally {
+      reload.mockRestore();
+    }
     await folderLoad(api);
   });
 
@@ -280,6 +288,7 @@ describe('InboxScreen', () => {
     render(<InboxScreen sync={sync} documents={api} now={() => NOW} onScan={vi.fn()} uploads={makeQueue()} scans={new ScansStore()} onSettings={vi.fn()} onSignInAgain={vi.fn()} />);
     expect(screen.getByText(/showing what was last loaded/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Reload' })).toBeInTheDocument();
     await folderLoad(api);
   });
 

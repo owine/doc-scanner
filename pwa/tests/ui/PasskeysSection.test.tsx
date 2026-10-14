@@ -15,6 +15,7 @@ function setup(over: Partial<PasskeysClient> = {}, props: Partial<PasskeysSectio
     remove: vi.fn().mockResolvedValue({}),
     begin: vi.fn().mockResolvedValue(BEGIN),
     enrol: vi.fn().mockResolvedValue({ kind: 'added', passkey: LAPTOP }),
+    forget: vi.fn().mockResolvedValue(true),
     ...over,
   };
   const onChanged = vi.fn();
@@ -146,6 +147,25 @@ describe('PasskeysSection', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Remove Laptop' }));
     await waitFor(() => expect(screen.queryByText('Laptop')).toBeNull());
     expect(onChanged).toHaveBeenCalledTimes(2);
+  });
+
+  it('asks the password manager to forget a removed passkey, and ignores its failure', async () => {
+    const { client, onChanged } = setup({
+      list: vi.fn().mockResolvedValue({ passkeys: [PHONE, LAPTOP], notice: null }),
+      forget: vi.fn().mockRejectedValue(new Error('unsupported')),
+    });
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove Phone' }));
+    await waitFor(() => expect(screen.queryByText('Phone')).toBeNull());
+    expect(client.forget).toHaveBeenCalledWith(PHONE.credentialId);
+    expect(onChanged).toHaveBeenCalledWith('removed');
+    expect(screen.getByRole('status')).toHaveTextContent('');
+  });
+
+  it('forgets nothing when the removal failed', async () => {
+    const { client } = setup({ remove: vi.fn().mockRejectedValue(new ApiError('internal', 500, 'internal')) });
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove Phone' }));
+    expect(await screen.findByText('Could not remove the passkey.')).toBeInTheDocument();
+    expect(client.forget).not.toHaveBeenCalled();
   });
 
   it('keeps a passkey that Finish setup may still store when Settings closes mid-step', async () => {

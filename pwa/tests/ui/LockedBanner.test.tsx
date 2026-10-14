@@ -79,6 +79,35 @@ describe('LockedBanner', () => {
     });
   }
 
+  it('offers a password sign-in beside Unlock, which never logs out', async () => {
+    const { client, onSignIn } = setup({ kind: 'failed', code: 'unlock_failed' });
+    await prepared(client);
+    expect(screen.getByRole('button', { name: 'Unlock' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in with password instead' }));
+    expect(onSignIn).toHaveBeenCalledTimes(1);
+    expect(client.unlock).not.toHaveBeenCalled();
+  });
+
+  it('keeps the password sign-in after a failed unlock', async () => {
+    const { client, onSignIn } = setup({ kind: 'failed', code: 'error' });
+    await prepared(client);
+    fireEvent.click(screen.getByRole('button', { name: 'Unlock' }));
+    expect(await screen.findByText(RETRY)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in with password instead' }));
+    expect(onSignIn).toHaveBeenCalledTimes(1);
+  });
+
+  it('says a passkey without PRF can’t unlock here, keeping both ways out', async () => {
+    const { client, onStatusChanged } = setup({ kind: 'failed', code: 'no_prf' });
+    await prepared(client);
+    fireEvent.click(screen.getByRole('button', { name: 'Unlock' }));
+    expect(await screen.findByText('That passkey can’t unlock here. Try another, or sign in with your password.')).toBeInTheDocument();
+    expect(screen.queryByText(RETRY)).toBeNull();
+    expect(screen.getByRole('button', { name: 'Unlock' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Sign in with password instead' })).toBeInTheDocument();
+    expect(onStatusChanged).not.toHaveBeenCalled();
+  });
+
   it('says Proton is unreachable, keeping the button', async () => {
     const { client } = setup({ kind: 'failed', code: 'proton_unavailable' });
     await prepared(client);
@@ -101,6 +130,8 @@ describe('LockedBanner', () => {
       fireEvent.click(unlockButton);
       expect(await screen.findByText(text)).toBeInTheDocument();
       expect(onStatusChanged).toHaveBeenCalledTimes(1);
+      // The app says why on the sign-in screen that may follow.
+      expect(onStatusChanged).toHaveBeenCalledWith(code);
       expect(screen.queryByRole('button', { name: 'Unlock' })).toBeNull();
       // Unlock is gone: focus moves to what replaced it.
       expect(screen.getByRole('button', { name: 'Sign in to Proton' })).toHaveFocus();
