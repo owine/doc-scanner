@@ -22,6 +22,9 @@ const light = declarations(/(?:^|\n)\s*:root\s*\{([^}]*)\}/);
 const systemDark = declarations(/@media\s*\(prefers-color-scheme:\s*dark\)\s*\{\s*:root:not\(\[data-theme="light"\]\)\s*\{([^}]*)\}/);
 const chosenDark = declarations(/:root\[data-theme="dark"\]\s*\{([^}]*)\}/);
 
+/** Tokens that are deliberately the same in both themes: camera surfaces, type, spacing, radii, motion. */
+const SAME_IN_BOTH = /^--(ink-(bg|fg|line|success|warning|danger)|font-|fs-|sp-|r-|ease-|dur-)/;
+
 describe('tokens.css', () => {
   it('defines the owine light palette on bare :root', () => {
     expect(light.get('--paper')).toBe('#f6f4ef');
@@ -41,5 +44,22 @@ describe('tokens.css', () => {
 
   it('uses a dark control border that clears 3:1', () => {
     expect(systemDark.get('--line-strong')).toBe('#626e80');
+  });
+
+  it('overrides every theme-dependent token in dark', () => {
+    for (const name of light.keys()) if (!SAME_IN_BOTH.test(name)) expect(systemDark.has(name), name).toBe(true);
+  });
+
+  it('declares only well-formed names and values', () => {
+    for (const block of [light, systemDark, chosenDark]) {
+      for (const [name, value] of block) {
+        expect(name).toMatch(/^(--[a-z0-9-]+|color-scheme)$/);
+        expect(value, name).not.toMatch(/--|:/);
+      }
+    }
+  });
+
+  it('has exactly one dark media query', () => {
+    expect(css.match(/prefers-color-scheme:\s*dark/g)).toHaveLength(1);
   });
 });

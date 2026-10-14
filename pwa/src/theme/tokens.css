@@ -1,8 +1,8 @@
 /* owine design tokens, the PWA's copy of the owine design system.
    Bare :root is the light palette. The dark overrides appear twice, once for
    the system setting and once for an explicit choice in Settings, and
-   tests/theme/tokens.test.ts keeps the two identical. Never put a brace in a
-   comment here: the test finds blocks by brace. */
+   tests/theme/tokens.test.ts keeps the two identical. Keep dark overrides in this
+   file only, and no brace or semicolon inside a value: the test splits blocks on them. */
 :root {
   /* surfaces and lines */
   --paper: #f6f4ef;
