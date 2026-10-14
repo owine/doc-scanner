@@ -6,7 +6,7 @@ import type { Settings } from '../documents/types.js';
 import { useFolders } from '../documents/use-folders.js';
 import { useTheme } from '../theme/use-theme.js';
 import { FolderPicker } from './inbox/FolderPicker.js';
-import { PasskeysSection } from './PasskeysSection.js';
+import { PasskeysSection, type PasskeyChange } from './PasskeysSection.js';
 
 export interface SettingsScreenProps {
   email: string;
@@ -17,8 +17,10 @@ export interface SettingsScreenProps {
   unlockAvailable?: boolean;
   proton?: ProtonState;
   /** A passkey was added or removed. */
-  onPasskeysChanged?: () => void;
+  onPasskeysChanged?: (change: PasskeyChange) => void;
   passkeysClient?: PasskeysClient;
+  /** Opened to add a passkey (the inbox's nudge): scroll to Passkeys and focus Add passkey. */
+  focusPasskeys?: boolean;
 }
 
 /**
@@ -52,6 +54,7 @@ export function SettingsScreen({
   proton = 'live',
   onPasskeysChanged = () => {},
   passkeysClient,
+  focusPasskeys = false,
 }: SettingsScreenProps) {
   const { pref, setPref } = useTheme();
   const folders = useFolders(documents);
@@ -291,6 +294,7 @@ export function SettingsScreen({
           email={email}
           live={proton === 'live'}
           onChanged={onPasskeysChanged}
+          focusAdd={focusPasskeys}
           {...(passkeysClient ? { client: passkeysClient } : {})}
         />
       )}

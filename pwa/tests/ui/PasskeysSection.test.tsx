@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/preact';
+import { act, render, screen, fireEvent, waitFor, within } from '@testing-library/preact';
 import { PasskeysSection, type PasskeysSectionProps } from '../../src/ui/PasskeysSection.js';
 import type { EnrolOutcome, PasskeysClient } from '../../src/auth/flows.js';
 import { ApiError, type PasskeyBegin, type PasskeyEntry } from '../../src/api.js';
@@ -146,6 +146,89 @@ describe('PasskeysSection', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Remove Laptop' }));
     await waitFor(() => expect(screen.queryByText('Laptop')).toBeNull());
     expect(onChanged).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps a passkey that Finish setup may still store when Settings closes mid-step', async () => {
+    let settle!: (o: EnrolOutcome) => void;
+    const finish = vi.fn(() => new Promise<EnrolOutcome>((resolve) => { settle = resolve; }));
+    const abandon = vi.fn<() => Promise<boolean>>().mockResolvedValue(true);
+    const { unmount } = setup({ enrol: vi.fn().mockResolvedValue({ kind: 'finish_setup', finish, abandon }) });
+    await startAdding();
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Finish setup' }));
+    expect(finish).toHaveBeenCalled();
+    unmount();
+    await act(async () => settle({ kind: 'added', passkey: LAPTOP }));
+    expect(abandon).not.toHaveBeenCalled();
+  });
+
+  it('hides a half-made passkey whose setup comes back after Settings closed', async () => {
+    let settle!: (o: EnrolOutcome) => void;
+    const abandon = vi.fn<() => Promise<boolean>>().mockResolvedValue(true);
+    const enrol = vi.fn(() => new Promise<EnrolOutcome>((resolve) => { settle = resolve; }));
+    const { unmount } = setup({ enrol });
+    await startAdding();
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    unmount();
+    await act(async () => settle({ kind: 'finish_setup', finish: vi.fn(), abandon }));
+    expect(abandon).toHaveBeenCalledTimes(1);
+  });
+
+  it('moves focus to Finish setup when the name form gives way to it', async () => {
+    setup({ enrol: unfinished().enrol });
+    await startAdding();
+    const cont = screen.getByRole('button', { name: 'Continue' });
+    cont.focus();
+    fireEvent.click(cont);
+    expect(await screen.findByRole('button', { name: 'Finish setup' })).toHaveFocus();
+  });
+
+  it('moves focus back to Add passkey after Cancel setup, and after the form is cancelled', async () => {
+    setup({ enrol: unfinished().enrol });
+    await startAdding();
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Cancel setup' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Add passkey' })).toHaveFocus());
+    await startAdding();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.getByRole('button', { name: 'Add passkey' })).toHaveFocus();
+  });
+
+  it('moves focus to Add passkey after a removal, or to the heading when Add is not offered', async () => {
+    const { unmount } = setup();
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove Phone' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Add passkey' })).toHaveFocus());
+    unmount();
+    setup({}, { live: false });
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove Phone' }));
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Passkeys' })).toHaveFocus());
+  });
+
+  it('does not show a step or a cancelled setup as an error', async () => {
+    setup({ enrol: unfinished().enrol });
+    await startAdding();
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    expect(await screen.findByText(/one more step/i)).not.toHaveClass('error-text');
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel setup' }));
+    expect(await screen.findByText('Setup cancelled.')).not.toHaveClass('error-text');
+  });
+
+  it('removes once on a double tap', async () => {
+    let done!: (v: unknown) => void;
+    const { client } = setup({ remove: vi.fn(() => new Promise((resolve) => { done = resolve; })) });
+    const button = await screen.findByRole('button', { name: 'Remove Phone' });
+    fireEvent.click(button);
+    fireEvent.click(button);
+    expect(client.remove).toHaveBeenCalledTimes(1);
+    await act(async () => done({}));
+    await waitFor(() => expect(screen.queryByText('Phone')).toBeNull());
+  });
+
+  it('names each Remove button apart when labels repeat', async () => {
+    const short = (iso: string) => new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+    setup({ list: vi.fn().mockResolvedValue({ passkeys: [{ ...PHONE, label: 'Passkey' }, { ...LAPTOP, label: 'Passkey' }], notice: null }) });
+    expect(await screen.findByRole('button', { name: `Remove Passkey (added ${short(PHONE.createdAt)})` })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: `Remove Passkey (added ${short(LAPTOP.createdAt)})` })).toBeInTheDocument();
   });
 
   it('offers no Add passkey without live Proton keys', async () => {
