@@ -1,0 +1,10 @@
+/* Sign-in and the full-page states. */
+.auth-screen {
+  max-width: 480px; margin: 0 auto;
+  padding: 24px 16px;
+  padding-top: max(24px, env(safe-area-inset-top));
+  padding-bottom: max(24px, env(safe-area-inset-bottom));
+}
+@media (min-width: 600px) {
+  .auth-screen { padding-top: 40px; padding-bottom: 40px; }
+}

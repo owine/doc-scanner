@@ -82,8 +82,8 @@ export function EditCornersScreen({ canvas, initialQuad, onCancel, onApply }: Ed
   const valid = quadIsValid(quad);
 
   return (
-    <main style={{ display: 'flex', flexDirection: 'column', height: '100dvh', background: 'var(--bg)', paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' }}>
-      <header style={{ display: 'flex', justifyContent: 'space-between', padding: 12, background: 'var(--bg-elev)', borderBottom: '1px solid var(--border)' }}>
+    <main style={{ display: 'flex', flexDirection: 'column', height: '100dvh', background: 'var(--paper)', paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' }}>
+      <header style={{ display: 'flex', justifyContent: 'space-between', padding: 12, background: 'var(--card)', borderBottom: '1px solid var(--line)' }}>
         <button class="btn btn-secondary" onClick={onCancel}>Cancel</button>
         <strong>Adjust corners</strong>
         <span style={{ width: 60 }} />
@@ -107,7 +107,7 @@ export function EditCornersScreen({ canvas, initialQuad, onCancel, onApply }: Ed
           />
         ))}
       </div>
-      <footer style={{ display: 'flex', gap: 8, padding: 12, background: 'var(--bg-elev)', borderTop: '1px solid var(--border)' }}>
+      <footer style={{ display: 'flex', gap: 8, padding: 12, background: 'var(--card)', borderTop: '1px solid var(--line)' }}>
         <button class="btn btn-secondary" style={{ flex: 1 }} onClick={onCancel}>Cancel</button>
         <button class="btn" style={{ flex: 1 }} onClick={() => onApply(quad)} disabled={!valid}>Apply</button>
       </footer>

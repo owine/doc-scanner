@@ -1,5 +1,8 @@
 import { initSentry } from './observability/sentry.js';
-import './theme/theme.css';
+import './theme/tokens.css';
+import './theme/base.css';
+import './theme/auth.css';
+import './theme/inbox.css';
 import { render } from 'preact';
 import { App } from './ui/App.js';
 import { warmServiceWorkerCache } from './sw-warm.js';
