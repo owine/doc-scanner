@@ -16,9 +16,19 @@ export type EnrolResult =
   /** Created, but it gives no PRF output, so it can't unlock. */
   | { kind: 'prf_unsupported'; credentialId: string }
   /** Safari refused the follow-up prompt without a new tap: run `finish` from a button. */
-  | { kind: 'finish_setup'; credentialId: string; finish: () => Promise<EnrolResult> };
+  | { kind: 'finish_setup'; credentialId: string; finish: () => Promise<EnrolResult> }
+  /**
+   * WebAuthn failed (`webauthn_<DOMException name>`). `credentialId`: the
+   * follow-up prompt failed after creation, so a passkey exists that can't unlock.
+   */
+  | { kind: 'failed'; code: string; credentialId?: string };
 
-export type UnlockResult = { kind: 'ok'; credentialId: string; prf: string } | { kind: 'cancelled' } | { kind: 'no_prf' };
+export type UnlockResult =
+  | { kind: 'ok'; credentialId: string; prf: string }
+  | { kind: 'cancelled' }
+  | { kind: 'no_prf' }
+  /** `webauthn_<DOMException name>`. */
+  | { kind: 'failed'; code: string };
 
 const RP_NAME = 'Doc Scanner';
 // ES256 and RS256: what platform authenticators and password managers offer.
@@ -49,6 +59,12 @@ const descriptor = (credentialId: string): PublicKeyCredentialDescriptor => ({ t
 
 function errorName(e: unknown): string | undefined {
   return typeof e === 'object' && e !== null && 'name' in e && typeof e.name === 'string' ? e.name : undefined;
+}
+
+/** A WebAuthn failure other than the ones mapped by name: its code, or the error itself for anything that isn't a DOMException. */
+function webauthnCode(e: unknown): string {
+  if (e instanceof DOMException) return `webauthn_${e.name}`;
+  throw e;
 }
 
 function asPublicKey(c: Credential | null): PublicKeyCredential | null {
@@ -83,13 +99,17 @@ export async function enrolPasskey(begin: PasskeyBegin, email: string): Promise<
       }),
     );
   } catch (e) {
-    if (errorName(e) === 'NotAllowedError') return { kind: 'cancelled' };
-    if (errorName(e) === 'InvalidStateError') return { kind: 'already_added' };
-    throw e;
+    const name = errorName(e);
+    // AbortError: the page or the browser stopped the prompt; nothing was made.
+    if (name === 'NotAllowedError' || name === 'AbortError') return { kind: 'cancelled' };
+    if (name === 'InvalidStateError') return { kind: 'already_added' };
+    return { kind: 'failed', code: webauthnCode(e) };
   }
   if (!created) return { kind: 'cancelled' };
   const prf = prfOf(created);
   if (prf) return { kind: 'ok', credentialId: created.id, prf };
+  // The authenticator said it has no PRF: a second prompt would only ask for nothing.
+  if (created.getClientExtensionResults().prf?.enabled === false) return { kind: 'prf_unsupported', credentialId: created.id };
   return readPrf(created.id, salt);
 }
 
@@ -110,7 +130,8 @@ async function readPrf(credentialId: string, salt: Uint8Array<ArrayBuffer>): Pro
   } catch (e) {
     // Safari may refuse a second prompt without a fresh tap; a tap on Finish setup asks again.
     if (errorName(e) === 'NotAllowedError') return { kind: 'finish_setup', credentialId, finish: () => readPrf(credentialId, salt) };
-    throw e;
+    // The passkey exists, so the caller can ask the password manager to hide it.
+    return { kind: 'failed', code: e instanceof DOMException ? `webauthn_${e.name}` : 'error', credentialId };
   }
   const prf = got ? prfOf(got) : null;
   return prf ? { kind: 'ok', credentialId, prf } : { kind: 'prf_unsupported', credentialId };
@@ -133,8 +154,9 @@ export async function unlockWithPasskey(credentials: UnlockCredential[]): Promis
       }),
     );
   } catch (e) {
-    if (errorName(e) === 'NotAllowedError') return { kind: 'cancelled' };
-    throw e;
+    const name = errorName(e);
+    if (name === 'NotAllowedError' || name === 'AbortError') return { kind: 'cancelled' };
+    return { kind: 'failed', code: webauthnCode(e) };
   }
   if (!got) return { kind: 'cancelled' };
   const prf = prfOf(got);

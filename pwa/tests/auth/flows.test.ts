@@ -46,6 +46,34 @@ describe('unlock', () => {
     expect(fetch.mock.calls.map(([url]) => url)).toEqual(['/api/auth/unlock']);
   });
 
+  it('starts the prompt within the tap when the salts were fetched before it (iOS needs the gesture)', async () => {
+    server({ 'POST /api/auth/unlock': json(STATUS) });
+    const c = installCredentials();
+    c.get.mockResolvedValue(fakeCredential(ID, PRF));
+    const p = unlock([{ credentialId: ID, salt: SALT }]);
+    expect(c.get).toHaveBeenCalledTimes(1);
+    await p;
+  });
+
+  it('fetches the salts itself when none were prepared', async () => {
+    const fetch = server({
+      'POST /api/auth/unlock/begin': json({ credentials: [{ credentialId: ID, salt: SALT }] }),
+      'POST /api/auth/unlock': json(STATUS),
+    });
+    installCredentials().get.mockResolvedValue(fakeCredential(ID, PRF));
+    expect(await unlock([])).toEqual({ kind: 'unlocked', status: STATUS });
+    expect(fetch.mock.calls.map(([url]) => url)).toEqual(['/api/auth/unlock/begin', '/api/auth/unlock']);
+  });
+
+  it('asks the password manager to hide a passkey the server does not know', async () => {
+    server({ 'POST /api/auth/unlock': json({ error: 'unknown_passkey' }, 404) });
+    installCredentials().get.mockResolvedValue(fakeCredential(ID, PRF));
+    const signalUnknownCredential = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('PublicKeyCredential', { signalUnknownCredential });
+    expect(await unlock([{ credentialId: ID, salt: SALT }])).toEqual({ kind: 'failed', code: 'unknown_passkey' });
+    expect(signalUnknownCredential).toHaveBeenCalledWith({ rpId: location.hostname, credentialId: ID });
+  });
+
   it('sends nothing when the prompt is cancelled', async () => {
     const fetch = server({});
     installCredentials().get.mockRejectedValue(domError('NotAllowedError'));
@@ -81,6 +109,15 @@ describe('enrol', () => {
     expect(fetch.mock.calls.map(([url]) => url)).toEqual(['/api/passkeys']);
   });
 
+  it('starts the prompt within the tap when begin was fetched before it (iOS needs the gesture)', async () => {
+    server({ 'POST /api/passkeys': json(ENTRY, 201) });
+    const c = installCredentials();
+    c.create.mockResolvedValue(fakeCredential(ID, PRF));
+    const p = enrol('Phone', 'user@example.test', BEGIN);
+    expect(c.create).toHaveBeenCalledTimes(1);
+    await p;
+  });
+
   it('stores nothing for a passkey without PRF, and asks the password manager to hide it', async () => {
     const fetch = server({});
     const c = installCredentials();
@@ -107,7 +144,11 @@ describe('enrol', () => {
     c.get.mockRejectedValueOnce(domError('NotAllowedError')).mockResolvedValueOnce(fakeCredential(ID, PRF));
     const first = await enrol('Phone', 'user@example.test', BEGIN);
     if (first.kind !== 'finish_setup') throw new Error(`expected finish_setup, got ${first.kind}`);
-    expect(await first.finish()).toEqual({ kind: 'added', passkey: ENTRY });
+    expect(c.get).toHaveBeenCalledTimes(1);
+    // The Finish setup tap starts the prompt itself.
+    const p = first.finish();
+    expect(c.get).toHaveBeenCalledTimes(2);
+    expect(await p).toEqual({ kind: 'added', passkey: ENTRY });
   });
 
   it('asks the password manager to hide a passkey abandoned at Finish setup', async () => {
@@ -132,6 +173,22 @@ describe('enrol', () => {
     expect(signalUnknownCredential).toHaveBeenCalledWith({ rpId: location.hostname, credentialId: ID });
   });
 
+  for (const [label, response] of [
+    ['a proxy 502 with an HTML page', () => new Response('<html><body>Bad Gateway</body></html>', { status: 502 })],
+    ['a 500 from the server', json({ error: 'internal' }, 500)],
+  ] as const) {
+    it(`keeps a passkey whose add got ${label}: the server may have stored it`, async () => {
+      server({ 'POST /api/passkeys': response });
+      installCredentials().create.mockResolvedValue(fakeCredential(ID, PRF));
+      const signalUnknownCredential = vi.fn().mockResolvedValue(undefined);
+      vi.stubGlobal('PublicKeyCredential', { signalUnknownCredential });
+      const outcome = await enrol('Phone', 'user@example.test', BEGIN);
+      expect(outcome).toMatchObject({ kind: 'failed' });
+      expect(outcome).not.toHaveProperty('forgotten');
+      expect(signalUnknownCredential).not.toHaveBeenCalled();
+    });
+  }
+
   it('keeps a passkey whose add never got an answer: the server may have stored it', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
     installCredentials().create.mockResolvedValue(fakeCredential(ID, PRF));
@@ -139,6 +196,18 @@ describe('enrol', () => {
     vi.stubGlobal('PublicKeyCredential', { signalUnknownCredential });
     expect(await enrol('Phone', 'user@example.test', BEGIN)).toEqual({ kind: 'failed', code: 'error' });
     expect(signalUnknownCredential).not.toHaveBeenCalled();
+  });
+
+  it('hides a passkey whose follow-up prompt failed, and fails with the WebAuthn error', async () => {
+    const fetch = server({});
+    const c = installCredentials();
+    c.create.mockResolvedValue(fakeCredential(ID, null));
+    c.get.mockRejectedValue(domError('SecurityError'));
+    const signalUnknownCredential = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('PublicKeyCredential', { signalUnknownCredential });
+    expect(await enrol('Phone', 'user@example.test', BEGIN)).toEqual({ kind: 'failed', code: 'webauthn_SecurityError', forgotten: true });
+    expect(signalUnknownCredential).toHaveBeenCalledWith({ rpId: location.hostname, credentialId: ID });
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it('maps a cancelled prompt and an already-added passkey, and fails on a server error', async () => {

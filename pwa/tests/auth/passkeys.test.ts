@@ -71,14 +71,41 @@ describe('enrolPasskey', () => {
     expect(await enrolPasskey(BEGIN, 'user@example.test')).toEqual({ kind: 'prf_unsupported', credentialId: ID });
   });
 
-  it('maps a cancelled prompt, an already-added passkey, and passes other failures on', async () => {
+  it('says at once that a passkey created without PRF cannot unlock, with no second prompt', async () => {
+    const c = installCredentials();
+    c.create.mockResolvedValue(fakeCredential(ID, null, { enabled: false }));
+    expect(await enrolPasskey(BEGIN, 'user@example.test')).toEqual({ kind: 'prf_unsupported', credentialId: ID });
+    expect(c.get).not.toHaveBeenCalled();
+  });
+
+  it('still asks again when creation enabled PRF but gave no result', async () => {
+    const c = installCredentials();
+    c.create.mockResolvedValue(fakeCredential(ID, null, { enabled: true }));
+    c.get.mockResolvedValue(fakeCredential(ID, PRF));
+    expect(await enrolPasskey(BEGIN, 'user@example.test')).toEqual({ kind: 'ok', credentialId: ID, prf: toBase64url(PRF) });
+  });
+
+  it('fails with the passkey it made when the follow-up prompt fails for another reason', async () => {
+    const c = installCredentials();
+    c.create.mockResolvedValue(fakeCredential(ID, null));
+    c.get.mockRejectedValueOnce(domError('SecurityError'));
+    expect(await enrolPasskey(BEGIN, 'user@example.test')).toEqual({ kind: 'failed', code: 'webauthn_SecurityError', credentialId: ID });
+    c.get.mockRejectedValueOnce(domError('AbortError'));
+    expect(await enrolPasskey(BEGIN, 'user@example.test')).toEqual({ kind: 'failed', code: 'webauthn_AbortError', credentialId: ID });
+  });
+
+  it('maps a cancelled or aborted prompt, an already-added passkey, and other WebAuthn failures by name', async () => {
     const c = installCredentials();
     c.create.mockRejectedValueOnce(domError('NotAllowedError'));
+    expect(await enrolPasskey(BEGIN, 'user@example.test')).toEqual({ kind: 'cancelled' });
+    c.create.mockRejectedValueOnce(domError('AbortError'));
     expect(await enrolPasskey(BEGIN, 'user@example.test')).toEqual({ kind: 'cancelled' });
     c.create.mockRejectedValueOnce(domError('InvalidStateError'));
     expect(await enrolPasskey(BEGIN, 'user@example.test')).toEqual({ kind: 'already_added' });
     c.create.mockRejectedValueOnce(domError('SecurityError'));
-    await expect(enrolPasskey(BEGIN, 'user@example.test')).rejects.toMatchObject({ name: 'SecurityError' });
+    expect(await enrolPasskey(BEGIN, 'user@example.test')).toEqual({ kind: 'failed', code: 'webauthn_SecurityError' });
+    c.create.mockRejectedValueOnce(new TypeError('not a DOMException'));
+    await expect(enrolPasskey(BEGIN, 'user@example.test')).rejects.toBeInstanceOf(TypeError);
   });
 });
 
@@ -98,10 +125,14 @@ describe('unlockWithPasskey', () => {
     expect(bytes(options.extensions.prf.evalByCredential[ID_2].first)).toEqual(Array.from(new Uint8Array(32).fill(4)));
   });
 
-  it('maps a cancelled prompt, and a credential with no PRF result', async () => {
+  it('maps a cancelled or aborted prompt, other WebAuthn failures by name, and a credential with no PRF result', async () => {
     const c = installCredentials();
     c.get.mockRejectedValueOnce(domError('NotAllowedError'));
     expect(await unlockWithPasskey([{ credentialId: ID, salt: SALT }])).toEqual({ kind: 'cancelled' });
+    c.get.mockRejectedValueOnce(domError('AbortError'));
+    expect(await unlockWithPasskey([{ credentialId: ID, salt: SALT }])).toEqual({ kind: 'cancelled' });
+    c.get.mockRejectedValueOnce(domError('SecurityError'));
+    expect(await unlockWithPasskey([{ credentialId: ID, salt: SALT }])).toEqual({ kind: 'failed', code: 'webauthn_SecurityError' });
     c.get.mockResolvedValueOnce(fakeCredential(ID, null));
     expect(await unlockWithPasskey([{ credentialId: ID, salt: SALT }])).toEqual({ kind: 'no_prf' });
   });

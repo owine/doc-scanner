@@ -35,11 +35,19 @@ const failed = (e: unknown): EnrolOutcome => ({ kind: 'failed', code: codeOf(e) 
 /** One tap: the passkey prompt, then the server unwraps and resumes Proton (spec §2, Unlock). */
 export async function unlock(prepared: UnlockCredential[] | null = null): Promise<UnlockOutcome> {
   try {
-    const credentials = prepared ?? (await api.unlock.begin()).credentials;
+    // With salts in hand, the prompt starts before any await, inside the tap.
+    const credentials = prepared && prepared.length > 0 ? prepared : (await api.unlock.begin()).credentials;
     const result = await unlockWithPasskey(credentials);
     if (result.kind === 'cancelled') return { kind: 'cancelled' };
     if (result.kind === 'no_prf') return { kind: 'failed', code: 'unlock_failed' };
-    return { kind: 'unlocked', status: await api.unlock({ credentialId: result.credentialId, prf: result.prf }) };
+    if (result.kind === 'failed') return { kind: 'failed', code: result.code };
+    try {
+      return { kind: 'unlocked', status: await api.unlock({ credentialId: result.credentialId, prf: result.prf }) };
+    } catch (e) {
+      // The server has no such passkey (removed elsewhere): ask the password manager to hide it.
+      if (e instanceof ApiError && e.code === 'unknown_passkey') await forgetCredential(result.credentialId);
+      throw e;
+    }
   } catch (e) {
     return { kind: 'failed', code: codeOf(e) };
   }
@@ -64,6 +72,11 @@ async function settle(result: EnrolResult, salt: string, label: string): Promise
     case 'prf_unsupported':
       // Created, but it can't unlock: nothing goes to the server.
       return { kind: 'prf_unsupported', forgotten: await forgetCredential(result.credentialId) };
+    case 'failed':
+      // A passkey made before the follow-up prompt failed can't unlock: hide it.
+      return result.credentialId === undefined
+        ? { kind: 'failed', code: result.code }
+        : { kind: 'failed', code: result.code, forgotten: await forgetCredential(result.credentialId) };
     case 'finish_setup': {
       const { finish, credentialId } = result;
       return {
@@ -82,8 +95,10 @@ async function settle(result: EnrolResult, salt: string, label: string): Promise
       try {
         return { kind: 'added', passkey: await api.passkeys.add({ credentialId: result.credentialId, salt, prf: result.prf, label }) };
       } catch (e) {
-        // A request that got no answer may have been stored: keep that passkey.
-        if (!(e instanceof ApiError)) throw e;
+        // Only a refusal (a 4xx with the server's code) means it wasn't stored.
+        // No answer, a 5xx, or an answer without a code (a proxy's HTML 502)
+        // may have come after the server stored it: keep that passkey.
+        if (!(e instanceof ApiError && e.code !== undefined && e.status >= 400 && e.status < 500)) return failed(e);
         // The server refused it, so it will never unlock: ask the password manager to hide it.
         const forgotten = await forgetCredential(result.credentialId);
         if (e.code === 'invalid_enrolment') return { kind: 'expired', forgotten };
