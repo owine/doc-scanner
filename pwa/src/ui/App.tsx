@@ -14,6 +14,7 @@ import { UploadQueue } from '../uploads/queue.js';
 import { captureRequestFailure } from '../observability/sentry.js';
 import { watchStatus } from './status-watch.js';
 import { clearNudgeDismissal } from './inbox/nudge.js';
+import { Mark } from './Mark.js';
 
 type Route =
   /** `focusHeading`: back from a screen whose button had focus, which is gone now. */
@@ -254,7 +255,7 @@ export function App() {
   if (expired) {
     return (
       <main class="auth-screen">
-        <h1>doc-scanner</h1>
+        <h1 class="lockup"><Mark size={30} />doc-scanner</h1>
         <p class="warn" role="alert">Your sign-in has expired.</p>
         {/* An installed iOS app has no reload control of its own. */}
         <button class="btn btn-block" onClick={() => location.reload()}>
@@ -266,14 +267,14 @@ export function App() {
   if (unreachable) {
     return (
       <main class="auth-screen">
-        <h1>doc-scanner</h1>
+        <h1 class="lockup"><Mark size={30} />doc-scanner</h1>
         <p class="warn" role="alert">Can't reach the server.</p>
         <button class="btn btn-block" disabled={retrying} onClick={() => void retry()}>
           Retry
         </button>
         {/* In every mode: an expired proxy sign-in answered with a cross-origin
             redirect reads as no answer, and only a reload goes through it. */}
-        <button class="btn btn-secondary btn-block" onClick={() => location.reload()} style={{ marginTop: 8 }}>
+        <button class="btn btn-secondary btn-block" onClick={() => location.reload()}>
           Reload
         </button>
       </main>

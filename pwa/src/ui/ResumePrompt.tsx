@@ -18,9 +18,9 @@ export function ResumePrompt({ scan, onResume, onDiscard }: ResumePromptProps) {
   return (
     <main class="auth-screen">
       <div class="card">
-        <h2 style={{ marginTop: 0 }}>Unfinished scan</h2>
+        <h2>Unfinished scan</h2>
         <p>You have an in-progress scan with <strong>{scan.pageCount} pages</strong> from {relativeTime(scan.createdAt)}.</p>
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div class="actions">
           <button class="btn" onClick={onResume}>Resume scanning</button>
           <button class="btn btn-secondary" onClick={onDiscard}>Discard</button>
         </div>

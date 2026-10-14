@@ -139,7 +139,7 @@ export function ScannerScreen({ store, resumeScanId, onBack, onDone }: ScannerSc
       <main class="auth-screen">
         <div class="warn"><strong>Camera unavailable.</strong> {error}</div>
         <p class="muted">Open Settings → Safari → Camera and allow access.</p>
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div class="actions">
           <button class="btn" onClick={() => location.reload()}>Try again</button>
           <button class="btn btn-secondary" onClick={onBack}>Back</button>
         </div>
