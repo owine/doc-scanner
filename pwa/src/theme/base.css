@@ -28,17 +28,17 @@ input[type="checkbox"]:focus-visible { outline: 2px solid var(--accent); outline
 @media (prefers-reduced-motion: no-preference) {
   .btn { transition: background-color var(--dur-fast) var(--ease-out); }
 }
-.btn:active { background: var(--accent-press); transform: translateY(0.5px); }
-.btn-secondary { background: transparent; color: var(--ink); border-color: var(--line-strong); }
-.btn-secondary:active { background: var(--paper-2); }
-.btn-danger { background: var(--danger); color: var(--on-accent); }
-.btn-danger:active { background: color-mix(in oklab, var(--danger) 88%, var(--ink)); }
 @media (hover: hover) {
   .btn:hover { background: var(--accent-hover); }
   .btn-secondary:hover { background: var(--paper-2); }
   .btn-danger:hover { background: color-mix(in oklab, var(--danger) 88%, var(--ink)); }
   .btn-link:hover { color: var(--accent-hover); text-decoration: underline; text-underline-offset: 0.18em; }
 }
+.btn:active { background: var(--accent-press); transform: translateY(0.5px); }
+.btn-secondary { background: transparent; color: var(--ink); border-color: var(--line-strong); }
+.btn-secondary:active { background: var(--paper-2); }
+.btn-danger { background: var(--danger); color: var(--on-accent); }
+.btn-danger:active { background: color-mix(in oklab, var(--danger) 88%, var(--ink)); }
 .btn:disabled, .btn:disabled:hover, .btn[aria-disabled="true"] {
   background: var(--paper-3); color: var(--ink-4); border-color: var(--line);
   cursor: not-allowed; transform: none;
