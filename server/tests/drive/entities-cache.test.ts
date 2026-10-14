@@ -93,4 +93,24 @@ describe('EntitiesCache', () => {
     await cache.clear();
     await expect(cache.getEntity('foo')).rejects.toThrow();
   });
+
+  it('neither reads nor writes once its client is no longer live, but still clears', async () => {
+    const { db, cleanup } = createTestDb();
+    cleanupFn = cleanup;
+    let live = true;
+    const cache = new EntitiesCache(db, KEY, () => live);
+    const other = new EntitiesCache(db, KEY);
+    await cache.setEntity('kept', 'v', ['t']);
+    live = false;
+    await cache.setEntity('late', 'v');
+    await cache.removeEntities(['kept']);
+    expect(await other.getEntity('kept')).toBe('v');
+    await expect(other.getEntity('late')).rejects.toThrow();
+    await expect(cache.getEntity('kept')).rejects.toThrow();
+    const byTag = [];
+    for await (const e of cache.iterateEntitiesByTag('t')) byTag.push(e);
+    expect(byTag).toEqual([]);
+    await cache.clear();
+    await expect(other.getEntity('kept')).rejects.toThrow();
+  });
 });

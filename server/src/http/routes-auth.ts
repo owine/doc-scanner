@@ -128,6 +128,8 @@ export function authRoutes(deps: AuthRoutesDeps) {
         deps.store.save(session);
         logger.info({ email: session.email }, 'proton session refreshed');
       },
+      // The entities table is shared: a replaced client must not write to it.
+      isLive,
     });
     // They are not account-scoped; the new client clears the shared tables.
     if (s.clearDriveCaches) await driveClient.clearCaches();
@@ -217,11 +219,19 @@ export function authRoutes(deps: AuthRoutesDeps) {
     if (header && !c.get('auth')) return c.json({ error: 'not_authenticated' }, 401);
     // In turn: an unlock finishing after this would bring the session back.
     return mutex.run(async (): Promise<Response> => {
-      // Drop the SDK's persisted caches before the live session goes away. They
-      // are not account-scoped, so leaving them behind would serve one account's
-      // entities to whoever logs in next.
-      // Fall back to any live session so a stale or missing cookie still clears them.
+      // Fall back to any live session so a stale or missing cookie still clears the caches.
       const driveClient = c.get('auth')?.liveSession?.driveClient ?? getAnyLiveSession()?.driveClient;
+      // Forgotten first, in one synchronous run: from here no live client
+      // (the worker's included) can write to the caches cleared below.
+      if (header) forgetAllSessions();
+      else revokeAllSessions(c);
+      deps.store.clear();
+      // "Sign out" means "forget my Proton access here": every wrap holds the passphrase.
+      const passkeysRemoved = deps.passkeys.removeAll();
+      deleteSetting(deps.db, SETTING.keySaltFingerprint);
+      // Drop the SDK's persisted caches. They are not account-scoped, so
+      // leaving them behind would serve one account's entities to whoever
+      // logs in next.
       if (driveClient) {
         try {
           await driveClient.clearCaches();
@@ -231,12 +241,6 @@ export function authRoutes(deps: AuthRoutesDeps) {
           logger.warn({ err }, 'failed to clear drive caches on logout');
         }
       }
-      deps.store.clear();
-      // "Sign out" means "forget my Proton access here": every wrap holds the passphrase.
-      const passkeysRemoved = deps.passkeys.removeAll();
-      deleteSetting(deps.db, SETTING.keySaltFingerprint);
-      if (header) forgetAllSessions();
-      else revokeAllSessions(c);
       logger.info({ passkeysRemoved }, 'logged out');
       return c.json({ ok: true });
     });
