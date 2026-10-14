@@ -7,6 +7,28 @@ export interface LoginScreenProps {
   onCancel?: () => void;
 }
 
+const TOTP_REQUIRED = 'TOTP code required';
+
+/** The server's refusal in words; a code it doesn't know is never shown raw. */
+function loginError(err: unknown): string {
+  // No answer at all, as the inbox says it.
+  if (!(err instanceof ApiError)) return "Can't reach the server.";
+  switch (err.code) {
+    case 'totp_required':
+      return TOTP_REQUIRED;
+    // A 500 says the same code for a failure after Proton accepted the login.
+    case 'auth_failed':
+      return err.status === 401 ? 'Proton didn’t accept that email, password or code.' : 'Couldn’t sign in. Try again.';
+    case 'invalid_input':
+      return 'Check your email and password.';
+    // Header mode, where the proxy's user must be known first.
+    case 'not_authenticated':
+      return 'This browser isn’t signed in to the server. Reload the page and try again.';
+    default:
+      return 'Couldn’t sign in. Try again.';
+  }
+}
+
 export function LoginScreen({ onLoggedIn, onCancel }: LoginScreenProps) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -29,8 +51,8 @@ export function LoginScreen({ onLoggedIn, onCancel }: LoginScreenProps) {
       const res = await api.login(totp ? { email, password, totp } : { email, password });
       onLoggedIn(res.email);
     } catch (err) {
-      if (err instanceof ApiError && err.code === 'totp_required') { setNeedsTotp(true); setError('TOTP code required'); }
-      else setError(err instanceof Error ? err.message : 'Login failed');
+      if (err instanceof ApiError && err.code === 'totp_required') setNeedsTotp(true);
+      setError(loginError(err));
     } finally { setBusy(false); }
   }
 
