@@ -12,6 +12,7 @@ const PAPER = '#f6f4ef';
 const ACCENT = '#2b5fd9';
 const out = (name) => fileURLToPath(new URL(`../../pwa/public/icons/${name}`, import.meta.url));
 
+// The in-app mark is pwa/src/ui/Mark.tsx: change both together.
 /** The mark on a 32-unit grid. */
 const mark = (stroke, dot) =>
   `<path d="M10 6.5h8.5l4 4V25.5H10z" fill="none" stroke="${PAPER}" stroke-width="${stroke}" stroke-linejoin="round"/>` +
