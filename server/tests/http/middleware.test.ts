@@ -1,4 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { logger } from '../../src/logger.js';
 import { Hono } from 'hono';
 import { createTestDb } from '../helpers/test-db.js';
 import { SessionStore } from '../../src/auth/session-store.js';
@@ -6,6 +7,7 @@ import { _resetLiveSessions } from '../../src/auth/live-session.js';
 import {
   COOKIE_MODE,
   PROXY_SECRET_HEADER,
+  _resetRejectionWarning,
   _resetSids,
   authModeFrom,
   sessionMiddleware,
@@ -21,6 +23,7 @@ const WITH_SECRET: AuthMode = { kind: 'header', user: 'owine', secret: SECRET };
 let cleanups: (() => void)[] = [];
 beforeEach(() => {
   _resetSids();
+  _resetRejectionWarning();
   _resetLiveSessions();
 });
 afterEach(() => {
@@ -89,6 +92,48 @@ describe('sessionMiddleware in header mode', () => {
       expect((await probe(app, method, user)).body.auth?.sid).toBe('proxy');
     }
     expect((await probe(app, 'GET', { ...user, 'Sec-Fetch-Site': 'cross-site' })).body.auth?.sid).toBe('proxy');
+  });
+});
+
+describe('header mode rejection warning', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it('warns, at most once a minute, naming only why a Remote-User was refused', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-13T10:00:00Z'));
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    const { app } = setup(WITH_SECRET);
+    const reasons = () => warn.mock.calls.map(([obj]) => (obj as { reason: string }).reason);
+
+    await probe(app, 'GET', { 'Remote-User': 'mallory', [PROXY_SECRET_HEADER]: SECRET });
+    expect(reasons()).toEqual(['user mismatch']);
+    // Within the minute: no second warning.
+    await probe(app, 'GET', { 'Remote-User': 'owine' });
+    expect(reasons()).toEqual(['user mismatch']);
+    vi.setSystemTime(new Date('2026-10-13T10:01:01Z'));
+    await probe(app, 'GET', { 'Remote-User': 'owine' });
+    expect(reasons()).toEqual(['user mismatch', 'secret missing']);
+    vi.setSystemTime(new Date('2026-10-13T10:02:02Z'));
+    await probe(app, 'GET', { 'Remote-User': 'owine', [PROXY_SECRET_HEADER]: 'wrong-secret-value' });
+    expect(reasons()).toEqual(['user mismatch', 'secret missing', 'secret mismatch']);
+    // Shared by every router's middleware: a second one stays quiet within the minute.
+    const other = setup(WITH_SECRET).app;
+    await probe(other, 'GET', { 'Remote-User': 'mallory' });
+    expect(reasons()).toHaveLength(3);
+    // Never the values themselves.
+    const logged = JSON.stringify(warn.mock.calls);
+    for (const value of ['mallory', 'owine', SECRET, 'wrong-secret-value']) expect(logged).not.toContain(value);
+  });
+
+  it('stays quiet without a Remote-User, and for an accepted one', async () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    const { app } = setup(WITH_SECRET);
+    await probe(app);
+    await probe(app, 'GET', { 'Remote-User': 'owine', [PROXY_SECRET_HEADER]: SECRET });
+    expect(warn).not.toHaveBeenCalled();
   });
 });
 

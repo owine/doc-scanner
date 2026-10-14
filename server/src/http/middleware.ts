@@ -6,6 +6,7 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { Config } from '../config.js';
 import type { SessionStore } from '../auth/session-store.js';
 import { getLiveSession, disposeAllLiveSessions, type LiveSession } from '../auth/live-session.js';
+import { logger } from '../logger.js';
 
 export const COOKIE_NAME = 'docscanner_sid';
 
@@ -53,6 +54,31 @@ function secretMatches(given: string | undefined, expected: string): boolean {
   return timingSafeEqual(digest(given), digest(expected));
 }
 
+type Rejection = 'user mismatch' | 'secret missing' | 'secret mismatch';
+
+/** Why a request that names a proxy user is refused, or null when it is accepted. */
+function rejectionOf(mode: Extract<AuthMode, { kind: 'header' }>, remoteUser: string, givenSecret: string | undefined): Rejection | null {
+  if (remoteUser !== mode.user) return 'user mismatch';
+  if (mode.secret === null) return null;
+  if (givenSecret === undefined) return 'secret missing';
+  return secretMatches(givenSecret, mode.secret) ? null : 'secret mismatch';
+}
+
+/**
+ * A misconfigured proxy refuses every request: one warning a minute is
+ * enough. Module-wide, since every router runs a middleware of its own.
+ */
+const REJECTION_WARNING_INTERVAL_MS = 60_000;
+let lastRejectionWarning = -Infinity;
+
+function warnRejected(reason: Rejection): void {
+  const now = Date.now();
+  if (now - lastRejectionWarning < REJECTION_WARNING_INTERVAL_MS) return;
+  lastRejectionWarning = now;
+  // The reason only: never the user or the secret that was sent.
+  logger.warn({ reason }, 'header mode refused the proxy user');
+}
+
 export const sessionMiddleware = (store: SessionStore, mode: AuthMode = COOKIE_MODE): MiddlewareHandler<Env> => async (c, next) => {
   if (mode.kind === 'header') {
     // The app's own SameSite=Strict cookie used to stop cross-site requests;
@@ -62,7 +88,11 @@ export const sessionMiddleware = (store: SessionStore, mode: AuthMode = COOKIE_M
     if (UNSAFE_METHODS.has(c.req.method) && site !== undefined && site !== 'same-origin') {
       return c.json({ error: 'cross_site' }, 403);
     }
-    if (c.req.header('Remote-User') === mode.user && (mode.secret === null || secretMatches(c.req.header(PROXY_SECRET_HEADER), mode.secret))) {
+    const remoteUser = c.req.header('Remote-User');
+    // No Remote-User: the request never went through the proxy's auth, which is not worth a warning.
+    const rejection = remoteUser === undefined ? null : rejectionOf(mode, remoteUser, c.req.header(PROXY_SECRET_HEADER));
+    if (rejection !== null) warnRejected(rejection);
+    else if (remoteUser !== undefined) {
       c.set('auth', {
         email: store.storedEmail() ?? c.req.header('Remote-Email') ?? mode.user,
         sid: PROXY_SID,
@@ -133,3 +163,6 @@ export function revokeAllSessions(c: Context<Env>): void {
 
 // For tests: reset the in-memory sid set
 export function _resetSids(): void { liveSids.clear(); }
+
+// For tests: the next refused proxy user warns again.
+export function _resetRejectionWarning(): void { lastRejectionWarning = -Infinity; }
