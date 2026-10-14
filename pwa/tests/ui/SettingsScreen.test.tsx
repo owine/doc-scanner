@@ -161,7 +161,8 @@ describe('SettingsScreen', () => {
 
   it('adds and removes never-file-here folders', async () => {
     const { api } = setup();
-    fireEvent.click(await screen.findByRole('button', { name: 'Remove /Archive' }));
+    expect(await screen.findByRole('button', { name: 'Remove /Archive' })).toHaveClass('btn-secondary');
+    fireEvent.click(screen.getByRole('button', { name: 'Remove /Archive' }));
     fireEvent.click(screen.getByRole('button', { name: /add folder/i }));
     fireEvent.click(await screen.findByRole('button', { name: '/Taxes/2026' }));
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
