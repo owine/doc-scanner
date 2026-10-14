@@ -51,6 +51,10 @@ export interface InboxScreenProps {
   showPasskeyNudge?: boolean;
   /** Defaults to onSettings, where passkeys are added. */
   onAddPasskey?: () => void;
+  /** The nudge was dismissed (stored on this device too, where storage allows). */
+  onNudgeDismissed?: () => void;
+  /** Focus the heading on arrival: the control that had focus is gone (passkey-unlock spec §3, Cancel). */
+  focusHeading?: boolean;
   unlockClient?: UnlockClient;
 }
 
@@ -79,6 +83,8 @@ export function InboxScreen({
   onSignInToProton = onSignInAgain,
   showPasskeyNudge = false,
   onAddPasskey = onSettings,
+  onNudgeDismissed = () => {},
+  focusHeading = false,
   unlockClient,
 }: InboxScreenProps) {
   const { docs, loaded, error } = useDocuments(sync);
@@ -95,7 +101,13 @@ export function InboxScreen({
       // Storage refused (private browsing): dismissed until the next visit.
     }
     setNudgeHidden(true);
+    onNudgeDismissed();
   };
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  // On arrival only, before paint.
+  useLayoutEffect(() => {
+    if (focusHeading) headingRef.current?.focus();
+  }, []);
   // The queue keeps why a send failed (uploads.buildErrorOf): the row
   // unmounts while its scan is claimed, and Done in App sends scans too.
   const sendScan = async (id: string) => {
@@ -282,7 +294,9 @@ export function InboxScreen({
         }}
       />
       <header class="inbox-header">
-        <h1>Inbox</h1>
+        <h1 ref={headingRef} tabIndex={-1}>
+          Inbox
+        </h1>
         <div class="actions">
           <button class="btn btn-secondary" onClick={() => fileInput.current?.click()}>
             Add

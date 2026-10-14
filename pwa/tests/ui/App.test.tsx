@@ -113,9 +113,9 @@ describe('App', () => {
       ['signs out', json({ ok: true })],
       ['fails to sign out', json({ error: 'internal' }, 500)],
     ] as const) {
-      it(`goes to the login screen from "Sign in again" when it ${label}`, async () => {
+      it(`in cookie mode, goes to the login screen from "Sign in again" when it ${label}`, async () => {
         const fetch = server({
-          'GET /api/auth/status': json({ email: 'user@example.test' }),
+          'GET /api/auth/status': json({ email: 'user@example.test', proton: 'live', passkeys: 0, unlockAvailable: false }),
           'GET /api/documents': json({ documents: [makeDoc({ state: 'awaiting_login' })], cursor: 1 }),
           'GET /api/folders': json({ error: 'folders_not_loaded' }, 503),
           'POST /api/auth/logout': logout,
@@ -126,6 +126,57 @@ describe('App', () => {
         expect(fetch).toHaveBeenCalledWith('/api/auth/logout', expect.objectContaining({ method: 'POST' }));
       });
     }
+
+    it('never logs out from "Sign in again" while the mode is unknown', async () => {
+      const fetch = server({
+        // An answer without unlockAvailable: cookie or header mode can't be told.
+        'GET /api/auth/status': json({ email: 'user@example.test', proton: 'live', passkeys: 0 }),
+        'GET /api/documents': json({ documents: [makeDoc({ state: 'awaiting_login' })], cursor: 1 }),
+        'GET /api/folders': json({ error: 'folders_not_loaded' }, 503),
+        'POST /api/auth/logout': json({ ok: true }),
+      });
+      render(<App />);
+      fireEvent.click(await screen.findByRole('button', { name: /sign in again/i }));
+      expect(await screen.findByRole('button', { name: /^sign in$/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
+      expect(fetch.mock.calls.some(([url]) => url === '/api/auth/logout')).toBe(false);
+    });
+
+    it("says it can't reach the server when the first status read fails, and Retry recovers", async () => {
+      const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        const routes: Record<string, () => Response> = {
+          'GET /api/auth/status': () => new Response('<html><body>Bad Gateway</body></html>', { status: 502 }),
+          'GET /api/documents': json({ documents: [], cursor: 0 }),
+          'GET /api/folders': json({ error: 'folders_not_loaded' }, 503),
+        };
+        server(routes);
+        render(<App />);
+        expect(await screen.findByText("Can't reach the server.")).toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: /^sign in$/i })).toBeNull();
+        // Still down: Retry stays.
+        fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+        await waitFor(() => expect(screen.getByRole('button', { name: 'Retry' })).toBeEnabled());
+        expect(screen.getByText("Can't reach the server.")).toBeInTheDocument();
+        routes['GET /api/auth/status'] = json({ email: 'user@example.test', proton: 'live', passkeys: 0, unlockAvailable: false });
+        fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+        expect(await screen.findByRole('heading', { name: 'Inbox' })).toBeInTheDocument();
+      } finally {
+        logged.mockRestore();
+      }
+    });
+
+    it("says it can't reach the server when the first status read gets no answer", async () => {
+      const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
+        render(<App />);
+        expect(await screen.findByRole('button', { name: 'Retry' })).toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: /^sign in$/i })).toBeNull();
+      } finally {
+        logged.mockRestore();
+      }
+    });
 
     const status = (proton: 'live' | 'locked' | 'none', passkeys: number) => json({ email: 'user@example.test', proton, passkeys, unlockAvailable: true });
     const inbox = {
@@ -153,11 +204,19 @@ describe('App', () => {
         'POST /api/auth/unlock/begin': json({ credentials: [{ credentialId: id, salt: toBase64url(new Uint8Array(32).fill(3)) }] }),
         'POST /api/auth/unlock': status('live', 1),
       });
-      installCredentials().get.mockResolvedValue(fakeCredential(id, prf));
+      const c = installCredentials();
+      c.get.mockResolvedValue(fakeCredential(id, prf));
+      const begins = () => fetch.mock.calls.filter(([url]) => url === '/api/auth/unlock/begin').length;
       try {
         render(<App />);
         expect(await screen.findByRole('heading', { name: 'Inbox' })).toBeInTheDocument();
-        fireEvent.click(await screen.findByRole('button', { name: 'Unlock' }));
+        const unlockButton = await screen.findByRole('button', { name: 'Unlock' });
+        await waitFor(() => expect(unlockButton).toBeEnabled());
+        expect(begins()).toBe(1);
+        fireEvent.click(unlockButton);
+        // The prompt starts within the tap, with the salts fetched before it: no fetch in between.
+        expect(c.get).toHaveBeenCalledTimes(1);
+        expect(begins()).toBe(1);
         await waitFor(() => expect(screen.queryByText(/filing is paused/i)).toBeNull());
         const sent = fetch.mock.calls.find(([url]) => url === '/api/auth/unlock')!;
         expect(JSON.parse(String(sent[1]!.body))).toEqual({ credentialId: id, prf: toBase64url(prf) });
@@ -180,6 +239,7 @@ describe('App', () => {
       try {
         render(<App />);
         const unlockButton = await screen.findByRole('button', { name: 'Unlock' });
+        await waitFor(() => expect(unlockButton).toBeEnabled());
         // The server removed the passkeys while refusing.
         routes['GET /api/auth/status'] = status('locked', 0);
         fireEvent.click(unlockButton);
@@ -199,6 +259,8 @@ describe('App', () => {
       expect(await screen.findByRole('button', { name: /^sign in$/i })).toBeInTheDocument();
       fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
       expect(await screen.findByRole('heading', { name: 'Inbox' })).toBeInTheDocument();
+      // The Cancel button is gone: focus lands on the inbox's heading.
+      expect(screen.getByRole('heading', { name: 'Inbox' })).toHaveFocus();
       expect(calledLogout(fetch)).toBe(false);
     });
 
@@ -217,8 +279,86 @@ describe('App', () => {
       fireEvent.click(screen.getByRole('button', { name: /^sign in$/i }));
       expect(await screen.findByText('Add a passkey so a server restart doesn’t need your Proton password.')).toBeInTheDocument();
       expect(calledLogout(fetch)).toBe(false);
-      fireEvent.click(screen.getByRole('button', { name: 'Add passkey' }));
-      expect(await screen.findByRole('heading', { name: 'Settings' })).toBeInTheDocument();
+      const scrolled = vi.spyOn(Element.prototype, 'scrollIntoView');
+      try {
+        fireEvent.click(screen.getByRole('button', { name: 'Add passkey' }));
+        expect(await screen.findByRole('heading', { name: 'Settings' })).toBeInTheDocument();
+        // Straight to the Passkeys section, on its Add passkey button.
+        await waitFor(() => expect(screen.getByRole('button', { name: 'Add passkey' })).toHaveFocus());
+        expect(scrolled.mock.contexts).toContain(screen.getByRole('heading', { name: 'Passkeys' }));
+      } finally {
+        scrolled.mockRestore();
+      }
+    });
+
+    /** Signs in to Proton from the login screen (proton: 'none'); the status then reads `after`. */
+    async function signInToProton(routes: Record<string, () => Response>, after: () => Response) {
+      render(<App />);
+      fireEvent.input(await screen.findByLabelText('Email'), { target: { value: 'user@example.test' } });
+      fireEvent.input(screen.getByLabelText('Password'), { target: { value: 'correct horse' } });
+      routes['GET /api/auth/status'] = after;
+      fireEvent.click(screen.getByRole('button', { name: /^sign in$/i }));
+    }
+    const NUDGE = 'Add a passkey so a server restart doesn’t need your Proton password.';
+
+    it('stops suggesting a passkey once one was added, even after it is removed again', async () => {
+      localStorage.clear();
+      const id = toBase64url(new Uint8Array(16).fill(1));
+      const routes: Record<string, () => Response> = {
+        'GET /api/auth/status': status('none', 0),
+        ...inbox,
+        'POST /api/auth/login': json({ ok: true, email: 'user@example.test' }),
+        'POST /api/passkeys/begin': json({ salt: toBase64url(new Uint8Array(32).fill(3)), userHandle: toBase64url(new Uint8Array(16).fill(9)), excludeCredentials: [] }),
+        'POST /api/passkeys': json({ credentialId: id, label: 'Passkey', createdAt: '2026-10-13T10:00:00.000Z', lastUsedAt: null }, 201),
+        [`DELETE /api/passkeys/${id}`]: json({}),
+      };
+      const fetch = server(routes);
+      const statusReads = () => fetch.mock.calls.filter(([url]) => url === '/api/auth/status').length;
+      installCredentials().create.mockResolvedValue(fakeCredential(id, new Uint8Array(32).fill(7)));
+      try {
+        await signInToProton(routes, status('live', 0));
+        fireEvent.click(await screen.findByRole('button', { name: 'Add passkey' }));
+        expect(await screen.findByRole('heading', { name: 'Settings' })).toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: 'Add passkey' }));
+        const cont = screen.getByRole('button', { name: 'Continue' });
+        await waitFor(() => expect(cont).toBeEnabled());
+        routes['GET /api/auth/status'] = status('live', 1);
+        fireEvent.click(cont);
+        expect(await screen.findByText('Passkey added.')).toBeInTheDocument();
+        await waitFor(() => expect(statusReads()).toBe(3));
+        routes['GET /api/auth/status'] = status('live', 0);
+        fireEvent.click(screen.getByRole('button', { name: 'Remove Passkey' }));
+        await waitFor(() => expect(statusReads()).toBe(4));
+        fireEvent.click(screen.getByRole('button', { name: /back/i }));
+        expect(await screen.findByRole('heading', { name: 'Inbox' })).toBeInTheDocument();
+        expect(screen.queryByText(NUDGE)).toBeNull();
+      } finally {
+        removeCredentials();
+      }
+    });
+
+    it('stops suggesting a passkey once dismissed, even where the dismissal could not be stored', async () => {
+      localStorage.clear();
+      const refused = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+        throw new DOMException('refused', 'SecurityError');
+      });
+      try {
+        const routes: Record<string, () => Response> = {
+          'GET /api/auth/status': status('none', 0),
+          ...inbox,
+          'POST /api/auth/login': json({ ok: true, email: 'user@example.test' }),
+        };
+        server(routes);
+        await signInToProton(routes, status('live', 0));
+        expect(await screen.findByText(NUDGE)).toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+        fireEvent.click(await screen.findByRole('button', { name: /back/i }));
+        expect(await screen.findByRole('heading', { name: 'Inbox' })).toBeInTheDocument();
+        expect(screen.queryByText(NUDGE)).toBeNull();
+      } finally {
+        refused.mockRestore();
+      }
     });
   });
 

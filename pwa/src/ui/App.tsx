@@ -14,15 +14,27 @@ import { UploadQueue } from '../uploads/queue.js';
 import { captureRequestFailure } from '../observability/sentry.js';
 
 type Route =
-  | { kind: 'inbox' }
-  | { kind: 'settings' }
+  /** `focusHeading`: back from a screen whose button had focus, which is gone now. */
+  | { kind: 'inbox'; focusHeading?: boolean }
+  /** `focusPasskeys`: opened to add a passkey, so straight to that section. */
+  | { kind: 'settings'; focusPasskeys?: boolean }
   | { kind: 'scanner'; resumeScanId?: string }
   /** LoginScreen over the signed-in app, with Cancel back to the inbox (passkey-unlock spec §3). */
   | { kind: 'proton-login' };
 
+/**
+ * The status as App holds it. `unlockAvailable` is undefined until the server
+ * has said (a login answers before the status is read again): unknown is
+ * never taken for cookie mode, whose Sign in again logs out.
+ */
+type AppStatus = Omit<StatusResponse, 'unlockAvailable'> & { unlockAvailable: boolean | undefined };
+
 export function App() {
-  const [status, setStatus] = useState<StatusResponse | null>(null);
+  const [status, setStatus] = useState<AppStatus | null>(null);
   const [loaded, setLoaded] = useState(false);
+  // The first status read got no usable answer (network, 5xx): neither signed in nor out.
+  const [unreachable, setUnreachable] = useState(false);
+  const [retrying, setRetrying] = useState(false);
   // A Proton login in this tab: the passkey nudge follows only that.
   const [justSignedIn, setJustSignedIn] = useState(false);
   const [route, setRoute] = useState<Route>({ kind: 'inbox' });
@@ -66,10 +78,32 @@ export function App() {
   // screen shows and nothing polls or uploads, as when signed out.
   const email = status && status.proton !== 'none' ? status.email : null;
 
+  /** The first read, and Retry: only a 401 means signed out. */
+  async function readStatus(): Promise<void> {
+    try {
+      setStatus(await api.status());
+      setUnreachable(false);
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 401) {
+        setStatus(null);
+        setUnreachable(false);
+      } else {
+        console.error('could not read the sign-in status', (e as Error)?.name);
+        setUnreachable(true);
+      }
+    } finally {
+      setLoaded(true);
+    }
+  }
+
+  async function retry() {
+    setRetrying(true);
+    await readStatus();
+    setRetrying(false);
+  }
+
   useEffect(() => {
-    api.status().then(setStatus)
-      .catch((e) => { if (!(e instanceof ApiError && e.status === 401)) console.error(e); })
-      .finally(() => setLoaded(true));
+    void readStatus();
     // Opened once at start and shared; a failed open is tried again by the next caller.
     store.open().catch((e: unknown) => console.error('open store', (e as Error)?.name));
   }, []);
@@ -119,15 +153,17 @@ export function App() {
 
   function loggedIn(signedInEmail: string) {
     // Live at once; the refresh brings the passkey count and the mode.
-    setStatus((s) => ({ email: signedInEmail, proton: 'live', passkeys: s?.passkeys ?? 0, unlockAvailable: s?.unlockAvailable ?? false }));
+    setStatus((s) => ({ email: signedInEmail, proton: 'live', passkeys: s?.passkeys ?? 0, unlockAvailable: s?.unlockAvailable }));
     setRoute({ kind: 'inbox' });
     setJustSignedIn(true);
     void refreshStatus();
   }
 
   async function signInAgain() {
-    // Header mode: sign in to Proton over the app. A logout would remove the passkeys too.
-    if (status?.unlockAvailable) {
+    // Header mode, or a mode not known yet: sign in to Proton over the app. In
+    // header mode a logout would remove the passkeys too, so only a server that
+    // has said it is in cookie mode gets one.
+    if (status?.unlockAvailable !== false) {
       setRoute({ kind: 'proton-login' });
       return;
     }
@@ -145,8 +181,19 @@ export function App() {
   }
 
   if (!loaded) return <main class="auth-screen">Loading…</main>;
+  if (unreachable) {
+    return (
+      <main class="auth-screen">
+        <h1>doc-scanner</h1>
+        <p class="warn" role="alert">Can't reach the server.</p>
+        <button class="btn btn-block" disabled={retrying} onClick={() => void retry()}>
+          Retry
+        </button>
+      </main>
+    );
+  }
   if (!status || status.proton === 'none') return <LoginScreen onLoggedIn={loggedIn} />;
-  if (route.kind === 'proton-login') return <LoginScreen onLoggedIn={loggedIn} onCancel={() => setRoute({ kind: 'inbox' })} />;
+  if (route.kind === 'proton-login') return <LoginScreen onLoggedIn={loggedIn} onCancel={() => setRoute({ kind: 'inbox', focusHeading: true })} />;
 
   if (resume && route.kind === 'inbox') {
     return (
@@ -172,16 +219,24 @@ export function App() {
         onUnlocked={setStatus}
         onStatusChanged={() => void refreshStatus()}
         onSignInToProton={() => setRoute({ kind: 'proton-login' })}
-        showPasskeyNudge={justSignedIn && status.unlockAvailable && status.passkeys === 0}
-        onAddPasskey={() => setRoute({ kind: 'settings' })}
+        showPasskeyNudge={justSignedIn && status.unlockAvailable === true && status.passkeys === 0}
+        // Done with for this sign-in: removing the last passkey later must not bring it back.
+        onNudgeDismissed={() => setJustSignedIn(false)}
+        onAddPasskey={() => setRoute({ kind: 'settings', focusPasskeys: true })}
+        focusHeading={route.focusHeading === true}
       />;
     case 'settings':
       return (
         <SettingsScreen
           email={status.email}
-          unlockAvailable={status.unlockAvailable}
+          unlockAvailable={status.unlockAvailable === true}
           proton={status.proton}
-          onPasskeysChanged={() => void refreshStatus()}
+          focusPasskeys={route.focusPasskeys === true}
+          onPasskeysChanged={(change) => {
+            // The nudge has done its job for this sign-in.
+            if (change === 'added') setJustSignedIn(false);
+            void refreshStatus();
+          }}
           onBack={() => setRoute({ kind: 'inbox' })}
           onLoggedOut={signedOut}
         />
