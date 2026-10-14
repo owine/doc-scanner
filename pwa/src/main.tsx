@@ -5,6 +5,7 @@ import './theme/tokens.css';
 import './theme/base.css';
 import './theme/auth.css';
 import './theme/inbox.css';
+import './theme/settings.css';
 import { render } from 'preact';
 import { App } from './ui/App.js';
 import { warmServiceWorkerCache } from './sw-warm.js';

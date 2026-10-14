@@ -242,7 +242,7 @@ export function PasskeysSection({ email, live, onChanged, focusAdd = false, clie
                   </span>
                 </span>
                 <button
-                  class="btn btn-secondary btn-small"
+                  class="btn btn-danger btn-small"
                   aria-label={`Remove ${names[i]}`}
                   disabled={removingId !== null}
                   onClick={() => void remove(p.credentialId)}

@@ -1,0 +1,11 @@
+/* Settings. The page layout is the inbox's: see inbox.css. */
+.plain-fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.segmented { display: flex; gap: var(--sp-1); padding: var(--sp-1); background: var(--paper-3); border-radius: var(--r-3); }
+.segment {
+  flex: 1; min-height: 40px; border: 0; border-radius: var(--r-2);
+  background: transparent; color: var(--ink-2);
+  font: 500 var(--fs-14)/1 var(--font-sans); text-transform: capitalize; cursor: pointer;
+}
+.segment:hover { color: var(--ink); }
+.segment[aria-checked="true"] { background: var(--card); color: var(--ink); box-shadow: var(--shadow-1); }
+.inbox .card + h2 { margin-top: var(--sp-6); }

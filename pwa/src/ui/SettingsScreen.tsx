@@ -168,7 +168,7 @@ export function SettingsScreen({
         </p>
       ) : (
         <div key="filing-form" class="card">
-          <fieldset disabled={busy} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
+          <fieldset disabled={busy} class="plain-fieldset">
           <label class="field">
             <input type="checkbox" checked={draft.autoFileEnabled} onChange={(e) => set('autoFileEnabled', (e.target as HTMLInputElement).checked)} />{' '}
             File automatically when confident
@@ -224,7 +224,7 @@ export function SettingsScreen({
             <ul class="doc-list" role="list">
               {draft.excludePaths.map((p) => (
                 <li key={p} class="doc-row">
-                  <span class="doc-main">{p}</span>
+                  <span class="doc-main path">{p}</span>
                   <button
                     class="btn btn-secondary btn-small"
                     aria-label={`Remove ${p}`}
@@ -274,19 +274,20 @@ export function SettingsScreen({
       </div>
 
       <h2>Theme</h2>
-      <div class="card" role="radiogroup" aria-label="Theme" style={{ display: 'flex', gap: 8 }}>
-        {(['system', 'light', 'dark'] as const).map((p) => (
-          <button
-            key={p}
-            role="radio"
-            aria-checked={pref === p}
-            class={pref === p ? 'btn' : 'btn btn-secondary'}
-            onClick={() => setPref(p)}
-            style={{ textTransform: 'capitalize' }}
-          >
-            {p}
-          </button>
-        ))}
+      <div class="card">
+        <div class="segmented" role="radiogroup" aria-label="Theme">
+          {(['system', 'light', 'dark'] as const).map((p) => (
+            <button
+              key={p}
+              role="radio"
+              aria-checked={pref === p}
+              class="segment"
+              onClick={() => setPref(p)}
+            >
+              {p}
+            </button>
+          ))}
+        </div>
       </div>
 
       {unlockAvailable && (

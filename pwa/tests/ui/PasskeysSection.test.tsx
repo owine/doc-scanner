@@ -141,6 +141,8 @@ describe('PasskeysSection', () => {
       list: vi.fn().mockResolvedValue({ passkeys: [PHONE, LAPTOP], notice: null }),
       remove: vi.fn().mockResolvedValueOnce({}).mockRejectedValueOnce(new ApiError('not_found', 404, 'not_found')),
     });
+    await screen.findByRole('button', { name: 'Remove Phone' });
+    expect(screen.getAllByRole('button', { name: /^Remove / })[0]).toHaveClass('btn-danger');
     fireEvent.click(await screen.findByRole('button', { name: 'Remove Phone' }));
     await waitFor(() => expect(screen.queryByText('Phone')).toBeNull());
     expect(client.remove).toHaveBeenCalledWith(PHONE.credentialId);
