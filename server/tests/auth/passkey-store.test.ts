@@ -104,6 +104,12 @@ describe('PasskeyStore', () => {
     expect(s.list()[0]?.lastUsedAt).toBe(NOW.toISOString());
   });
 
+  it('says whether it has a credential id', () => {
+    const { s } = setup();
+    add(s);
+    expect([s.has(ID), s.has(OTHER)]).toEqual([true, false]);
+  });
+
   it('lists every id with its salt', () => {
     const { s } = setup();
     add(s);

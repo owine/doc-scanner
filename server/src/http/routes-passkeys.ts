@@ -76,6 +76,12 @@ export function passkeyRoutes(deps: { db: DB; store: SessionStore; passkeys: Pas
     if (!pending.has(salt)) return c.json({ error: 'invalid_enrolment' }, 400);
     const prf = decodeBase64url(body.data.prf);
     if (!prf || prf.length !== PRF_BYTES) return c.json({ error: 'invalid_input' }, 400);
+    // add() would replace the wrap: a second enrolment of one authenticator
+    // must not silently overwrite the first (begin excludes known ids).
+    if (deps.passkeys.has(credentialId)) {
+      prf.fill(0);
+      return c.json({ error: 'already_enrolled' }, 409);
+    }
     let entry: PasskeyEntry;
     try {
       entry = await live.mailboxSecret.use((passphrase) =>

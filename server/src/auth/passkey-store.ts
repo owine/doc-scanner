@@ -141,6 +141,10 @@ export class PasskeyStore {
     }));
   }
 
+  has(credentialId: string): boolean {
+    return this.db.prepare('SELECT 1 FROM passkey_unlocks WHERE credential_id = ?').get(credentialId) !== undefined;
+  }
+
   count(): number {
     return (this.db.prepare('SELECT COUNT(*) AS n FROM passkey_unlocks').get() as { n: number }).n;
   }

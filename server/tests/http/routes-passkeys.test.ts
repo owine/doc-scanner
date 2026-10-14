@@ -139,6 +139,16 @@ describe('passkey enrolment', () => {
     for (const [entry] of added.mock.calls) expect(entry.prf.every((b) => b === 0)).toBe(true);
   });
 
+  it('refuses to enrol a credential id again, and keeps its wrap', async () => {
+    const c = await live();
+    expect((await add(c, { credentialId: CRED, salt: (await begin(c)).salt, prf: PRF_B64, label: LABEL })).status).toBe(201);
+    const again = await add(c, { credentialId: CRED, salt: (await begin(c)).salt, prf: Buffer.alloc(32, 9).toString('base64url'), label: 'other' });
+    expect(again.status).toBe(409);
+    expect(await again.json()).toEqual({ error: 'already_enrolled' });
+    expect(text(c.passkeys.unwrap(CRED, PRF))).toBe(PASSPHRASE);
+    expect(c.passkeys.list().map((p) => p.label)).toEqual([LABEL]);
+  });
+
   it('keeps at most 16 pending salts, forgetting the oldest first', async () => {
     const c = await live();
     const salts: string[] = [];
