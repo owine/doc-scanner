@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { makeHarness, ANALYSIS, okOutcome } from './harness.js';
+import { makeHarness, ANALYSIS, TREE, okOutcome } from './harness.js';
 import { DocumentWorker, MAX_ATTEMPTS } from '../../src/documents/worker.js';
 import type { DocumentRow } from '../../src/documents/types.js';
 
@@ -334,6 +334,57 @@ describe('DocumentWorker', () => {
     expect(h.repo.get(doc.id)).toMatchObject({ state: 'failed', attempts: MAX_ATTEMPTS, discardRequested: false });
     expect(h.report).toHaveBeenCalledTimes(1);
     expect(h.report.mock.calls[0][1]).toBe('file');
+  });
+
+  describe('a folder walk that outlives its session', () => {
+    const TREE_B = [{ linkId: 'B-ROOT', path: '/', files: [] }];
+
+    /** Session A's walk, held until released; session B's drive walks at once. */
+    function twoSessions() {
+      h = makeHarness({ withTree: false });
+      let releaseA!: () => void;
+      h.drive.walkFolderTree.mockImplementation(() => new Promise((resolve) => (releaseA = () => resolve([...TREE]))));
+      const driveB = { ...h.drive, walkFolderTree: vi.fn().mockResolvedValue(TREE_B) };
+      const sessionB = { sid: 's', driveClient: driveB } as never;
+      return { releaseA: () => releaseA(), driveB, sessionB };
+    }
+
+    it('does not save a walk started under one session that finishes after a switch to another', async () => {
+      const { releaseA, sessionB } = twoSessions();
+      const w = new DocumentWorker(h.ctx);
+      const walkA = w.refreshFolderCache();
+      await vi.waitFor(() => expect(h.drive.walkFolderTree).toHaveBeenCalledTimes(1));
+      h.setLive(sessionB);
+      releaseA();
+      await walkA;
+      expect(h.ctx.folderCache.load()).toBeNull();
+    });
+
+    it('does not save a walk that finishes after a logout', async () => {
+      const { releaseA } = twoSessions();
+      const w = new DocumentWorker(h.ctx);
+      const walkA = w.refreshFolderCache();
+      await vi.waitFor(() => expect(h.drive.walkFolderTree).toHaveBeenCalledTimes(1));
+      h.setLive(undefined);
+      releaseA();
+      await walkA;
+      expect(h.ctx.folderCache.load()).toBeNull();
+    });
+
+    it("starts the new session's own walk on its login instead of joining the old one", async () => {
+      const { releaseA, driveB, sessionB } = twoSessions();
+      const w = new DocumentWorker(h.ctx);
+      const walkA = w.refreshFolderCache();
+      await vi.waitFor(() => expect(h.drive.walkFolderTree).toHaveBeenCalledTimes(1));
+      h.setLive(sessionB);
+      await w.onLogin();
+      expect(driveB.walkFolderTree).toHaveBeenCalledTimes(1);
+      expect(h.ctx.folderCache.load()?.tree).toEqual(TREE_B);
+      // A's walk finishing late leaves B's tree in place.
+      releaseA();
+      await walkA;
+      expect(h.ctx.folderCache.load()?.tree).toEqual(TREE_B);
+    });
   });
 
   it('walks again after a folder refresh that failed', async () => {

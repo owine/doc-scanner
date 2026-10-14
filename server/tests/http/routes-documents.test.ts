@@ -398,9 +398,10 @@ describe('approve', () => {
   });
 });
 
-/** A live session whose only Drive call is the folder walk. */
+/** A live session whose only Drive call is the folder walk. One object, as a real session is. */
 function walking(walkFolderTree: () => Promise<typeof TREE>): () => LiveSession {
-  return () => ({ driveClient: { walkFolderTree } }) as unknown as LiveSession;
+  const live = { driveClient: { walkFolderTree } } as unknown as LiveSession;
+  return () => live;
 }
 
 describe('errors', () => {
