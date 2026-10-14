@@ -1,6 +1,6 @@
 /* Camera surfaces: the scanner and edit corners. Dark in both themes. */
 .camera {
-  display: flex; flex-direction: column; height: 100dvh;
+  display: flex; flex-direction: column; height: 100dvh; box-sizing: border-box;
   background: var(--ink-bg); color: var(--ink-fg); color-scheme: dark;
   padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom);
 }
@@ -19,12 +19,13 @@
 @media (hover: hover) {
   .camera .btn-secondary:hover:not(:disabled) { background: rgb(255 255 255 / 0.12); }
 }
-.camera .btn:disabled { background: var(--ink-bg-2); color: var(--ink-fg-2); border-color: var(--ink-line); }
+.camera .btn:disabled { background: var(--ink-bg-2); color: color-mix(in oklab, var(--ink-fg-2) 55%, transparent); border-color: var(--ink-line); }
 
 .camera-view { flex: 1; position: relative; overflow: hidden; min-height: 0; }
 .camera-video { display: block; width: 100%; height: 100%; object-fit: cover; }
 .camera-hint {
-  position: absolute; top: var(--sp-3); left: 0; right: 0; text-align: center;
+  position: absolute; top: var(--sp-3); left: 50%; transform: translateX(-50%); white-space: nowrap;
+  padding: var(--sp-1) 10px; border-radius: 999px; background: rgb(0 0 0 / 0.55);
   font-weight: 500; color: var(--ink-warning); text-shadow: 0 1px 3px rgb(0 0 0 / 0.7);
 }
 .camera-hint--stable { color: var(--ink-success); }
@@ -46,7 +47,7 @@
 
 /* The shutter echoes the mark: a ring with the accent dot sitting on it. */
 .shutter {
-  position: relative; justify-self: center; width: 68px; height: 68px; padding: 0;
+  position: relative; box-sizing: border-box; justify-self: center; width: 68px; height: 68px; padding: 0;
   border-radius: 50%; border: 3px solid var(--ink-fg); background: rgb(255 255 255 / 0.12); cursor: pointer;
 }
 .shutter:active { background: rgb(255 255 255 / 0.24); }

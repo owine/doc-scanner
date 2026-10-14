@@ -58,8 +58,11 @@ export function EditCornersScreen({ canvas, initialQuad, onCancel, onApply }: Ed
       setRender({ scale: s, offsetX, offsetY });
     };
     observe();
-    window.addEventListener('resize', observe);
-    return () => { window.removeEventListener('resize', observe); canvas.remove(); };
+    // The wrapper resizes without the window too: the invalid-corners message, font loads, dvh.
+    const wrap = wrapRef.current;
+    const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(observe);
+    if (ro) ro.observe(wrap); else window.addEventListener('resize', observe);
+    return () => { ro?.disconnect(); window.removeEventListener('resize', observe); canvas.remove(); };
   }, [canvas]);
 
   function onPointerDown(key: keyof Quad) {
@@ -109,7 +112,7 @@ export function EditCornersScreen({ canvas, initialQuad, onCancel, onApply }: Ed
         <button class="btn btn-secondary" onClick={onCancel}>Cancel</button>
         <button class="btn" onClick={() => onApply(quad)} disabled={!valid}>Apply</button>
       </footer>
-      {!valid && <p class="error-text camera-error">Corners must form a quadrilateral</p>}
+      {!valid && <p class="camera-error">Corners must form a quadrilateral</p>}
     </main>
   );
 }

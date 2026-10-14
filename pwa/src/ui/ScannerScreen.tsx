@@ -173,7 +173,7 @@ export function ScannerScreen({ store, resumeScanId, onBack, onDone }: ScannerSc
         )}
       </div>
       <footer class="camera-foot">
-        <span class="muted camera-count">Pages: {pageCount}</span>
+        <span class="camera-count">Pages: {pageCount}</span>
         <button aria-label="Capture" class="shutter" onClick={shutter}>
           <span class="shutter-dot" aria-hidden="true" />
         </button>
