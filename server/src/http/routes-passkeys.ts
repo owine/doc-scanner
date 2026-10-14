@@ -6,7 +6,8 @@ import type { SessionStore } from '../auth/session-store.js';
 import { CREDENTIAL_ID, PRF_BYTES, decodeBase64url, shortId, type PasskeyEntry, type PasskeyStore } from '../auth/passkey-store.js';
 import { SETTING, readSetting, takeSetting, writeSetting } from '../auth/app-settings.js';
 import { logger } from '../logger.js';
-import { headerOnly, sessionMiddleware, type AuthContext, type AuthMode } from './middleware.js';
+import { PROXY_SID, headerOnly, sessionMiddleware, type AuthContext, type AuthMode } from './middleware.js';
+import { getLiveSession } from '../auth/live-session.js';
 
 type Env = { Variables: { auth?: AuthContext } };
 
@@ -69,6 +70,9 @@ export function passkeyRoutes(deps: { db: DB; store: SessionStore; passkeys: Pas
     const live = c.get('auth')!.liveSession;
     if (!live) return c.json({ error: 'proton_not_live' }, 409);
     const body = AddSchema.safeParse(await c.req.json().catch(() => null));
+    // A logout or another login may have run while the body arrived: the
+    // captured session's passphrase is disposed. No await from here to use().
+    if (getLiveSession(PROXY_SID) !== live) return c.json({ error: 'proton_not_live' }, 409);
     if (!body.success) return c.json({ error: 'invalid_input' }, 400);
     const { credentialId, salt, label } = body.data;
     prune(Date.now());

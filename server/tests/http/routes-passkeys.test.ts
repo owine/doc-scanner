@@ -13,6 +13,7 @@ import {
   PASSPHRASE,
   PRF,
   PRF_B64,
+  PROXY_HEADERS,
   SESSION,
   authApp,
   del,
@@ -107,6 +108,32 @@ describe('passkey enrolment', () => {
       expect(res.status).toBe(409);
       expect(await res.json()).toEqual({ error: 'proton_not_live' });
     }
+  });
+
+  it('answers proton_not_live when the session is logged out while the body is read', async () => {
+    const c = await live();
+    const { salt } = await begin(c);
+    const json = new TextEncoder().encode(JSON.stringify({ credentialId: CRED, salt, prf: PRF_B64 }));
+    // Pulled only when the route reads the body: after the middleware saw the live session.
+    const body = new ReadableStream<Uint8Array>(
+      {
+        pull(ctrl) {
+          _resetLiveSessions();
+          ctrl.enqueue(json);
+          ctrl.close();
+        },
+      },
+      { highWaterMark: 0 },
+    );
+    const res = await c.app.request('/api/passkeys', {
+      method: 'POST',
+      headers: { ...PROXY_HEADERS, 'content-type': 'application/json' },
+      body,
+      duplex: 'half',
+    } as RequestInit);
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: 'proton_not_live' });
+    expect(c.passkeys.count()).toBe(0);
   });
 
   it('refuses an unknown, a used or an expired salt', async () => {
