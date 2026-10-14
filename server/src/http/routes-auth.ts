@@ -169,9 +169,13 @@ export function authRoutes(deps: AuthRoutesDeps) {
       // ProtonAuth.login reports its own failures (and knows which are typos);
       // this only covers what fails after Proton has accepted the login.
       let loggedIn = false;
+      // Owned here until startLiveSession takes it (which disposes it itself
+      // on a failure); any step in between that throws must not strand it.
+      let secret: MailboxSecret | undefined;
       try {
         const result = await deps.protonAuth.login(email, password, totp);
         loggedIn = true;
+        secret = result.mailboxSecret;
         // Never a logout first: it would remove the passkeys. Compared by
         // User.ID, since one account can be typed as different emails.
         const previousUserId = readSetting(deps.db, SETTING.protonUserId);
@@ -200,11 +204,13 @@ export function authRoutes(deps: AuthRoutesDeps) {
           keySaltFingerprint: result.keySaltFingerprint,
           clearDriveCaches: otherAccount,
         });
+        secret = undefined;
         // Last: if anything above failed, the next login still sees the old account and clears again.
         writeSetting(deps.db, SETTING.protonUserId, result.userId);
         logger.info({ email, remoteUser }, 'login succeeded');
         return c.json({ ok: true, email: result.session.email });
       } catch (e) {
+        secret?.dispose();
         if (e instanceof TwoFactorRequiredError) return c.json({ error: 'totp_required' }, 422);
         if (loggedIn) captureAuthFailure(e, 'login', 'session');
         const status = (e as { status?: number }).status === 401 ? 401 : 500;
@@ -316,6 +322,15 @@ export function authRoutes(deps: AuthRoutesDeps) {
         logger.error({ credential, errName: errorName(err) }, 'passkey unlock failed');
         return c.json({ error: 'internal' }, 500);
       }
+      // Recorded at enrolment and unchanged: this passphrase still opened the
+      // keys. Read before the secret exists, so a failure here zeroes the bytes.
+      let keySaltFingerprint: string | null;
+      try {
+        keySaltFingerprint = readSetting(deps.db, SETTING.keySaltFingerprint);
+      } catch (err) {
+        passphrase.fill(0);
+        throw err;
+      }
       // From here the MailboxSecret owns the bytes; logout or the next login disposes it.
       await startLiveSession({
         sid: PROXY_SID,
@@ -323,10 +338,14 @@ export function authRoutes(deps: AuthRoutesDeps) {
         mailboxSecret: new MailboxSecret(passphrase),
         decryptedKeys: resumed.decryptedKeys,
         userId: resumed.userId,
-        // Recorded at enrolment and unchanged: this passphrase still opened the keys.
-        keySaltFingerprint: readSetting(deps.db, SETTING.keySaltFingerprint),
+        keySaltFingerprint,
       });
-      deps.passkeys.touch(credentialId);
+      // The session is live: a failed bookkeeping write must not answer 500.
+      try {
+        deps.passkeys.touch(credentialId);
+      } catch (err) {
+        logger.warn({ credential, errName: errorName(err) }, 'passkey unlock: could not record the use');
+      }
       logger.info({ credential }, 'unlocked with a passkey');
       return c.json(status(auth.email, PROXY_SID));
     });

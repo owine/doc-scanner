@@ -5,6 +5,7 @@ import { SETTING, readSetting, writeSetting } from '../../src/auth/app-settings.
 import type { DecryptedUserKey } from '../../src/auth/keys.js';
 import { DriveClient } from '../../src/drive/client.js';
 import { SessionStore } from '../../src/auth/session-store.js';
+import { PasskeyStore } from '../../src/auth/passkey-store.js';
 import { TREE } from '../documents/harness.js';
 import { SESSION, authApp, get, loginResult, makeKeys, post, seedPasskey, signIn, type AuthApp } from '../helpers/auth-app.js';
 
@@ -144,6 +145,47 @@ describe('signing in again', () => {
     // So the next login still sees a different account, and clears again.
     expect(readSetting(c.db, SETTING.protonUserId)).toBe('user-A');
     await expect(second.mailboxSecret.use(() => 1)).rejects.toThrow('already disposed');
+  });
+
+  describe('disposes the new passphrase when a step after the Proton login fails', () => {
+    /** Makes every statement matching `sql` throw, as a full disk would. */
+    function failSql(c: AuthApp, sql: RegExp) {
+      const prepare = c.db.prepare.bind(c.db);
+      vi.spyOn(c.db, 'prepare').mockImplementation((s: string) => {
+        if (sql.test(s)) throw new Error('disk I/O error');
+        return prepare(s);
+      });
+    }
+
+    const steps: [string, (c: AuthApp) => void][] = [
+      ['reading the stored account id', (c) => failSql(c, /^SELECT value FROM app_settings/)],
+      ['clearing the folder cache', (c) => vi.spyOn(c.pipeline!, 'clearAccountData').mockImplementation(() => { throw new Error('x'); })],
+      ['removing the passkeys', (c) => vi.spyOn(PasskeyStore.prototype, 'removeAll').mockImplementation(() => { throw new Error('x'); })],
+      ['deleting a setting', (c) => failSql(c, /^DELETE FROM app_settings/)],
+      ['saving the tokens', () => vi.spyOn(SessionStore.prototype, 'save').mockImplementation(() => { throw new Error('x'); })],
+    ];
+    for (const [step, fail] of steps) {
+      it(`on ${step}`, async () => {
+        const c = setup({ pipeline: true });
+        await signIn(c, keys, { userId: 'user-A' });
+        fail(c);
+        const second = loginResult(keys, { userId: 'user-B' });
+        c.auth.login.mockResolvedValueOnce(second);
+        expect((await post(c.app, '/api/auth/login', { email: 'b@x.test', password: 'p' })).status).toBe(500);
+        await expect(second.mailboxSecret.use(() => 1)).rejects.toThrow('already disposed');
+      });
+    }
+
+    it('on checking for a changed key salt', async () => {
+      const c = setup();
+      writeSetting(c.db, SETTING.keySaltFingerprint, 'fp-old');
+      seedPasskey(c.passkeys);
+      failSql(c, /^INSERT INTO app_settings/);
+      const result = loginResult(keys);
+      c.auth.login.mockResolvedValueOnce(result);
+      expect((await post(c.app, '/api/auth/login', { email: 'e@x.test', password: 'p' })).status).toBe(500);
+      await expect(result.mailboxSecret.use(() => 1)).rejects.toThrow('already disposed');
+    });
   });
 
   it('treats an email that differs only in case as the same account', async () => {

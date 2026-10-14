@@ -5,6 +5,7 @@ import { ProtonApiError } from '../../src/auth/proton-api.js';
 import { SessionEndedError } from '../../src/auth/srp.js';
 import { KeyDecryptError, type DecryptedUserKey } from '../../src/auth/keys.js';
 import { logger } from '../../src/logger.js';
+import { PasskeyStore } from '../../src/auth/passkey-store.js';
 import { SETTING, deleteSetting, writeSetting } from '../../src/auth/app-settings.js';
 import {
   CRED,
@@ -223,6 +224,33 @@ describe('POST /api/auth/unlock', () => {
       expect(c.passkeys.count()).toBe(1);
     });
   }
+
+  it('zeroes the passphrase when reading the recorded fingerprint fails', async () => {
+    const c = locked();
+    c.auth.resume.mockResolvedValue(resumeResult(keys));
+    const prepare = c.db.prepare.bind(c.db);
+    vi.spyOn(c.db, 'prepare').mockImplementation((s: string) => {
+      if (/^SELECT value FROM app_settings/.test(s)) throw new Error('disk I/O error');
+      return prepare(s);
+    });
+    expect((await unlock(c)).status).toBe(500);
+    const passphrase = c.auth.resume.mock.calls[0]![1] as Uint8Array;
+    expect(passphrase.every((b) => b === 0)).toBe(true);
+    expect(getLiveSession('proxy')).toBeUndefined();
+  });
+
+  it('still answers 200 when recording the use fails', async () => {
+    const c = locked();
+    c.auth.resume.mockResolvedValue(resumeResult(keys));
+    vi.spyOn(PasskeyStore.prototype, 'touch').mockImplementation(() => {
+      throw new Error('disk I/O error');
+    });
+    const warn = vi.spyOn(logger, 'warn');
+    const res = await unlock(c);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual(LIVE_STATUS);
+    expect(warn).toHaveBeenCalledWith(expect.objectContaining({ errName: 'Error' }), expect.any(String));
+  });
 
   it('resumes documents awaiting login through the live-session listener', async () => {
     const c = locked({ pipeline: true });
