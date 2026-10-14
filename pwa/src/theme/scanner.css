@@ -25,7 +25,7 @@
 .camera-video { display: block; width: 100%; height: 100%; object-fit: cover; }
 .camera-hint {
   position: absolute; top: var(--sp-3); left: 50%; transform: translateX(-50%); white-space: nowrap;
-  padding: var(--sp-1) 10px; border-radius: 999px; background: rgb(0 0 0 / 0.55);
+  padding: var(--sp-1) 10px; border-radius: 999px; background: rgb(17 22 29 / 0.8);
   font-weight: 500; color: var(--ink-warning); text-shadow: 0 1px 3px rgb(0 0 0 / 0.7);
 }
 .camera-hint--stable { color: var(--ink-success); }
