@@ -219,6 +219,16 @@ describe('passkey enrolment', () => {
   });
 });
 
+describe('request size', () => {
+  it('refuses a body over 16 KiB with 413', async () => {
+    const c = await live();
+    const res = await add(c, { credentialId: CRED, salt: (await begin(c)).salt, prf: PRF_B64, label: 'x'.repeat(17 * 1024) });
+    expect(res.status).toBe(413);
+    expect(await res.json()).toEqual({ error: 'payload_too_large' });
+    expect(c.passkeys.count()).toBe(0);
+  });
+});
+
 describe('listing and removing passkeys', () => {
   it('lists the passkeys, and says once that a password change removed them', async () => {
     const c = setup();

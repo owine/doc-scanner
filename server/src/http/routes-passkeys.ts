@@ -6,7 +6,7 @@ import type { SessionStore } from '../auth/session-store.js';
 import { CREDENTIAL_ID, PRF_BYTES, decodeBase64url, shortId, type PasskeyEntry, type PasskeyStore } from '../auth/passkey-store.js';
 import { SETTING, readSetting, takeSetting, writeSetting } from '../auth/app-settings.js';
 import { logger } from '../logger.js';
-import { PROXY_SID, headerOnly, sessionMiddleware, type AuthContext, type AuthMode } from './middleware.js';
+import { PROXY_SID, headerOnly, sessionMiddleware, smallBodies, type AuthContext, type AuthMode } from './middleware.js';
 import { getLiveSession } from '../auth/live-session.js';
 
 type Env = { Variables: { auth?: AuthContext } };
@@ -43,7 +43,7 @@ function cleanLabel(label: string | undefined): string {
 /** Passkey enrolment, listing and removal (passkey-unlock spec §2). Header mode only. */
 export function passkeyRoutes(deps: { db: DB; store: SessionStore; passkeys: PasskeyStore; authMode: AuthMode }) {
   const r = new Hono<Env>();
-  r.use('*', sessionMiddleware(deps.store, deps.authMode), headerOnly(deps.authMode));
+  r.use('*', smallBodies(), sessionMiddleware(deps.store, deps.authMode), headerOnly(deps.authMode));
   // Salt (base64url) -> when it expires. In memory: a restart ends every enrolment under way.
   const pending = new Map<string, number>();
   const prune = (now: number) => {

@@ -22,6 +22,7 @@ import {
   mintSid,
   revokeAllSessions,
   sessionMiddleware,
+  smallBodies,
   type AuthContext,
   type AuthMode,
 } from './middleware.js';
@@ -73,7 +74,7 @@ export interface AuthRoutesDeps {
 export function authRoutes(deps: AuthRoutesDeps) {
   const header = deps.authMode.kind === 'header';
   const r = new Hono<Env>();
-  r.use('*', sessionMiddleware(deps.store, deps.authMode));
+  r.use('*', smallBodies(), sessionMiddleware(deps.store, deps.authMode));
 
   // Login, unlock and logout take turns: two Proton calls at once could each
   // refresh the one refresh token, and Proton would reject the second.

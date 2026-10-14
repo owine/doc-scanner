@@ -1,4 +1,5 @@
 import type { MiddlewareHandler } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import type { Context } from 'hono';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
@@ -81,6 +82,10 @@ export const sessionMiddleware = (store: SessionStore, mode: AuthMode = COOKIE_M
   }
   await next();
 };
+
+/** For the auth and passkey routers: their JSON bodies are a few hundred bytes. */
+export const smallBodies = (): MiddlewareHandler =>
+  bodyLimit({ maxSize: 16 * 1024, onError: (c) => c.json({ error: 'payload_too_large' }, 413) });
 
 /**
  * For routes that exist only in header mode (spec §1, Guards): passkeys

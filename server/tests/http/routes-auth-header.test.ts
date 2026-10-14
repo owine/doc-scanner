@@ -54,6 +54,18 @@ describe('POST /api/auth/login in header mode', () => {
   });
 });
 
+describe('request size', () => {
+  it('refuses a body over 16 KiB with 413, before any Proton call', async () => {
+    const { app, auth } = setup();
+    for (const path of ['/api/auth/login', '/api/auth/unlock']) {
+      const res = await post(app, path, { email: 'e@x.test', password: 'p'.repeat(17 * 1024) });
+      expect([path, res.status]).toEqual([path, 413]);
+      expect(await res.json()).toEqual({ error: 'payload_too_large' });
+    }
+    expect(auth.login).not.toHaveBeenCalled();
+  });
+});
+
 describe('GET /api/auth/status', () => {
   it('says none, locked or live, with the passkey count and unlock available', async () => {
     const c = setup();
