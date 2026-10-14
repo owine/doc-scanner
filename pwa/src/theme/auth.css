@@ -10,5 +10,7 @@
   .auth-screen { padding-top: var(--sp-10); padding-bottom: var(--sp-10); }
 }
 .auth-screen > * { margin: 0; }
+/* Direct children are spaced by the column's gap; inside a form, base.css's stacked-button margin applies. */
+.auth-screen > .btn-block + .btn-block { margin-top: 0; }
 .auth-screen h2 { font-size: var(--fs-20); }
 .lockup { display: flex; align-items: center; gap: 10px; font-size: 26px; font-weight: 500; letter-spacing: -0.025em; }

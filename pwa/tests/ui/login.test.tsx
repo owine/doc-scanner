@@ -12,6 +12,11 @@ describe('LoginScreen', () => {
     expect(screen.getByRole('alert')).toHaveTextContent(/never stored/i);
   });
 
+  it('names the heading doc-scanner despite the mark', () => {
+    render(<LoginScreen onLoggedIn={() => {}} />);
+    expect(screen.getByRole('heading', { name: 'doc-scanner' })).toBeInTheDocument();
+  });
+
   it('renders email and password inputs', () => {
     const { container } = render(<LoginScreen onLoggedIn={() => {}} />);
     expect(container.querySelector('input[type="email"]')).not.toBeNull();
