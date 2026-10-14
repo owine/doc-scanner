@@ -8,7 +8,8 @@ export interface EditCornersScreenProps {
   onApply: (quad: Quad) => void;
 }
 
-const HANDLE_RADIUS = 14;
+/** Half the handle's 44 px touch target, centred on the corner; the visible ring is 28 px. */
+const HANDLE_HIT_RADIUS = 22;
 
 function quadIsValid(q: Quad): boolean {
   const a = signedArea([q.tl, q.tr, q.br, q.bl]);
@@ -57,8 +58,11 @@ export function EditCornersScreen({ canvas, initialQuad, onCancel, onApply }: Ed
       setRender({ scale: s, offsetX, offsetY });
     };
     observe();
-    window.addEventListener('resize', observe);
-    return () => { window.removeEventListener('resize', observe); canvas.remove(); };
+    // The wrapper resizes without the window too: the invalid-corners message, font loads, dvh.
+    const wrap = wrapRef.current;
+    const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(observe);
+    if (ro) ro.observe(wrap); else window.addEventListener('resize', observe);
+    return () => { ro?.disconnect(); window.removeEventListener('resize', observe); canvas.remove(); };
   }, [canvas]);
 
   function onPointerDown(key: keyof Quad) {
@@ -82,36 +86,33 @@ export function EditCornersScreen({ canvas, initialQuad, onCancel, onApply }: Ed
   const valid = quadIsValid(quad);
 
   return (
-    <main style={{ display: 'flex', flexDirection: 'column', height: '100dvh', background: 'var(--bg)', paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' }}>
-      <header style={{ display: 'flex', justifyContent: 'space-between', padding: 12, background: 'var(--bg-elev)', borderBottom: '1px solid var(--border)' }}>
+    <main class="camera">
+      <header class="camera-bar">
         <button class="btn btn-secondary" onClick={onCancel}>Cancel</button>
-        <strong>Adjust corners</strong>
-        <span style={{ width: 60 }} />
+        <strong class="camera-title">Adjust corners</strong>
+        <span />
       </header>
-      <div ref={wrapRef} style={{ flex: 1, position: 'relative', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-           onPointerMove={onPointerMove}
-           onPointerUp={onPointerUp}>
+      <div ref={wrapRef} class="corners-view" onPointerMove={onPointerMove} onPointerUp={onPointerUp}>
         {(['tl', 'tr', 'bl', 'br'] as const).map((k) => (
           <div
             key={k}
+            class="corner-handle"
             onPointerDown={onPointerDown(k)}
+            // Strings with units: Preact 11's core no longer appends "px" to numbers
+            // (only preact/compat does), and browsers ignore a unitless length.
             style={{
-              position: 'absolute', width: HANDLE_RADIUS * 2, height: HANDLE_RADIUS * 2,
-              borderRadius: '50%', background: 'var(--accent)', border: '2px solid #fff',
-              boxShadow: '0 1px 4px rgba(0,0,0,0.5)',
-              left: quad[k].x * render.scale + render.offsetX - HANDLE_RADIUS,
-              top: quad[k].y * render.scale + render.offsetY - HANDLE_RADIUS,
-              touchAction: 'none', cursor: 'grab',
+              left: `${quad[k].x * render.scale + render.offsetX - HANDLE_HIT_RADIUS}px`,
+              top: `${quad[k].y * render.scale + render.offsetY - HANDLE_HIT_RADIUS}px`,
             }}
             aria-label={`Corner ${k}`}
           />
         ))}
       </div>
-      <footer style={{ display: 'flex', gap: 8, padding: 12, background: 'var(--bg-elev)', borderTop: '1px solid var(--border)' }}>
-        <button class="btn btn-secondary" style={{ flex: 1 }} onClick={onCancel}>Cancel</button>
-        <button class="btn" style={{ flex: 1 }} onClick={() => onApply(quad)} disabled={!valid}>Apply</button>
+      <footer class="camera-foot camera-foot--split">
+        <button class="btn btn-secondary" onClick={onCancel}>Cancel</button>
+        <button class="btn" onClick={() => onApply(quad)} disabled={!valid}>Apply</button>
       </footer>
-      {!valid && <p class="error-text" style={{ textAlign: 'center', padding: 4 }}>Corners must form a quadrilateral</p>}
+      {!valid && <p class="camera-error">Corners must form a quadrilateral</p>}
     </main>
   );
 }

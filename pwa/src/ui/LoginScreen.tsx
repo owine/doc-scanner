@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { api, ApiError } from '../api.js';
+import { Mark } from './Mark.js';
 
 export interface LoginScreenProps {
   onLoggedIn: (email: string) => void;
@@ -73,7 +74,7 @@ export function LoginScreen({ onLoggedIn, onCancel, reason }: LoginScreenProps) 
 
   return (
     <main class="auth-screen">
-      <h1>doc-scanner</h1>
+      <h1 class="lockup"><Mark size={30} />doc-scanner</h1>
       <div role="alert" class="warn">
         <strong>Warning:</strong> This is an unofficial app. Your Proton credentials are sent
         only to your own server. Proton does not endorse this app. Your password is never stored.
@@ -97,13 +98,13 @@ export function LoginScreen({ onLoggedIn, onCancel, reason }: LoginScreenProps) 
         {error && <p class="error-text">{error}</p>}
         {reload && (
           // An installed iOS app has no reload control of its own.
-          <button class="btn btn-secondary btn-block" type="button" onClick={() => location.reload()} style={{ marginBottom: 8 }}>
+          <button class="btn btn-secondary btn-block" type="button" onClick={() => location.reload()}>
             Reload
           </button>
         )}
         <button class="btn btn-block" type="submit" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
         {onCancel && (
-          <button class="btn btn-secondary btn-block" type="button" onClick={onCancel} style={{ marginTop: 8 }}>
+          <button class="btn btn-secondary btn-block" type="button" onClick={onCancel}>
             Cancel
           </button>
         )}

@@ -1,0 +1,114 @@
+/* The inbox, and the settings screen, which shares its layout. */
+.inbox {
+  position: relative; max-width: 720px; margin: 0 auto; padding: var(--sp-4);
+  padding-top: max(var(--sp-4), env(safe-area-inset-top));
+  padding-bottom: max(var(--sp-6), env(safe-area-inset-bottom));
+}
+.inbox-header { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+.inbox-header h1 { margin: 0; flex: 0 1 auto; font-size: 22px; }
+.inbox-header .actions { margin-left: auto; }
+.inbox h2 {
+  margin: var(--sp-6) 0 var(--sp-2);
+  font: 500 var(--fs-12)/1.2 var(--font-mono); letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--ink-3);
+}
+.inbox .warn { margin: var(--sp-3) 0 0; }
+.nudge { margin-top: var(--sp-3); }
+.nudge p { margin: 0 0 var(--sp-2); }
+
+/* Rows */
+.doc-list { list-style: none; padding: 0; margin: 0; }
+.doc-row {
+  display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap;
+  padding: var(--sp-3) 0; border-bottom: 1px solid var(--line);
+}
+.doc-row:last-child { border-bottom: 0; }
+.doc-main { flex: 1; min-width: 12rem; }
+.doc-name { font-weight: 500; overflow-wrap: anywhere; }
+.doc-row .doc-meta { font-family: var(--font-mono); font-size: var(--fs-12); overflow-wrap: anywhere; }
+.doc-row .error-text { font-size: var(--fs-13); }
+.state-dot {
+  flex: none; align-self: flex-start; margin-top: calc(0.75em - 4px);
+  width: 8px; height: 8px; border-radius: 50%; box-sizing: border-box;
+}
+.state-dot--work { border: 1.5px solid var(--accent); }
+.state-dot--ok { background: var(--success); }
+.state-dot--bad { background: var(--danger); }
+.state-dot--idle { border: 1.5px solid var(--line-strong); }
+.doc-main progress {
+  display: block; width: 100%; height: 3px; margin-top: 6px;
+  appearance: none; border: 0; border-radius: 2px; background: var(--paper-3); accent-color: var(--accent);
+}
+.doc-main progress::-webkit-progress-bar { background: var(--paper-3); border-radius: 2px; }
+.doc-main progress::-webkit-progress-value { background: var(--accent); border-radius: 2px; }
+.doc-main progress::-moz-progress-bar { background: var(--accent); border-radius: 2px; }
+@media (forced-colors: active) { .doc-main progress { appearance: auto; } }
+
+/* Review card */
+.review-card { margin-bottom: var(--sp-3); display: flex; flex-direction: column; gap: var(--sp-3); }
+.review-card .field { margin-bottom: 0; }
+.review-card > p, .review-card .confidence p { margin: 0; }
+.review-card .field-head { min-height: 44px; }
+.review-card .doc-chooser { margin-top: 0; }
+.review-top { display: flex; gap: var(--sp-3); align-items: flex-start; }
+.review-thumb {
+  flex: none; width: 88px; aspect-ratio: 3 / 4; object-fit: cover; object-position: top;
+  border: 1px solid var(--line); border-radius: var(--r-1); background: var(--paper);
+}
+@media (min-width: 600px) { .review-thumb { width: 120px; } }
+.review-head { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+.review-meta { font-family: var(--font-mono); font-size: var(--fs-12); overflow-wrap: anywhere; }
+.folder-row { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; overflow-wrap: anywhere; }
+.path { font-family: var(--font-mono); font-size: var(--fs-14); color: var(--ink); overflow-wrap: anywhere; }
+.confidence { display: flex; flex-direction: column; gap: 6px; }
+.confidence-line { font-variant-numeric: tabular-nums; }
+.meter { position: relative; height: 4px; border-radius: 2px; background: var(--paper-3); }
+.meter-fill { position: absolute; inset: 0 auto 0 0; width: var(--value); border-radius: 2px; background: var(--ink-3); }
+.meter--low .meter-fill { background: var(--warning); }
+.meter--ok .meter-fill { background: var(--accent); }
+.meter-tick { position: absolute; top: -3px; bottom: -3px; left: var(--threshold); width: 1px; background: var(--ink-3); transform: translateX(-50%); }
+.review-card .rationale {
+  padding-top: var(--sp-3); border-top: 1px solid var(--line);
+  color: var(--ink-2); font-size: var(--fs-14); line-height: 1.5;
+}
+/* Approve, the one solid button in the card's own action row, takes the spare width.
+   Direct children only, so the document chooser's buttons inside the card don't stretch. */
+.review-card > .actions > .btn:not(.btn-secondary):first-child { flex: 1; }
+
+/* Folder picker and document chooser */
+.folder-picker { display: flex; flex-direction: column; gap: var(--sp-2); }
+.folder-results {
+  list-style: none; padding: 0; margin: 0; max-height: 320px; overflow-y: auto;
+  background: var(--paper); border: 1px solid var(--line); border-radius: var(--r-2);
+}
+.folder-results li { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1); border-bottom: 1px solid var(--line); }
+.folder-results li:last-child { border-bottom: none; }
+.folder-results .btn-square { margin-right: var(--sp-1); }
+.folder-result {
+  all: unset; flex: 1; box-sizing: border-box; min-height: 44px; padding: 10px 12px;
+  display: flex; align-items: center; cursor: pointer; overflow-wrap: anywhere; color: var(--ink);
+}
+.folder-picker .folder-result { font: 400 var(--fs-14)/1.4 var(--font-mono); }
+@media (hover: hover) { .folder-result:hover:not(:disabled) { background: var(--paper-2); } }
+.folder-result:disabled { color: var(--ink-4); cursor: not-allowed; }
+.folder-result:focus-visible,
+.folder-results .btn-square:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); outline-offset: -2px; }
+.new-folder { display: flex; gap: var(--sp-2); width: 100%; padding: var(--sp-2) var(--sp-3); box-sizing: border-box; }
+.doc-chooser { display: flex; flex-direction: column; gap: var(--sp-2); margin-top: var(--sp-2); }
+.doc-chooser h3 {
+  margin: var(--sp-1) 0 0;
+  font: 500 var(--fs-12)/1.2 var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3);
+}
+.chooser-option {
+  flex: 1; display: flex; align-items: center; gap: var(--sp-2); padding: 10px 12px;
+  min-height: 44px; box-sizing: border-box; overflow-wrap: anywhere; cursor: pointer;
+}
+
+/* Drop overlay: a soft wash, never a thick or accent border. */
+.drop-overlay {
+  position: fixed; inset: 0; z-index: 10; pointer-events: none;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--sp-4);
+  background: color-mix(in oklab, var(--accent-soft) 90%, transparent); color: var(--accent-ink);
+  font-size: var(--fs-20); font-weight: 500;
+}
+.drop-overlay .mark { color: var(--accent-ink); }

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/preact';
-import { DiscardedRow, WaitingRow } from '../../src/ui/inbox/DocumentRows.js';
+import { DiscardedRow, FailedRow, FiledRow, WaitingRow } from '../../src/ui/inbox/DocumentRows.js';
 import { makeDoc } from '../documents/fixtures.js';
 
 const NOW = new Date('2026-10-13T12:00:00.000Z');
@@ -22,5 +22,21 @@ describe('DocumentRows', () => {
   it('says what a waiting document is being filed with', () => {
     render(<ul><WaitingRow doc={makeDoc({ state: 'analyzing', anchorName: 'Certified letter' })} onDiscard={vi.fn()} /></ul>);
     expect(screen.getByText('Paired with “Certified letter”')).toBeInTheDocument();
+  });
+});
+
+describe('row state dots', () => {
+  const noop = async () => {};
+  const filedDoc = makeDoc({ state: 'filed', filed: { name: 'Lease.pdf', folderPath: '/Home', driveNodeUid: 'n', driveUrl: null } });
+  it.each([
+    ['waiting', () => <WaitingRow doc={makeDoc({ state: 'analyzing' })} onDiscard={noop} />, 'work'],
+    ['filed', () => <FiledRow doc={filedDoc} />, 'ok'],
+    ['failed', () => <FailedRow doc={makeDoc({ state: 'failed' })} onRetry={noop} onDiscard={noop} />, 'bad'],
+    ['discarded', () => <DiscardedRow doc={makeDoc({ state: 'discarded', discardedAt: '2026-10-10T12:00:00.000Z' })} now={new Date('2026-10-10T12:00:00.000Z')} onRestore={noop} />, 'idle'],
+  ] as const)('marks a %s row, hidden from assistive tech', (_, row, kind) => {
+    const { container } = render(<ul>{row()}</ul>);
+    const dot = container.querySelector(`.state-dot--${kind}`);
+    expect(dot).not.toBeNull();
+    expect(dot).toHaveAttribute('aria-hidden', 'true');
   });
 });

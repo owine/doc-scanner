@@ -46,4 +46,42 @@ describe('EditCornersScreen', () => {
     fireEvent.click(screen.getAllByRole('button', { name: /cancel/i })[0]!);
     expect(onCancel).toHaveBeenCalled();
   });
+
+  it('draws the corners as styled handles centred on their points', () => {
+    const canvas = fakeCanvas();
+    // Wrapper twice the canvas size: scale 2, no offsets.
+    const w = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(canvas.width * 2);
+    const h = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(canvas.height * 2);
+    try {
+      render(<EditCornersScreen canvas={canvas} initialQuad={VALID_QUAD} onCancel={() => {}} onApply={() => {}} />);
+      for (const k of ['tl', 'tr', 'bl', 'br']) {
+        expect(screen.getByLabelText(`Corner ${k}`)).toHaveClass('corner-handle');
+      }
+      const tl = screen.getByLabelText('Corner tl');
+      expect(tl.style.left).toBe(`${VALID_QUAD.tl.x * 2 - 22}px`);
+      expect(tl.style.top).toBe(`${VALID_QUAD.tl.y * 2 - 22}px`);
+    } finally {
+      w.mockRestore();
+      h.mockRestore();
+    }
+  });
+
+  it('offsets the handles by the letterbox when the wrapper is wider than the canvas', () => {
+    const canvas = fakeCanvas();
+    // Height-bound: scale 2, canvas drawn 2x wide, centred with offsetX of 100.
+    const scale = 2;
+    const wrapH = canvas.height * scale;
+    const offsetX = 100;
+    const w = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(canvas.width * scale + offsetX * 2);
+    const h = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(wrapH);
+    try {
+      render(<EditCornersScreen canvas={canvas} initialQuad={VALID_QUAD} onCancel={() => {}} onApply={() => {}} />);
+      const tl = screen.getByLabelText('Corner tl');
+      expect(tl.style.left).toBe(`${VALID_QUAD.tl.x * scale + offsetX - 22}px`);
+      expect(tl.style.top).toBe(`${VALID_QUAD.tl.y * scale - 22}px`);
+    } finally {
+      w.mockRestore();
+      h.mockRestore();
+    }
+  });
 });

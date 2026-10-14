@@ -51,8 +51,8 @@ describe('useTheme', () => {
     const meta = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')!;
     const { result } = renderHook(() => useTheme());
     act(() => result.current.setPref('dark'));
-    expect(meta.content).toBe('#0f0f0f');
+    expect(meta.content).toBe('#14181f');
     act(() => result.current.setPref('light'));
-    expect(meta.content).toBe('#ffffff');
+    expect(meta.content).toBe('#f6f4ef');
   });
 });

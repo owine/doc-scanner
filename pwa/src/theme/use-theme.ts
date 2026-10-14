@@ -21,7 +21,7 @@ function applyToDom(pref: ThemePreference): void {
   else root.setAttribute('data-theme', pref);
 
   const meta = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
-  if (meta) meta.content = effective(pref) === 'dark' ? '#0f0f0f' : '#ffffff';
+  if (meta) meta.content = effective(pref) === 'dark' ? '#14181f' : '#f6f4ef';
 }
 
 export function useTheme(): { pref: ThemePreference; setPref: (p: ThemePreference) => void } {

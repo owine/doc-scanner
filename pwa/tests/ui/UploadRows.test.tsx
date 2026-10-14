@@ -70,6 +70,19 @@ describe('UploadRow', () => {
   });
 });
 
+describe('row state dots', () => {
+  it.each([
+    ['failed upload', () => <UploadRow item={item({ state: 'failed', error: 'x' })} queue={idle()} />, 'bad'],
+    ['waiting upload', () => <UploadRow item={item()} queue={idle()} />, 'work'],
+    ['device scan', () => <DeviceScanRow scan={scan} onSend={vi.fn()} onDelete={vi.fn()} />, 'idle'],
+  ] as const)('marks a %s, hidden from assistive tech', (_, row, kind) => {
+    const { container } = render(<ul>{row()}</ul>);
+    const dot = container.querySelector(`.state-dot--${kind}`);
+    expect(dot).not.toBeNull();
+    expect(dot).toHaveAttribute('aria-hidden', 'true');
+  });
+});
+
 describe('DeviceScanRow', () => {
   it('says when sending failed, and can be tried again', async () => {
     const onSend = vi.fn().mockRejectedValue(new Error('no pages'));
