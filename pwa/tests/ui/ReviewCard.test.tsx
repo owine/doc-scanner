@@ -9,11 +9,11 @@ const folders: FoldersState = { folders: FOLDERS, error: null, busy: false, relo
 const nativeConfirm = window.confirm;
 afterEach(() => { window.confirm = nativeConfirm; });
 
-function renderCard(doc = makeDoc(), handlers: Partial<{ onApprove: any; onDiscard: any }> = {}) {
+function renderCard(doc = makeDoc(), handlers: Partial<{ onApprove: any; onDiscard: any }> = {}, extra: { threshold?: number | null } = {}) {
   const onApprove = handlers.onApprove ?? vi.fn(async () => {});
   const onDiscard = handlers.onDiscard ?? vi.fn(async () => {});
-  render(<ReviewCard doc={doc} folders={folders} onApprove={onApprove} onDiscard={onDiscard} />);
-  return { onApprove, onDiscard };
+  const { container } = render(<ReviewCard doc={doc} folders={folders} onApprove={onApprove} onDiscard={onDiscard} {...extra} />);
+  return { onApprove, onDiscard, container };
 }
 
 describe('ReviewCard', () => {
@@ -182,10 +182,32 @@ describe('ReviewCard', () => {
   });
 
   it('hides a thumbnail that fails to load', () => {
-    renderCard(makeDoc({ hasThumbnail: true }));
-    const img = screen.getByRole('img', { name: 'First page preview' }) as HTMLImageElement;
+    const { container } = renderCard(makeDoc({ hasThumbnail: true }));
+    const img = screen.getByRole('img', { name: 'First page preview' });
     fireEvent.error(img);
-    expect(img.hidden).toBe(true);
+    expect(screen.queryByRole('img', { name: 'First page preview' })).toBeNull();
+    expect(container.querySelector('.review-thumb')).toBeNull();
+  });
+
+  it('marks the auto-file threshold on the meter when it is known', () => {
+    const { container } = renderCard(makeDoc(), {}, { threshold: 0.8 });
+    expect(screen.getByText(/60% confident/)).toHaveTextContent('60% confident · confidence 0.600 is below 0.80 (auto-file threshold 80%)');
+    const meter = container.querySelector('.meter')!;
+    expect(meter).toHaveAttribute('aria-hidden', 'true');
+    expect(meter).toHaveClass('meter--low');
+    expect(meter.querySelector('.meter-tick')).not.toBeNull();
+  });
+
+  it('shows the meter without a tick when the threshold is unknown', () => {
+    const { container } = renderCard();
+    expect(screen.getByText(/60% confident/)).not.toHaveTextContent(/auto-file threshold/);
+    expect(container.querySelector('.meter')).toHaveClass('meter--unknown');
+    expect(container.querySelector('.meter-tick')).toBeNull();
+  });
+
+  it('shows a confidence at or above the threshold as confident', () => {
+    const { container } = renderCard(makeDoc(), {}, { threshold: 0.6 });
+    expect(container.querySelector('.meter')).toHaveClass('meter--ok');
   });
 
   it('shows the preparation note, muted', () => {

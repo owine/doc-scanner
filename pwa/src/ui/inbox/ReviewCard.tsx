@@ -62,6 +62,7 @@ export function ReviewCard({ doc, folders, onApprove, onDiscard, review = [], fi
   const [error, setError] = useState<string | null>(null);
   const changeRef = useRef<HTMLButtonElement>(null);
   const wasPicking = useRef(false);
+  const [thumbFailed, setThumbFailed] = useState(false);
 
   // Hand focus back to Change when the picker closes, not to <body>.
   useEffect(() => {
@@ -124,37 +125,53 @@ export function ReviewCard({ doc, folders, onApprove, onDiscard, review = [], fi
     </>
   );
 
+  const percent = suggested ? Math.round(suggested.confidence * 100) : 0;
+  const tone = threshold === null || !suggested ? 'unknown' : suggested.confidence >= threshold ? 'ok' : 'low';
+  const meterStyle: Record<string, string> = {
+    '--value': `${percent}%`,
+    ...(threshold !== null && { '--threshold': `${Math.round(threshold * 100)}%` }),
+  };
+
   return (
     <article class="card review-card" aria-label={`Review ${suggested?.name ?? doc.originalName ?? 'document'}`}>
-      {/* Hidden if it won't load (a signed-out session, a document filed meanwhile) rather than shown broken. */}
-      {doc.hasThumbnail && (
-        <img
-          class="review-thumb"
-          src={`/api/documents/${encodeURIComponent(doc.id)}/thumbnail`}
-          alt="First page preview"
-          loading="lazy"
-          onError={(e) => {
-            (e.currentTarget as HTMLImageElement).hidden = true;
-          }}
-        />
-      )}
-      <p class="muted">
-        {doc.originalName ?? 'Untitled'} · {SOURCE_LABEL[doc.source]}
-      </p>
-      <label class="field">
-        <span class="field-label">Name</span>
-        <input
-          ref={noAutocorrect}
-          value={name}
-          autocapitalize="off"
-          spellcheck={false}
-          onInput={(e) => setName((e.target as HTMLInputElement).value)}
-        />
-      </label>
+      <div class="review-top">
+        {/* Gone if it won't load (a signed-out session, a document filed meanwhile), so no empty box is left. */}
+        {doc.hasThumbnail && !thumbFailed && (
+          <img
+            class="review-thumb"
+            src={`/api/documents/${encodeURIComponent(doc.id)}/thumbnail`}
+            alt="First page preview"
+            loading="lazy"
+            onError={() => setThumbFailed(true)}
+          />
+        )}
+        <div class="review-head">
+          <p class="muted review-meta">
+            {doc.originalName ?? 'Untitled'} · {SOURCE_LABEL[doc.source]}
+          </p>
+          <label class="field">
+            <span class="field-label">Name</span>
+            <input
+              ref={noAutocorrect}
+              value={name}
+              autocapitalize="off"
+              spellcheck={false}
+              onInput={(e) => setName((e.target as HTMLInputElement).value)}
+            />
+          </label>
+        </div>
+      </div>
       <div class="field" role="group" aria-labelledby={`folder-label-${doc.id}`}>
-        <span class="field-label" id={`folder-label-${doc.id}`}>
-          Folder
-        </span>
+        <div class="field-head">
+          <span class="field-label" id={`folder-label-${doc.id}`}>
+            Folder
+          </span>
+          {!picking && (
+            <button ref={changeRef} class="btn-link" disabled={busy} onClick={() => setPicking(true)}>
+              Change
+            </button>
+          )}
+        </div>
         {picking ? (
           <FolderPicker
             folders={folders}
@@ -167,22 +184,25 @@ export function ReviewCard({ doc, folders, onApprove, onDiscard, review = [], fi
           />
         ) : (
           <div class="folder-row">
-            {folder ? <span>{folderLabel(folder)}</span> : <em class="muted">No folder suggested</em>}
+            {folder ? <span class="path">{folderLabel(folder)}</span> : <em class="muted">No folder suggested</em>}
             {folder?.kind === 'new' && <span class="badge">New folder</span>}
-            <button ref={changeRef} class="btn btn-secondary btn-small" disabled={busy} onClick={() => setPicking(true)}>
-              Change
-            </button>
           </div>
         )}
       </div>
       {suggested && (
-        <p class="muted confidence-line">
-          {Math.round(suggested.confidence * 100)}% confident{doc.reviewReason ? ` · ${doc.reviewReason}` : ''}
-          {threshold !== null && <span class="visually-hidden"> (auto-file threshold {Math.round(threshold * 100)}%)</span>}
-        </p>
+        <div class="confidence">
+          <p class="muted confidence-line">
+            {percent}% confident{doc.reviewReason ? ` · ${doc.reviewReason}` : ''}
+            {threshold !== null && <span class="visually-hidden"> (auto-file threshold {Math.round(threshold * 100)}%)</span>}
+          </p>
+          <div class={`meter meter--${tone}`} aria-hidden="true" style={meterStyle}>
+            <span class="meter-fill" />
+            {threshold !== null && <span class="meter-tick" />}
+          </div>
+        </div>
       )}
-      {doc.anchorName && <p class="muted">Paired with “{doc.anchorName}”</p>}
       {suggested?.rationale && <p class="rationale">{suggested.rationale}</p>}
+      {doc.anchorName && <p class="muted">Paired with “{doc.anchorName}”</p>}
       {doc.prepareNote && <p class="muted">{doc.prepareNote}</p>}
       {suggested?.contentSeen === false && <p class="muted">Analysed from the file's details only; its contents could not be read.</p>}
       {error && (

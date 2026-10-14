@@ -21,12 +21,34 @@
   min-height: 44px; box-sizing: border-box; overflow-wrap: anywhere; cursor: pointer;
 }
 
-.review-card { margin-bottom: 12px; }
-.review-card .rationale { margin: 8px 0; line-height: 1.4; }
-.review-thumb { float: right; width: 96px; margin: 0 0 8px 12px; border: 1px solid var(--line); border-radius: 4px; background: var(--paper); }
-@media (min-width: 600px) { .review-thumb { width: 140px; } }
-.review-card::after { content: ''; display: block; clear: both; }
-.folder-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; overflow-wrap: anywhere; }
+/* Review card */
+.review-card { margin-bottom: var(--sp-3); display: flex; flex-direction: column; gap: var(--sp-3); }
+.review-card .field { margin-bottom: 0; }
+.review-card p { margin: 0; }
+.review-top { display: flex; gap: var(--sp-3); align-items: flex-start; }
+.review-thumb {
+  flex: none; width: 88px; aspect-ratio: 3 / 4; object-fit: cover; object-position: top;
+  border: 1px solid var(--line); border-radius: var(--r-1); background: var(--paper);
+}
+@media (min-width: 600px) { .review-thumb { width: 120px; } }
+.review-head { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+.review-meta { font-family: var(--font-mono); font-size: var(--fs-12); overflow-wrap: anywhere; }
+.folder-row { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; overflow-wrap: anywhere; }
+.path { font-family: var(--font-mono); font-size: var(--fs-14); color: var(--ink); overflow-wrap: anywhere; }
+.confidence { display: flex; flex-direction: column; gap: 6px; }
+.confidence-line { font-variant-numeric: tabular-nums; }
+.meter { position: relative; height: 4px; border-radius: 2px; background: var(--paper-3); }
+.meter-fill { position: absolute; inset: 0 auto 0 0; width: var(--value); border-radius: 2px; background: var(--ink-3); }
+.meter--low .meter-fill { background: var(--warning); }
+.meter--ok .meter-fill { background: var(--accent); }
+.meter-tick { position: absolute; top: -3px; bottom: -3px; left: var(--threshold); width: 1px; background: var(--ink-3); }
+.review-card .rationale {
+  padding-top: var(--sp-3); border-top: 1px solid var(--line);
+  color: var(--ink-2); font-size: var(--fs-14); line-height: 1.5;
+}
+/* Approve, the one solid button in the card's own action row, takes the spare width.
+   Direct children only, so the document chooser's buttons inside the card don't stretch. */
+.review-card > .actions > .btn:not(.btn-secondary):first-child { flex: 1; }
 
 .inbox {
   position: relative;
