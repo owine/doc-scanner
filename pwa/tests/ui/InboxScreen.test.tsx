@@ -109,6 +109,7 @@ describe('InboxScreen', () => {
     expect(header.querySelector('svg.mark')).toHaveAttribute('aria-hidden', 'true');
     fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
     expect(props.onSettings).toHaveBeenCalledTimes(1);
+    // Flushes the settings fetch before the test ends.
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Inbox' })).toBeInTheDocument());
   });
 

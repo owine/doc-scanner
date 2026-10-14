@@ -43,7 +43,7 @@ export function WaitingRow({ doc, onDiscard }: { doc: DocumentView; onDiscard: (
       <StateDot state="work" />
       <div class="doc-main">
         <div class="doc-name" id={nameId(doc)}>{displayName(doc)}</div>
-        <div class="muted">{doc.discardRequested ? 'Discarding…' : (WAITING_LABEL[doc.state] ?? doc.state)}</div>
+        <div class="muted doc-meta">{doc.discardRequested ? 'Discarding…' : (WAITING_LABEL[doc.state] ?? doc.state)}</div>
         {doc.anchorName && <div class="muted">Paired with “{doc.anchorName}”</div>}
       </div>
       {/* A working document's discard is applied when its current step ends.
@@ -62,7 +62,7 @@ export function FiledRow({ doc }: { doc: DocumentView }) {
       <StateDot state="ok" />
       <div class="doc-main">
         <div class="doc-name" id={nameId(doc)}>{displayName(doc)}</div>
-        <div class="muted">{doc.filed?.folderPath ?? ''}</div>
+        <div class="muted doc-meta">{doc.filed?.folderPath ?? ''}</div>
         {doc.prepareNote && <div class="muted">{doc.prepareNote}</div>}
       </div>
       <span class={doc.autoFiled ? 'chip chip-auto' : 'chip'}>{doc.autoFiled ? 'auto' : doc.userEdited ? 'you edited' : 'you approved'}</span>
@@ -97,7 +97,7 @@ export function DiscardedRow({ doc, now, onRestore }: { doc: DocumentView; now: 
       <StateDot state="idle" />
       <div class="doc-main">
         <div class="doc-name" id={nameId(doc)}>{displayName(doc)}</div>
-        <div class="muted">
+        <div class="muted doc-meta">
           {doc.combinedInto ? 'Combined into another document · ' : ''}Deleted in {days} {days === 1 ? 'day' : 'days'}
         </div>
       </div>

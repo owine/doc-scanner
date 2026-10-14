@@ -23,7 +23,7 @@ export function UploadRow({ item, queue }: { item: UploadItem; queue: UploadQueu
         <div class="doc-name" id={nameId}>
           {item.name}
         </div>
-        <div class={item.state === 'failed' ? 'error-text' : 'muted'}>
+        <div class={item.state === 'failed' ? 'error-text' : 'muted doc-meta'}>
           <span role="status">{status(item, queue)}</span>
           {/* Outside the live region: shown, and on the progress bar, but not announced. */}
           {sending && <span> {Math.round(progress * 100)}%</span>}
@@ -95,7 +95,7 @@ export function DeviceScanRow({ scan, onSend, onDelete, error = null }: DeviceSc
         <div class="doc-name" id={nameId}>
           Scan · {scan.pageCount} {scan.pageCount === 1 ? 'page' : 'pages'}
         </div>
-        <div class="muted" id={dateId}>
+        <div class="muted doc-meta" id={dateId}>
           {new Date(scan.updatedAt).toLocaleString()}
         </div>
         {(failed ?? error) && <div class="error-text">{failed ?? error}</div>}

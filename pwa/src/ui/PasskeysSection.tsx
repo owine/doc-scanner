@@ -237,7 +237,7 @@ export function PasskeysSection({ email, live, onChanged, focusAdd = false, clie
                 <span class="doc-main">
                   <span class="doc-name">{p.label}</span>
                   <br />
-                  <span class="muted">
+                  <span class="muted doc-meta">
                     Added {day(p.createdAt)} · {p.lastUsedAt ? `Last used ${day(p.lastUsedAt)}` : 'Never used'}
                   </span>
                 </span>

@@ -5,7 +5,8 @@
   padding-bottom: max(var(--sp-6), env(safe-area-inset-bottom));
 }
 .inbox-header { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
-.inbox-header h1 { margin: 0; flex: 1; font-size: 22px; }
+.inbox-header h1 { margin: 0; flex: 0 1 auto; font-size: 22px; }
+.inbox-header .actions { margin-left: auto; }
 .inbox h2 {
   margin: var(--sp-6) 0 var(--sp-2);
   font: 500 var(--fs-12)/1.2 var(--font-mono); letter-spacing: 0.08em;
@@ -24,10 +25,10 @@
 .doc-row:last-child { border-bottom: 0; }
 .doc-main { flex: 1; min-width: 12rem; }
 .doc-name { font-weight: 500; overflow-wrap: anywhere; }
-.doc-row .muted { font-family: var(--font-mono); font-size: var(--fs-12); overflow-wrap: anywhere; }
+.doc-row .doc-meta { font-family: var(--font-mono); font-size: var(--fs-12); overflow-wrap: anywhere; }
 .doc-row .error-text { font-size: var(--fs-13); }
 .state-dot {
-  flex: none; align-self: flex-start; margin-top: 8px;
+  flex: none; align-self: flex-start; margin-top: calc(0.75em - 4px);
   width: 8px; height: 8px; border-radius: 50%; box-sizing: border-box;
 }
 .state-dot--work { border: 1.5px solid var(--accent); }
@@ -41,6 +42,7 @@
 .doc-main progress::-webkit-progress-bar { background: var(--paper-3); border-radius: 2px; }
 .doc-main progress::-webkit-progress-value { background: var(--accent); border-radius: 2px; }
 .doc-main progress::-moz-progress-bar { background: var(--accent); border-radius: 2px; }
+@media (forced-colors: active) { .doc-main progress { appearance: auto; } }
 
 /* Review card */
 .review-card { margin-bottom: var(--sp-3); display: flex; flex-direction: column; gap: var(--sp-3); }
@@ -87,9 +89,10 @@
   display: flex; align-items: center; cursor: pointer; overflow-wrap: anywhere; color: var(--ink);
 }
 .folder-picker .folder-result { font: 400 var(--fs-14)/1.4 var(--font-mono); }
-.folder-result:hover { background: var(--paper-2); }
+@media (hover: hover) { .folder-result:hover:not(:disabled) { background: var(--paper-2); } }
+.folder-result:disabled { color: var(--ink-4); cursor: not-allowed; }
 .folder-result:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
-.folder-results .btn:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
+.folder-results .btn-square:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
 .new-folder { display: flex; gap: var(--sp-2); width: 100%; padding: var(--sp-2) var(--sp-3); box-sizing: border-box; }
 .doc-chooser { display: flex; flex-direction: column; gap: var(--sp-2); margin-top: var(--sp-2); }
 .doc-chooser h3 {
