@@ -225,8 +225,11 @@ export function authRoutes(deps: AuthRoutesDeps) {
     if (header && !c.get('auth')) return c.json({ error: 'not_authenticated' }, 401);
     // In turn: an unlock finishing after this would bring the session back.
     return mutex.run(async (): Promise<Response> => {
-      // Fall back to any live session so a stale or missing cookie still clears the caches.
-      const driveClient = c.get('auth')?.liveSession?.driveClient ?? getAnyLiveSession()?.driveClient;
+      // Read in turn: a login queued ahead of this one may have replaced the
+      // session the middleware saw. Fall back to any live session so a stale
+      // or missing cookie still clears the caches.
+      const auth = c.get('auth');
+      const driveClient = ((auth && getLiveSession(auth.sid)) ?? getAnyLiveSession())?.driveClient;
       // Forgotten first, in one synchronous run: from here no live client
       // (the worker's included) can write to the caches cleared below.
       if (header) forgetAllSessions();

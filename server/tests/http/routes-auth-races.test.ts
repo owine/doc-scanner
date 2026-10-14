@@ -172,6 +172,25 @@ describe('login and logout take turns', () => {
     expect(c.passkeys.count()).toBe(0);
   });
 
+  it('clears the caches with the client live when its turn comes, not the one live when it was sent', async () => {
+    const c = setup();
+    await signIn(c, keys, { session: { ...SESSION, accessToken: 'first' } });
+    const cleared: unknown[] = [];
+    vi.spyOn(DriveClient.prototype, 'clearCaches').mockImplementation(async function (this: DriveClient) {
+      cleared.push(this);
+    });
+    const release = heldLogin(c, loginResult(keys, { session: { ...SESSION, accessToken: 'second' } }));
+    const signingIn = login(c);
+    await vi.waitFor(() => expect(c.auth.login).toHaveBeenCalledTimes(2));
+    // Sent while the first session is live; its turn comes after the second login.
+    const loggingOut = post(c.app, '/api/auth/logout');
+    await settle();
+    release();
+    expect([(await signingIn).status, (await loggingOut).status]).toEqual([200, 200]);
+    expect(cleared).toHaveLength(1);
+    expect(cleared[0]).toBe(built[1]!.client);
+  });
+
   it('lets the second of two overlapping logins see the first, and clear it as another account', async () => {
     const c = lockedWithPasskey({ pipeline: true });
     const a = loginResult(keys, { userId: 'user-A', session: { ...SESSION, accessToken: 'a' } });
