@@ -33,6 +33,12 @@ export interface Pipeline {
   settings: SettingsStore;
   folderCache: FolderCacheStore;
   worker: DocumentWorker;
+  /**
+   * What a login as a different Proton account must not inherit: the cached
+   * folder tree. The auth routes call it (passkey-unlock spec, Decisions).
+   */
+  clearAccountData(): void;
+
   /** Starts the worker's timers and subscribes it to logins. */
   start(): void;
   stop(): void;
@@ -69,6 +75,9 @@ export function createPipeline(o: PipelineOptions): Pipeline {
     settings,
     folderCache,
     worker,
+    clearAccountData() {
+      folderCache.clear();
+    },
     start() {
       if (unsubscribe) return;
       worker.start();

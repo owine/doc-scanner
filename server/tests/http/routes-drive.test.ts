@@ -40,6 +40,8 @@ async function loggedIn() {
       session: { uid: 'u', accessToken: 'a', refreshToken: 'r', email: 'e@x.test' },
       mailboxSecret: new MailboxSecret(new Uint8Array([0])),
       decryptedKeys: keys,
+      userId: 'user-1',
+      keySaltFingerprint: 'fp-1',
     }),
     refresh: vi.fn(),
   } as unknown as ProtonAuth;

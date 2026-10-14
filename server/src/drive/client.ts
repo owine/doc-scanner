@@ -43,6 +43,12 @@ export interface DriveClientConfig {
   session: ProtonSession;
   protonAuth: ProtonAuth;
   onSessionRefreshed?: (session: ProtonSession) => void;
+  /**
+   * False once a later login replaced this client or a logout forgot it; its
+   * entities cache then neither reads nor writes the shared table. Always
+   * live when omitted.
+   */
+  isLive?: () => boolean;
 }
 
 export interface ListRootChild {
@@ -133,7 +139,7 @@ export class DriveClient {
 
   constructor(cfg: DriveClientConfig) {
     this.session = cfg.session;
-    this.entitiesCache = new EntitiesCache(cfg.db, cfg.encryptionKey);
+    this.entitiesCache = new EntitiesCache(cfg.db, cfg.encryptionKey, cfg.isLive);
     this.eventIdStore = new EventIdStore(cfg.db);
 
     const httpClient = new DriveHttpClient({

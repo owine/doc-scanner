@@ -86,4 +86,18 @@ describe('ProtonApi', () => {
     const api = new ProtonApi('https://api.example.test', 'external-drive-docscanner@0.1.0');
     await expect(api.getAuthInfo('user@example.com')).rejects.toThrow(/Bad request/);
   });
+
+  it('gives up on a request after 30 seconds, as a TimeoutError', async () => {
+    // A signal that has already timed out; the fake fetch rejects as fetch does.
+    const timeout = vi
+      .spyOn(AbortSignal, 'timeout')
+      .mockReturnValueOnce(AbortSignal.abort(new DOMException('The operation was aborted due to timeout', 'TimeoutError')));
+    mockFetch.mockImplementationOnce(async (_url: string, init: RequestInit) => {
+      init.signal!.throwIfAborted();
+      return new Response('{}');
+    });
+    const api = new ProtonApi('https://api.example.test', 'external-drive-docscanner@0.1.0');
+    await expect(api.getUser('uid-1', 'at-1')).rejects.toMatchObject({ name: 'TimeoutError' });
+    expect(timeout).toHaveBeenCalledWith(30_000);
+  });
 });

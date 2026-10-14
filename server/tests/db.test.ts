@@ -23,7 +23,7 @@ describe('openDb', () => {
     cleanupFn = cleanup;
 
     const v = db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number };
-    expect(v.v).toBe(8);
+    expect(v.v).toBe(9);
   });
 
   it('migration 002 creates drive cache tables', () => {
@@ -37,7 +37,7 @@ describe('openDb', () => {
     expect(names).toContain('event_cursors');
 
     const v = db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number };
-    expect(v.v).toBe(8);
+    expect(v.v).toBe(9);
   });
 
   it('migration 006 adds documents.drive_url', () => {
@@ -73,6 +73,13 @@ describe('openDb', () => {
     expect(() => db.prepare('UPDATE documents SET reanalyzed = 2 WHERE id = ?').run('d1')).toThrow();
   });
 
+  it('migration 009 adds passkey_unlocks', () => {
+    const { db, cleanup } = createTestDb();
+    cleanupFn = cleanup;
+    const cols = (db.prepare("SELECT name FROM pragma_table_info('passkey_unlocks')").all() as { name: string }[]).map((c) => c.name);
+    expect(cols).toEqual(['credential_id', 'label', 'salt', 'wrapped', 'created_at', 'last_used_at']);
+  });
+
   it('migration 003 keys event cursors by scope and adds app_settings', () => {
     const { db, cleanup } = createTestDb();
     cleanupFn = cleanup;
@@ -100,7 +107,7 @@ describe('openDb', () => {
     const secondCount = (db2.prepare('SELECT COUNT(*) AS c FROM schema_version').get() as { c: number }).c;
     db2.close();
 
-    expect(secondCount).toBe(8);
+    expect(secondCount).toBe(9);
     expect(secondCount).toBe(firstCount);
     expect(secondApplied).toBe(firstApplied);
   });

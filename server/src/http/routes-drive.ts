@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { sessionMiddleware, type AuthContext } from './middleware.js';
+import { sessionMiddleware, type AuthContext, type AuthMode } from './middleware.js';
 import { logger } from '../logger.js';
 import { errorName } from '../observability/error-name.js';
 import type { DB } from '../db.js';
@@ -10,9 +10,9 @@ const TestUploadSchema = z.object({ name: z.string().optional() });
 
 type Env = { Variables: { auth?: AuthContext } };
 
-export function driveRoutes(deps: { db: DB; store: SessionStore }) {
+export function driveRoutes(deps: { db: DB; store: SessionStore; authMode: AuthMode }) {
   const r = new Hono<Env>();
-  r.use('*', sessionMiddleware(deps.store));
+  r.use('*', sessionMiddleware(deps.store, deps.authMode));
 
   r.post('/test-upload', async (c) => {
     const auth = c.get('auth');

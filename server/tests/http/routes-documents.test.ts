@@ -58,6 +58,8 @@ async function setup(opts: { liveSession?: () => LiveSession | undefined } = {})
       session: { uid: 'u', accessToken: 'a', refreshToken: 'r', email: 'e@x.test' },
       mailboxSecret: new MailboxSecret(new Uint8Array([0])),
       decryptedKeys: keys,
+      userId: 'user-1',
+      keySaltFingerprint: 'fp-1',
     }),
     refresh: vi.fn(),
   } as unknown as ProtonAuth;
@@ -396,9 +398,10 @@ describe('approve', () => {
   });
 });
 
-/** A live session whose only Drive call is the folder walk. */
+/** A live session whose only Drive call is the folder walk. One object, as a real session is. */
 function walking(walkFolderTree: () => Promise<typeof TREE>): () => LiveSession {
-  return () => ({ driveClient: { walkFolderTree } }) as unknown as LiveSession;
+  const live = { driveClient: { walkFolderTree } } as unknown as LiveSession;
+  return () => live;
 }
 
 describe('errors', () => {
@@ -678,6 +681,8 @@ describe('pipeline', () => {
       mailboxSecret: new MailboxSecret(new Uint8Array([0])),
       decryptedKeys: keys,
       driveClient: {} as DriveClient,
+      userId: 'user-1',
+      keySaltFingerprint: 'fp-1',
     });
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(onLogin).not.toHaveBeenCalled();
@@ -1023,5 +1028,30 @@ describe('POST /api/documents/:id/reanalyze', () => {
       decision: { name: 'Return receipt', folder: { kind: 'existing', linkId: 'BILLS', path: '/Bills' } },
       userEdited: false,
     });
+  });
+});
+
+describe('header mode', () => {
+  it('signs every router in by the proxy user', async () => {
+    const { db, cleanup } = createTestDb();
+    const dir = mkdtempSync(join(tmpdir(), 'routes-docs-'));
+    cleanups.push(cleanup, () => rmSync(dir, { recursive: true, force: true }));
+    const pipeline = createPipeline({
+      db,
+      dataDir: dir,
+      encryptionKey: KEY,
+      defaults: { model: 'm', effort: 'medium', autoFileThreshold: 0.8, autoFileEnabled: false, excludePaths: [] },
+      analyzerFor: () => ({ analyze: vi.fn() }),
+      liveSession: () => undefined,
+      prepare: fakePrepare(),
+    });
+    const app = createApp({ db, encryptionKey: KEY, pipeline, authMode: { kind: 'header', user: 'owine', secret: null } });
+    for (const path of ['/api/documents?since=0', '/api/settings', '/api/auth/status']) {
+      expect([path, (await app.request(path, { headers: { 'Remote-User': 'owine' } })).status]).toEqual([path, 200]);
+      expect([path, (await app.request(path)).status]).toEqual([path, 401]);
+    }
+    // Signed in, but no folder tree walked yet: 503, not 401. (The drive router answers 401 either way without a live session, so it can't tell.)
+    expect((await app.request('/api/folders', { headers: { 'Remote-User': 'owine' } })).status).toBe(503);
+    expect((await app.request('/api/folders')).status).toBe(401);
   });
 });

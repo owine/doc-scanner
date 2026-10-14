@@ -26,6 +26,16 @@ describe('SessionStore', () => {
     expect(store.load()).toBeNull();
   });
 
+  it('reads the stored email without decrypting, even with the wrong key', () => {
+    const { db, cleanup } = createTestDb(); cleanupFn = cleanup;
+    const store = new SessionStore(db, KEY);
+    expect(store.storedEmail()).toBeNull();
+    store.save(sample);
+    expect(new SessionStore(db, Buffer.alloc(32, 9).toString('base64')).storedEmail()).toBe('a@b.test');
+    store.clear();
+    expect(store.storedEmail()).toBeNull();
+  });
+
   it('clear() removes the session', () => {
     const { db, cleanup } = createTestDb(); cleanupFn = cleanup;
     const store = new SessionStore(db, KEY);

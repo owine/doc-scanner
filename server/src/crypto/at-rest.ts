@@ -4,7 +4,7 @@ const ALGO = 'aes-256-gcm';
 const IV_LEN = 12;
 const TAG_LEN = 16;
 
-export type AtRestPurpose = 'inbox' | 'folder-cache' | 'documents';
+export type AtRestPurpose = 'inbox' | 'folder-cache' | 'documents' | 'passkeys';
 
 /**
  * AES-256-GCM for data the server keeps on disk (inbox documents, the folder

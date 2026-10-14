@@ -1,12 +1,54 @@
 import { useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { api, ApiError } from '../api.js';
 
-export function LoginScreen({ onLoggedIn }: { onLoggedIn: (email: string) => void }) {
+export interface LoginScreenProps {
+  onLoggedIn: (email: string) => void;
+  /** Shown over a signed-in app (sign in to Proton): back to the inbox without signing in. */
+  onCancel?: () => void;
+  /** Why the app asks: `proton_ended` after an unlock answered that Proton ended the session. */
+  reason?: LoginReason | undefined;
+}
+
+export type LoginReason = 'proton_ended';
+
+const TOTP_REQUIRED = 'TOTP code required';
+const NOT_SIGNED_IN = 'This browser isn’t signed in to the server. Reload the page and try again.';
+
+/**
+ * The proxy in front of the server no longer signs this browser in (header
+ * mode): the server's own `not_authenticated`, or a 401 without the app's
+ * code, from the proxy itself. Only a reload goes through its sign-in again.
+ */
+function notSignedIn(err: unknown): boolean {
+  return err instanceof ApiError && (err.code === 'not_authenticated' || (err.status === 401 && err.code === undefined));
+}
+
+/** The server's refusal in words; a code it doesn't know is never shown raw. */
+function loginError(err: unknown): string {
+  // No answer at all, as the inbox says it.
+  if (!(err instanceof ApiError)) return "Can't reach the server.";
+  if (notSignedIn(err)) return NOT_SIGNED_IN;
+  switch (err.code) {
+    case 'totp_required':
+      return TOTP_REQUIRED;
+    // A 500 says the same code for a failure after Proton accepted the login.
+    case 'auth_failed':
+      return err.status === 401 ? 'Proton didn’t accept that email, password or code.' : 'Couldn’t sign in. Try again.';
+    case 'invalid_input':
+      return 'Check your email and password.';
+    default:
+      return 'Couldn’t sign in. Try again.';
+  }
+}
+
+export function LoginScreen({ onLoggedIn, onCancel, reason }: LoginScreenProps) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [totp, setTotp] = useState('');
   const [needsTotp, setNeedsTotp] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Header mode without the proxy's user: only a reload signs this browser in again.
+  const [reload, setReload] = useState(false);
   const [busy, setBusy] = useState(false);
   const totpRef = useRef<HTMLInputElement>(null);
 
@@ -18,13 +60,14 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: (email: string) => voi
 
   async function submit(e: Event) {
     e.preventDefault();
-    setBusy(true); setError(null);
+    setBusy(true); setError(null); setReload(false);
     try {
       const res = await api.login(totp ? { email, password, totp } : { email, password });
       onLoggedIn(res.email);
     } catch (err) {
-      if (err instanceof ApiError && err.code === 'totp_required') { setNeedsTotp(true); setError('TOTP code required'); }
-      else setError(err instanceof Error ? err.message : 'Login failed');
+      if (err instanceof ApiError && err.code === 'totp_required') setNeedsTotp(true);
+      setError(loginError(err));
+      setReload(notSignedIn(err));
     } finally { setBusy(false); }
   }
 
@@ -35,6 +78,7 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: (email: string) => voi
         <strong>Warning:</strong> This is an unofficial app. Your Proton credentials are sent
         only to your own server. Proton does not endorse this app. Your password is never stored.
       </div>
+      {reason === 'proton_ended' && <p>Proton ended the session. Sign in again to resume filing.</p>}
       <form onSubmit={submit}>
         <label class="field">
           <span class="field-label">Email</span>
@@ -51,7 +95,18 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: (email: string) => voi
           </label>
         )}
         {error && <p class="error-text">{error}</p>}
+        {reload && (
+          // An installed iOS app has no reload control of its own.
+          <button class="btn btn-secondary btn-block" type="button" onClick={() => location.reload()} style={{ marginBottom: 8 }}>
+            Reload
+          </button>
+        )}
         <button class="btn btn-block" type="submit" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
+        {onCancel && (
+          <button class="btn btn-secondary btn-block" type="button" onClick={onCancel} style={{ marginTop: 8 }}>
+            Cancel
+          </button>
+        )}
       </form>
     </main>
   );

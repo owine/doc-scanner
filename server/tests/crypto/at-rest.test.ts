@@ -21,6 +21,11 @@ describe('AtRestCipher', () => {
     expect(() => new AtRestCipher(MASTER, 'folder-cache').open(sealed)).toThrow(/unable to authenticate/i);
   });
 
+  it('gives passkey wraps a key of their own', () => {
+    const sealed = new AtRestCipher(MASTER, 'passkeys').seal(new Uint8Array([1]));
+    expect(() => new AtRestCipher(MASTER, 'documents').open(sealed)).toThrow(/unable to authenticate/i);
+  });
+
   it('rejects tampered ciphertext', () => {
     const c = new AtRestCipher(MASTER, 'inbox');
     const sealed = c.seal(new Uint8Array([1, 2, 3]));

@@ -11,6 +11,14 @@ export interface LiveSession {
   mailboxSecret: MailboxSecret;
   decryptedKeys: DecryptedUserKey;
   driveClient: DriveClient;
+  /** Proton's `User.ID` for the account these keys belong to. */
+  userId: string;
+  /**
+   * SHA-256 of the primary user key's KeySalt, which enrolment records. A
+   * login computes it; an unlock carries over the stored one (null if none
+   * was stored), since the passphrase it opened proves the salt unchanged.
+   */
+  keySaltFingerprint: string | null;
 }
 
 const sessions = new Map<string, LiveSession>();

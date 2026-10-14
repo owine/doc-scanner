@@ -8,6 +8,7 @@ import { decideStage } from './stages/decide.js';
 import { fileStage } from './stages/file.js';
 import { prepareStage } from './stages/prepare.js';
 import type { DocumentRow, DocumentState } from './types.js';
+import type { LiveSession } from '../auth/live-session.js';
 
 export const MAX_ATTEMPTS = 3;
 const BACKOFF_MS = [30_000, 2 * 60_000];
@@ -220,24 +221,37 @@ export class DocumentWorker {
     }
   }
 
-  private refreshing: Promise<void> | null = null;
+  /** The walk in flight, and the live session it walks for. */
+  private refreshing: { live: LiveSession; walk: Promise<void> } | null = null;
 
   /**
    * Re-walks Drive and caches the tree. A no-op without a live session.
    * Concurrent callers (login, the timer, several deferred analyses) share
-   * one walk in flight.
+   * one walk in flight, but only within one live session: after a login or
+   * logout the old walk saves nothing, and the new session walks for itself.
    */
   refreshFolderCache(): Promise<void> {
-    this.refreshing ??= (async () => {
-      const live = this.d.liveSession();
-      if (!live) return;
-      const tree = await live.driveClient.walkFolderTree();
-      this.d.folderCache.save(tree, this.d.now());
-      logger.info({ folders: tree.length }, 'folder cache refreshed');
-    })().finally(() => {
-      this.refreshing = null;
-    });
-    return this.refreshing;
+    const live = this.d.liveSession();
+    if (!live) return Promise.resolve();
+    if (this.refreshing?.live === live) return this.refreshing.walk;
+    const entry = {
+      live,
+      walk: (async () => {
+        const tree = await live.driveClient.walkFolderTree();
+        // Another account's tree, or one a logout has forgotten: the walk
+        // can take hours, and clearAccountData has already run.
+        if (this.d.liveSession() !== live) {
+          logger.info('folder walk outlived its session; not saved');
+          return;
+        }
+        this.d.folderCache.save(tree, this.d.now());
+        logger.info({ folders: tree.length }, 'folder cache refreshed');
+      })().finally(() => {
+        if (this.refreshing === entry) this.refreshing = null;
+      }),
+    };
+    this.refreshing = entry;
+    return entry.walk;
   }
 
   /** After a login: fresh tree, then everything that was waiting. */

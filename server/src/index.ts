@@ -10,6 +10,7 @@ import { openDb } from './db.js';
 import { analyzerForClient, createPipeline } from './documents/pipeline.js';
 import { createPrepareTools } from './prepare/tools.js';
 import { createApp } from './http/server.js';
+import { authModeFrom } from './http/middleware.js';
 import { logger } from './logger.js';
 
 const config = loadConfig();
@@ -32,9 +33,14 @@ const pipeline = createPipeline({
   prepare: createPrepareTools({ atStartup: true }),
 });
 
+const authMode = authModeFrom(config);
+// The mode only: never the user or the secret.
+logger.info({ authMode: authMode.kind, proxySecret: authMode.kind === 'header' && authMode.secret !== null }, 'sign-in mode');
+
 const app = createApp({
   db,
   pipeline,
+  authMode,
   encryptionKey: config.SESSION_ENCRYPTION_KEY,
   secureCookie: !config.INSECURE_COOKIES,
   pwaDistPath: config.PWA_DIST_PATH,

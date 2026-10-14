@@ -28,6 +28,25 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-info}
       TRUST_PROXY: "true"
       INSECURE_COOKIES: ${INSECURE_COOKIES:-false}
+      # Header mode (docs/superpowers/specs/2026-10-13-passkey-unlock-design.md):
+      # the Authelia username. Set, the proxy's Remote-User signs requests in, so
+      # a restart no longer signs you out and a passkey can unlock filing. The
+      # proxy must overwrite or strip any client-sent Remote-User on every route
+      # to the app, Authelia bypass rules included, and forward Authelia's
+      # Remote-User response header (Traefik: authResponseHeaders: Remote-User;
+      # nginx: auth_request_set $user $upstream_http_remote_user; then
+      # proxy_set_header Remote-User $user;). Passkeys belong to the app's
+      # hostname: change it and they must be added again. When Authelia's
+      # session expires, the app says "Your sign-in has expired." with Reload.
+      # Empty: the app's own sign-in.
+      AUTH_PROXY_USER: ${AUTH_PROXY_USER:-}
+      # Needed while `ports` publishes the app (even on 127.0.0.1): anything that
+      # reaches the port could send a forged Remote-User. At least 32 characters;
+      # the proxy sends it as X-Doc-Scanner-Proxy-Secret on every request
+      # (Traefik: a headers middleware's customRequestHeaders; nginx:
+      # proxy_set_header). Not needed when the port is unpublished and only the
+      # proxy shares a network.
+      AUTH_PROXY_SECRET: ${AUTH_PROXY_SECRET:-}
       PWA_DIST_PATH: /app/pwa/dist
       # Optional error reporting (GlitchTip); empty disables it.
       SENTRY_DSN: ${SENTRY_DSN:-}

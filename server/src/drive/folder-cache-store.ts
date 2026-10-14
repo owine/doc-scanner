@@ -60,6 +60,11 @@ export class FolderCacheStore {
     this.save(cached.tree, cached.walkedAt);
   }
 
+  /** Forgets the tree: another Proton account's folders must never be offered (passkey-unlock spec). */
+  clear(): void {
+    this.db.prepare('DELETE FROM folder_cache WHERE id = 1').run();
+  }
+
   save(tree: TreeFolder[], walkedAt: Date): void {
     const sealed = this.cipher.seal(new TextEncoder().encode(JSON.stringify(trim(tree))));
     this.db

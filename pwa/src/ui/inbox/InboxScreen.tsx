@@ -1,6 +1,7 @@
 import type { ComponentChildren } from 'preact';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
-import { ApiError } from '../../api.js';
+import { ApiError, type ProtonState, type StatusResponse } from '../../api.js';
+import type { UnlockClient } from '../../auth/flows.js';
 import { documentsApi, type DocumentsApi } from '../../documents/api.js';
 import { groupDocuments } from '../../documents/group.js';
 import { useDocuments, type DocumentSync } from '../../documents/sync.js';
@@ -13,6 +14,8 @@ import type { ScansStore } from '../../scanner/scans-store.js';
 import { useUploads, type UploadQueue } from '../../uploads/queue.js';
 import { sendScanToInbox, useDeviceScans } from '../../uploads/scans.js';
 import { DeviceScanRow, UploadRow } from './UploadRows.js';
+import { LockedBanner } from './LockedBanner.js';
+import { nudgeDismissed, storeNudgeDismissal } from './nudge.js';
 
 export interface InboxScreenProps {
   sync: DocumentSync;
@@ -26,6 +29,23 @@ export interface InboxScreenProps {
   uploads: UploadQueue;
   /** Must be stable. Task 6 lists its finished scans; the inbox shares App's open. */
   scans: ScansStore;
+  /** From GET /api/auth/status. `locked` shows the unlock banner (passkey-unlock spec §3). */
+  proton?: ProtonState;
+  passkeys?: number;
+  onUnlocked?: (status: StatusResponse) => void;
+  /** An unlock refusal changed the server's state (spec §3), with its code: the app reads its status again. */
+  onStatusChanged?: (code: string) => void;
+  /** Opens the sign-in-to-Proton screen; defaults to onSignInAgain. */
+  onSignInToProton?: () => void;
+  /** After a Proton login in header mode with no passkey yet. */
+  showPasskeyNudge?: boolean;
+  /** Defaults to onSettings, where passkeys are added. */
+  onAddPasskey?: () => void;
+  /** The nudge was dismissed (stored on this device too, where storage allows). */
+  onNudgeDismissed?: () => void;
+  /** Focus the heading on arrival: the control that had focus is gone (passkey-unlock spec §3, Cancel). */
+  focusHeading?: boolean;
+  unlockClient?: UnlockClient;
 }
 
 function Section({ id, title, children }: { id: string; title: string; children: ComponentChildren }) {
@@ -46,6 +66,16 @@ export function InboxScreen({
   onSignInAgain,
   uploads,
   scans,
+  proton = 'live',
+  passkeys = 0,
+  onUnlocked = () => {},
+  onStatusChanged = () => {},
+  onSignInToProton = onSignInAgain,
+  showPasskeyNudge = false,
+  onAddPasskey = onSettings,
+  onNudgeDismissed = () => {},
+  focusHeading = false,
+  unlockClient,
 }: InboxScreenProps) {
   const { docs, loaded, error } = useDocuments(sync);
   const pending = useUploads(uploads);
@@ -53,6 +83,19 @@ export function InboxScreen({
   const fileInput = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
+  const [dismissedHere, setDismissedHere] = useState(false);
+  // Stored dismissals are read as the nudge shows: the app clears them once no passkey is left.
+  const nudgeHidden = dismissedHere || (showPasskeyNudge && nudgeDismissed());
+  const dismissNudge = () => {
+    storeNudgeDismissal();
+    setDismissedHere(true);
+    onNudgeDismissed();
+  };
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  // On arrival only, before paint.
+  useLayoutEffect(() => {
+    if (focusHeading) headingRef.current?.focus();
+  }, []);
   // The queue keeps why a send failed (uploads.buildErrorOf): the row
   // unmounts while its scan is claimed, and Done in App sends scans too.
   const sendScan = async (id: string) => {
@@ -239,7 +282,9 @@ export function InboxScreen({
         }}
       />
       <header class="inbox-header">
-        <h1>Inbox</h1>
+        <h1 ref={headingRef} tabIndex={-1}>
+          Inbox
+        </h1>
         <div class="actions">
           <button class="btn btn-secondary" onClick={() => fileInput.current?.click()}>
             Add
@@ -258,19 +303,49 @@ export function InboxScreen({
         {addError && <p class="warn">{addError}</p>}
         {Boolean(error) && loaded && (
           <p class="warn">
-            {docs.length > 0 ? "Can't reach the server. Showing what was last loaded." : "Can't reach the server."}
+            {docs.length > 0 ? "Can't reach the server. Showing what was last loaded." : "Can't reach the server."}{' '}
+            {/* An expired proxy sign-in answered with a redirect reads as no answer: a reload goes through it. */}
+            <button class="btn btn-secondary btn-small" onClick={() => location.reload()}>
+              Reload
+            </button>
           </p>
         )}
-        {g.awaitingLogin > 0 && (
-          <div class="warn">
-            {g.awaitingLogin === 1 ? '1 document is' : `${g.awaitingLogin} documents are`} waiting to be filed. Sign in again to
-            give the server access to Drive.{' '}
-            <button class="btn btn-secondary btn-small" onClick={onSignInAgain}>
-              Sign in again
-            </button>
-          </div>
+        {proton === 'locked' ? (
+          // Replaces the sign-in banner below: nothing can be filed until the keys are back.
+          <LockedBanner
+            passkeys={passkeys}
+            onUnlocked={onUnlocked}
+            onStatusChanged={onStatusChanged}
+            onSignIn={onSignInToProton}
+            {...(unlockClient ? { client: unlockClient } : {})}
+          />
+        ) : (
+          // Live, yet documents wait: the session's tokens died inside it.
+          g.awaitingLogin > 0 && (
+            <div class="warn">
+              {g.awaitingLogin === 1 ? '1 document is' : `${g.awaitingLogin} documents are`} waiting to be filed. Sign in again to
+              give the server access to Drive.{' '}
+              <button class="btn btn-secondary btn-small" onClick={onSignInAgain}>
+                Sign in again
+              </button>
+            </div>
+          )
         )}
       </div>
+
+      {showPasskeyNudge && !nudgeHidden && (
+        <div class="card nudge" role="note">
+          <p>Add a passkey so a server restart doesn’t need your Proton password.</p>
+          <div class="actions">
+            <button class="btn btn-small" onClick={onAddPasskey}>
+              Add passkey
+            </button>
+            <button class="btn btn-secondary btn-small" onClick={dismissNudge}>
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
 
       {pending.length > 0 && (
         <Section id="uploading" title="Uploading">

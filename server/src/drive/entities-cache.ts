@@ -28,9 +28,16 @@ interface StoredPayload {
 export class EntitiesCache implements ProtonDriveCache<string> {
   private readonly key: Buffer;
 
+  /**
+   * @param isLive false once the client this cache serves has been replaced
+   *   or logged out. The table is shared by every account, so such a client,
+   *   still mid-job in the worker, must neither write to it nor read another
+   *   account's entries from it. Clearing is never refused.
+   */
   constructor(
     private readonly db: DB,
     base64Key: string,
+    private readonly isLive: () => boolean = () => true,
   ) {
     this.key = Buffer.from(base64Key, 'base64');
     if (this.key.length !== 32) {
@@ -43,6 +50,7 @@ export class EntitiesCache implements ProtonDriveCache<string> {
   }
 
   async setEntity(key: string, value: string, tags?: string[]): Promise<void> {
+    if (!this.isLive()) return;
     const payload: StoredPayload = { value, tags: tags ?? [] };
     const blob = this.encrypt(JSON.stringify(payload));
     this.db
@@ -57,6 +65,8 @@ export class EntitiesCache implements ProtonDriveCache<string> {
   }
 
   async getEntity(key: string): Promise<string> {
+    // A miss: the SDK fetches from the API instead.
+    if (!this.isLive()) throw new Error(`Entity not found: ${key}`);
     const row = this.db
       .prepare('SELECT encrypted_blob FROM entities_cache WHERE key = ?')
       .get(key) as { encrypted_blob: Uint8Array } | undefined;
@@ -78,6 +88,7 @@ export class EntitiesCache implements ProtonDriveCache<string> {
   }
 
   async *iterateEntitiesByTag(tag: string): AsyncGenerator<EntityResult<string>> {
+    if (!this.isLive()) return;
     const rows = this.db
       .prepare('SELECT key, encrypted_blob FROM entities_cache')
       .all() as Array<{ key: string; encrypted_blob: Uint8Array }>;
@@ -94,6 +105,7 @@ export class EntitiesCache implements ProtonDriveCache<string> {
   }
 
   async removeEntities(keys: string[]): Promise<void> {
+    if (!this.isLive()) return;
     const stmt = this.db.prepare('DELETE FROM entities_cache WHERE key = ?');
     // SQLite has no nested transactions: only open one if the caller has not
     // already started one, otherwise the BEGIN throws and takes the delete

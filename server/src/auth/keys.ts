@@ -32,11 +32,24 @@ export interface DecryptedUserKey {
   addresses: DecryptedAddress[];
 }
 
+/**
+ * Why the keys would not open. Only `user_key` (the key parsed, but the
+ * passphrase did not decrypt it) means the passphrase is wrong, so only it makes passkey
+ * unlocks stale (passkey-unlock spec §2).
+ */
+export type KeyDecryptReason = 'user_key' | 'key_unreadable' | 'no_keys' | 'no_addresses' | 'address_key';
+
 export class KeyDecryptError extends Error {
-  constructor(message: string, public readonly cause?: unknown) {
+  constructor(message: string, public readonly reason: KeyDecryptReason, public readonly cause?: unknown) {
     super(message);
     this.name = 'KeyDecryptError';
   }
+}
+
+export interface UnlockedKeys {
+  decryptedKeys: DecryptedUserKey;
+  /** Proton's `User.ID`: tells a different account from the same one typed differently. */
+  userId: string;
 }
 
 export interface FetchAndDecryptParams {
@@ -62,12 +75,12 @@ export interface FetchAndDecryptParams {
  * The Drive SDK's `SharesManager.createVolume` sends both to the API as
  * `AddressID` / `AddressKeyID`, so they must be authentic and distinct.
  */
-export async function fetchAndDecryptUserKey(params: FetchAndDecryptParams): Promise<DecryptedUserKey> {
+export async function fetchAndDecryptUserKey(params: FetchAndDecryptParams): Promise<UnlockedKeys> {
   const { api, uid, accessToken, mailboxPasswordBytes } = params;
 
   const { User } = await api.getUser(uid, accessToken);
   if (!User.Keys || User.Keys.length === 0) {
-    throw new KeyDecryptError('User has no keys');
+    throw new KeyDecryptError('User has no keys', 'no_keys');
   }
 
   const passphrase = new TextDecoder().decode(mailboxPasswordBytes);
@@ -78,15 +91,21 @@ export async function fetchAndDecryptUserKey(params: FetchAndDecryptParams): Pro
   const decryptedUserKeys: { id: string; primary: number; key: openpgp.PrivateKey }[] = [];
   for (const k of User.Keys) {
     if (!k.Active) continue;
+    let armored: openpgp.PrivateKey;
     try {
-      const armored = await openpgp.readPrivateKey({ armoredKey: k.PrivateKey });
+      armored = await openpgp.readPrivateKey({ armoredKey: k.PrivateKey });
+    } catch (e) {
+      throw new KeyDecryptError(`Failed to read user key ${k.ID}`, 'key_unreadable', e);
+    }
+    try {
       const key = await openpgp.decryptKey({ privateKey: armored, passphrase });
       decryptedUserKeys.push({ id: k.ID, primary: k.Primary, key });
     } catch (e) {
-      throw new KeyDecryptError(`Failed to decrypt user key ${k.ID}`, e);
+      throw new KeyDecryptError(`Failed to decrypt user key ${k.ID}`, 'user_key', e);
     }
   }
-  if (decryptedUserKeys.length === 0) throw new KeyDecryptError('No decryptable user keys');
+  // Every user key inactive: not a passphrase problem.
+  if (decryptedUserKeys.length === 0) throw new KeyDecryptError('No decryptable user keys', 'no_keys');
 
   const primaryUserKey =
     decryptedUserKeys.find((k) => k.primary === 1) ?? decryptedUserKeys[0]!;
@@ -94,7 +113,7 @@ export async function fetchAndDecryptUserKey(params: FetchAndDecryptParams): Pro
   // Fetch addresses to get real Address IDs and address-level keys.
   const { Addresses } = await api.getAddresses(uid, accessToken);
   const enabled = (Addresses ?? []).filter((a) => a.Status === 1 && a.Receive === 1);
-  if (enabled.length === 0) throw new KeyDecryptError('User has no enabled addresses');
+  if (enabled.length === 0) throw new KeyDecryptError('User has no enabled addresses', 'no_addresses');
 
   const addressUserKeys = decryptedUserKeys.map((k) => k.key);
 
@@ -127,13 +146,13 @@ export async function fetchAndDecryptUserKey(params: FetchAndDecryptParams): Pro
 
     if (keys.length === 0) {
       // Address ID, not the email: this message can reach error reports.
-      throw new KeyDecryptError(`Failed to decrypt any address key for address ${addr.ID}`);
+      throw new KeyDecryptError(`Failed to decrypt any address key for address ${addr.ID}`, 'address_key');
     }
     decryptedAddresses.push({ email: addr.Email, addressId: addr.ID, keys, primaryKeyIndex });
   }
 
   if (decryptedAddresses.length === 0) {
-    throw new KeyDecryptError('No decryptable address keys');
+    throw new KeyDecryptError('No decryptable address keys', 'address_key');
   }
 
   // Pick the primary address (lowest Order, or first as fallback).
@@ -144,9 +163,12 @@ export async function fetchAndDecryptUserKey(params: FetchAndDecryptParams): Pro
     decryptedAddresses[0]!;
 
   return {
-    primaryAddress: { email: primaryEntry.email, addressId: primaryEntry.addressId },
-    primaryKey: primaryUserKey.key,
-    addresses: decryptedAddresses,
+    decryptedKeys: {
+      primaryAddress: { email: primaryEntry.email, addressId: primaryEntry.addressId },
+      primaryKey: primaryUserKey.key,
+      addresses: decryptedAddresses,
+    },
+    userId: User.ID,
   };
 }
 
