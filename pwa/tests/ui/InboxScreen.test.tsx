@@ -661,6 +661,8 @@ describe('InboxScreen while Proton is locked', () => {
   it('unlocks from the banner and hands over the new status', async () => {
     const onUnlocked = vi.fn();
     setup([], {}, undefined, { proton: 'locked', passkeys: 1, onUnlocked, unlockClient: unlockClient() });
+    // Enabled once the salts fetched on mount have arrived.
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Unlock' })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: 'Unlock' }));
     await waitFor(() => expect(onUnlocked).toHaveBeenCalledWith(LIVE));
   });
@@ -672,6 +674,8 @@ describe('InboxScreen while Proton is locked', () => {
       unlock: vi.fn().mockResolvedValue({ kind: 'failed', code: 'passkeys_stale' }),
     };
     setup([], {}, undefined, { proton: 'locked', passkeys: 1, onStatusChanged, unlockClient: client });
+    // Enabled once the salts fetched on mount have arrived.
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Unlock' })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: 'Unlock' }));
     await waitFor(() => expect(onStatusChanged).toHaveBeenCalled());
   });

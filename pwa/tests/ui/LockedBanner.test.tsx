@@ -70,7 +70,8 @@ describe('LockedBanner', () => {
     ['a network failure', { kind: 'failed', code: 'error' }],
   ] as const) {
     it(`asks to try again after ${label}, keeping the button`, async () => {
-      const { onStatusChanged } = setup(outcome);
+      const { client, onStatusChanged } = setup(outcome);
+      await prepared(client);
       fireEvent.click(screen.getByRole('button', { name: 'Unlock' }));
       expect(await screen.findByText(RETRY)).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Unlock' })).toBeEnabled();
@@ -79,7 +80,8 @@ describe('LockedBanner', () => {
   }
 
   it('says Proton is unreachable, keeping the button', async () => {
-    setup({ kind: 'failed', code: 'proton_unavailable' });
+    const { client } = setup({ kind: 'failed', code: 'proton_unavailable' });
+    await prepared(client);
     fireEvent.click(screen.getByRole('button', { name: 'Unlock' }));
     expect(await screen.findByText('Proton isn’t reachable right now. Try again in a moment.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Unlock' })).toBeInTheDocument();
@@ -87,19 +89,61 @@ describe('LockedBanner', () => {
 
   for (const [code, text] of [
     ['proton_login_required', 'Filing is paused. Sign in to Proton to resume.'],
+    ['no_passkeys', 'Filing is paused. Sign in to Proton to resume.'],
     ['passkeys_stale', 'Your Proton password changed. Sign in again, then add your passkey again in Settings.'],
     ['passkey_unreadable', 'That passkey can no longer unlock. Sign in to Proton, then remove it and add it again in Settings.'],
   ] as const) {
-    it(`sends the user to sign in after ${code}, and tells the app its status changed`, async () => {
-      const { onSignIn, onStatusChanged } = setup({ kind: 'failed', code });
-      fireEvent.click(screen.getByRole('button', { name: 'Unlock' }));
+    it(`sends the user to sign in after ${code}, focused, and tells the app its status changed`, async () => {
+      const { client, onSignIn, onStatusChanged } = setup({ kind: 'failed', code });
+      await prepared(client);
+      const unlockButton = screen.getByRole('button', { name: 'Unlock' });
+      unlockButton.focus();
+      fireEvent.click(unlockButton);
       expect(await screen.findByText(text)).toBeInTheDocument();
       expect(onStatusChanged).toHaveBeenCalledTimes(1);
       expect(screen.queryByRole('button', { name: 'Unlock' })).toBeNull();
+      // Unlock is gone: focus moves to what replaced it.
+      expect(screen.getByRole('button', { name: 'Sign in to Proton' })).toHaveFocus();
+      // Nothing left to unlock with: no salts fetched again.
+      expect(client.prepare).toHaveBeenCalledTimes(1);
       fireEvent.click(screen.getByRole('button', { name: 'Sign in to Proton' }));
       expect(onSignIn).toHaveBeenCalled();
     });
   }
+
+  it('asks again after an unknown passkey, and tells the app its status changed', async () => {
+    const { client, onStatusChanged } = setup({ kind: 'failed', code: 'unknown_passkey' });
+    await prepared(client);
+    fireEvent.click(screen.getByRole('button', { name: 'Unlock' }));
+    expect(await screen.findByText(RETRY)).toBeInTheDocument();
+    expect(onStatusChanged).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: 'Unlock' })).toBeInTheDocument();
+  });
+
+  it('holds Unlock until the salts arrive, so the tap starts the prompt itself', async () => {
+    const { client } = setup({ kind: 'unlocked', status: LIVE });
+    expect(screen.getByRole('button', { name: 'Unlock' })).toBeDisabled();
+    await prepared(client);
+    expect(screen.getByRole('button', { name: 'Unlock' })).toBeEnabled();
+  });
+
+  it('offers Unlock anyway when fetching the salts first failed, and the tap fetches them', async () => {
+    const client: UnlockClient = {
+      prepare: vi.fn().mockRejectedValue(new Error('offline')),
+      unlock: vi.fn().mockResolvedValue({ kind: 'unlocked', status: LIVE }),
+    };
+    const onUnlocked = vi.fn();
+    render(<LockedBanner passkeys={1} onUnlocked={onUnlocked} onSignIn={vi.fn()} client={client} />);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Unlock' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Unlock' }));
+    await waitFor(() => expect(onUnlocked).toHaveBeenCalledWith(LIVE));
+    expect(client.unlock).toHaveBeenCalledWith(null);
+  });
+
+  it('does not take focus when it first shows only Sign in to Proton', () => {
+    setup({ kind: 'cancelled' }, 0);
+    expect(screen.getByRole('button', { name: 'Sign in to Proton' })).not.toHaveFocus();
+  });
 
   it('ignores an outcome that arrives after it is gone', async () => {
     let finish!: (o: UnlockOutcome) => void;
@@ -109,6 +153,7 @@ describe('LockedBanner', () => {
     };
     const onUnlocked = vi.fn();
     const { unmount } = render(<LockedBanner passkeys={1} onUnlocked={onUnlocked} onSignIn={vi.fn()} client={client} />);
+    await prepared(client);
     fireEvent.click(screen.getByRole('button', { name: 'Unlock' }));
     unmount();
     await act(async () => finish({ kind: 'unlocked', status: LIVE }));

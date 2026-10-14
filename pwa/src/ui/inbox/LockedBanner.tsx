@@ -32,7 +32,10 @@ function problemOf(code: string): Problem {
 }
 
 /** Refusals after which the server's state differs: the app reads its status again. */
-const STATUS_CHANGING = new Set(['proton_login_required', 'passkeys_stale', 'passkey_unreadable']);
+const STATUS_CHANGING = new Set(['proton_login_required', 'no_passkeys', 'passkeys_stale', 'passkey_unreadable', 'unknown_passkey']);
+
+/** Problems that leave only Sign in to Proton: no passkey can unlock now. */
+const SIGN_IN_ONLY = new Set<Problem>(['login_required', 'stale', 'unreadable']);
 
 const SIGN_IN_TEXT = {
   login_required: 'Filing is paused. Sign in to Proton to resume.',
@@ -48,6 +51,12 @@ const SIGN_IN_TEXT = {
 export function LockedBanner({ passkeys, onUnlocked, onSignIn, onStatusChanged = () => {}, client = unlockClient }: LockedBannerProps) {
   const [problem, setProblem] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
+  // The first salts are on their way: a tap now would have to fetch them
+  // before the prompt, and iOS may refuse a prompt that no longer follows the tap.
+  const [preparing, setPreparing] = useState(passkeys > 0);
+  // Unlock was replaced by Sign in to Proton: focus follows it.
+  const [focusSignIn, setFocusSignIn] = useState(false);
+  const signInRef = useRef<HTMLButtonElement>(null);
   const prepared = useRef<UnlockCredential[] | null>(null);
   // Only the latest fetch may fill `prepared`.
   const generation = useRef(0);
@@ -60,21 +69,31 @@ export function LockedBanner({ passkeys, onUnlocked, onSignIn, onStatusChanged =
     };
   }, []);
 
-  function prefetch() {
+  useLayoutEffect(() => {
+    if (!focusSignIn) return;
+    signInRef.current?.focus();
+    setFocusSignIn(false);
+  }, [focusSignIn]);
+
+  function prefetch(first = false) {
     const mine = ++generation.current;
     prepared.current = null;
+    if (first) setPreparing(true);
     client
       .prepare()
       .then((credentials) => {
         if (generation.current === mine) prepared.current = credentials;
       })
       // The tap fetches them itself then.
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => {
+        if (mounted.current && generation.current === mine) setPreparing(false);
+      });
   }
 
   useEffect(() => {
     if (passkeys === 0) return;
-    prefetch();
+    prefetch(true);
   }, [client, passkeys]);
 
   async function tap() {
@@ -87,19 +106,21 @@ export function LockedBanner({ passkeys, onUnlocked, onSignIn, onStatusChanged =
       onUnlocked(outcome.status);
       return;
     }
-    // A passkey may have been removed, or another added elsewhere: the next tap gets fresh salts.
-    prefetch();
-    setProblem(outcome.kind === 'cancelled' ? 'retry' : problemOf(outcome.code));
+    const next = outcome.kind === 'cancelled' ? 'retry' : problemOf(outcome.code);
+    if (SIGN_IN_ONLY.has(next)) setFocusSignIn(true);
+    // A passkey may have been removed, or another added elsewhere: the next tap
+    // gets fresh salts. Not when only Sign in to Proton is left.
+    else prefetch();
+    setProblem(next);
     if (outcome.kind === 'failed' && STATUS_CHANGING.has(outcome.code)) onStatusChanged();
   }
 
-  const signInOnly =
-    problem === 'login_required' || problem === 'stale' || problem === 'unreadable' ? problem : passkeys === 0 ? 'login_required' : null;
+  const signInOnly = problem && SIGN_IN_ONLY.has(problem) ? (problem as keyof typeof SIGN_IN_TEXT) : passkeys === 0 ? 'login_required' : null;
   if (signInOnly) {
     return (
       <div class="warn">
         {SIGN_IN_TEXT[signInOnly]}{' '}
-        <button class="btn btn-secondary btn-small" onClick={onSignIn}>
+        <button ref={signInRef} class="btn btn-secondary btn-small" onClick={onSignIn}>
           Sign in to Proton
         </button>
       </div>
@@ -108,7 +129,7 @@ export function LockedBanner({ passkeys, onUnlocked, onSignIn, onStatusChanged =
   return (
     <div class="warn">
       Filing is paused until you unlock.{' '}
-      <button class="btn btn-small" disabled={busy} onClick={() => void tap()}>
+      <button class="btn btn-small" disabled={busy || preparing} onClick={() => void tap()}>
         {busy ? 'Unlocking…' : 'Unlock'}
       </button>
       {problem === 'retry' && <p class="error-text">Couldn’t unlock. Try again.</p>}
