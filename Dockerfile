@@ -57,7 +57,7 @@ RUN apk add --no-cache \
   ocrmypdf=16.11.1-r2 \
   tesseract-ocr-data-eng=5.5.2-r0 \
   py3-img2pdf=0.6.3-r1 \
-  ghostscript=10.07.1-r0
+  ghostscript=10.08.0-r0
 COPY --from=deps /app/node_modules ./node_modules
 # pnpm's workspace layout symlinks tsx (now a server runtime dep) into
 # server/node_modules, not the root node_modules copied above — needed for
