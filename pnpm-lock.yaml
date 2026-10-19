@@ -227,8 +227,8 @@ importers:
         specifier: 2.11.1
         version: 2.11.1(html-entities@2.6.0)
       '@hono/node-server':
-        specifier: 2.1.4
-        version: 2.1.4(hono@4.13.13)
+        specifier: 2.1.5
+        version: 2.1.5(hono@4.13.13)
       '@protontech/crypto':
         specifier: 2.2.0
         version: 2.2.0(@types/node@25.9.9)(typescript@7.0.2)
@@ -237,7 +237,7 @@ importers:
         version: 0.22.2(@protontech/crypto@2.2.0(@types/node@25.9.9)(typescript@7.0.2))
       '@sentry/hono':
         specifier: 11.6.0
-        version: 11.6.0(@hono/node-server@2.1.4(hono@4.13.13))(@sentry/node@11.6.0(@babel/core@7.29.7(supports-color@8.1.1)))(hono@4.13.13)
+        version: 11.6.0(@hono/node-server@2.1.5(hono@4.13.13))(@sentry/node@11.6.0(@babel/core@7.29.7(supports-color@8.1.1)))(hono@4.13.13)
       '@sentry/node':
         specifier: 11.6.0
         version: 11.6.0(@babel/core@7.29.7(supports-color@8.1.1))
@@ -560,8 +560,8 @@ packages:
   '@fontsource-variable/geist@5.3.0':
     resolution: {integrity: sha512-j0m+vLQuG5XAYoHtGCVu0spvlGreR3EzpECUVzkFmI1mTVnAO38l/NEPDCFgZ177JxzYJCLSmTQibIiYPilGrA==}
 
-  '@hono/node-server@2.1.4':
-    resolution: {integrity: sha512-2g1qeHl4BduwDn6L8nkAvDrPUWPMlkQ//a5NhP/zIyaXKMjZNRV+cG9Csu+BiJFf6+68pqzjf4Hi5sJGKHuS1g==}
+  '@hono/node-server@2.1.5':
+    resolution: {integrity: sha512-MgP/I06GdvsilDspMk/qmRzpk8LOUStP6jFAbSRi40W09DhoyUn+Mj7eyKICPqeYKybOjVFLVIAQzvu1bfIa7Q==}
     engines: {node: '>=20'}
     peerDependencies:
       hono: ^4 || ^5.0.0-0
@@ -2558,7 +2558,7 @@ snapshots:
 
   '@fontsource-variable/geist@5.3.0': {}
 
-  '@hono/node-server@2.1.4(hono@4.13.13)':
+  '@hono/node-server@2.1.5(hono@4.13.13)':
     dependencies:
       hono: 4.13.13
 
@@ -2926,7 +2926,7 @@ snapshots:
     dependencies:
       '@sentry/core': 11.6.0
 
-  '@sentry/hono@11.6.0(@hono/node-server@2.1.4(hono@4.13.13))(@sentry/node@11.6.0(@babel/core@7.29.7(supports-color@8.1.1)))(hono@4.13.13)':
+  '@sentry/hono@11.6.0(@hono/node-server@2.1.5(hono@4.13.13))(@sentry/node@11.6.0(@babel/core@7.29.7(supports-color@8.1.1)))(hono@4.13.13)':
     dependencies:
       '@opentelemetry/api': 1.9.1
       '@sentry/conventions': 0.26.0
@@ -2934,7 +2934,7 @@ snapshots:
       '@sentry/server-utils': 11.6.0
       hono: 4.13.13
     optionalDependencies:
-      '@hono/node-server': 2.1.4(hono@4.13.13)
+      '@hono/node-server': 2.1.5(hono@4.13.13)
       '@sentry/node': 11.6.0(@babel/core@7.29.7(supports-color@8.1.1))
 
   '@sentry/node@11.6.0(@babel/core@7.29.7(supports-color@8.1.1))':
