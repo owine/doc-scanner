@@ -1567,8 +1567,8 @@ packages:
   estree-walker@3.0.3:
     resolution: {integrity: sha512-7RUKfXgSMMkzt6ZuXmqapOurLGPPfgj6l9uRZ7lRGolvk0y2yocc35LdcxKC5PQZdn2DMqioAQ2NoWcrTKmm6g==}
 
-  exifreader@4.49.0:
-    resolution: {integrity: sha512-L5kH+ZMyO7MkzaprMR0Yo5HvtFCSwM4WHug2cg04Gykkh3xZe2toZrfDNyvmlMpfOlef9Zxc9NtjAp2fwnLhVA==}
+  exifreader@4.50.0:
+    resolution: {integrity: sha512-RUtdkMPWJd2BdinNSO0JVw0QkMigxDTsuambp+jMlPM1b5k3xvXa4p9Wat+JhW4iVBOEfpBw66PS6oYHS1yFTg==}
     hasBin: true
 
   expect-type@1.4.0:
@@ -2824,7 +2824,7 @@ snapshots:
       ttag: 1.8.12
     optionalDependencies:
       '@xmldom/xmldom': 0.9.12
-      exifreader: 4.49.0
+      exifreader: 4.50.0
     transitivePeerDependencies:
       - babel-plugin-macros
 
@@ -3374,7 +3374,7 @@ snapshots:
     dependencies:
       '@types/estree': 1.0.9
 
-  exifreader@4.49.0:
+  exifreader@4.50.0:
     optionalDependencies:
       '@xmldom/xmldom': 0.9.12
     optional: true
