@@ -18,7 +18,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "0.133.0",
     "@cantoo/pdf-lib": "2.11.1",
-    "@hono/node-server": "2.1.4",
+    "@hono/node-server": "2.1.5",
     "@protontech/crypto": "2.2.0",
     "@protontech/drive-sdk": "0.22.2",
     "@sentry/hono": "11.6.0",
