@@ -42,7 +42,7 @@ LABEL org.opencontainers.image.title="doc-scanner" \
 # tini pinned to its Alpine 3.24 repo version for deterministic builds; Renovate
 # extracts this `apk add` pin natively (datasource `apk`) and looks it up against
 # the registryUrls branch in renovate.json.
-# NOTE: the node base tag floats its Alpine version (node:24.21.0-alpine), so
+# NOTE: the node base tag floats its Alpine version (node:<version>-alpine), so
 # when node's default Alpine moves to 3.25 both this pin and that `branch=v3.24`
 # must be hand-updated — the build fails loudly until then.
 # ocrmypdf, tesseract-ocr-data-eng, py3-img2pdf and ghostscript are slice 3's

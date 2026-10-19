@@ -6,7 +6,7 @@ A personal-use, self-hosted PWA for scanning paper documents from a phone camera
 
 ## Quickstart
 
-Prerequisites: Node.js `24.21.0` (pinned in `.nvmrc`) and pnpm (the version pinned in the `packageManager` field, via Corepack). `engineStrict` is on, so `pnpm install` fails on any other Node version.
+Prerequisites: Node.js at the exact version pinned in `.nvmrc` and pnpm (the version pinned in the `packageManager` field, via Corepack). `engineStrict` is on, so `pnpm install` fails on any other Node version.
 
 ```bash
 fnm use                 # or: nvm use (reads .nvmrc)
