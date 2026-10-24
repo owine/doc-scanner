@@ -87,3 +87,5 @@ allowBuilds:
 # hono@4.12.34 — Renovate security update.
 minimumReleaseAgeExclude:
   - hono@4.12.34
+  # Renovate security update: happy-dom@21.0.4
+  - happy-dom@21.0.4
