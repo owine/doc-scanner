@@ -1,11 +1,14 @@
-# Production: runs the image CI publishes from main. The package is private,
-# so the host needs `docker login ghcr.io` once (a token with read:packages).
+# Production: runs a released image (CI builds it from main; publishing a
+# GitHub Release tags it). The package is private, so the host needs
+# `docker login ghcr.io` once (a token with read:packages).
 # To build from source instead, add compose.build.yml:
 #   docker compose -f compose.yml -f compose.build.yml up --build
 services:
   app:
-    # `latest` follows main; pin a `sha-<short>` tag to hold a known-good build.
-    # `up` reuses a cached `latest`, so update with:
+    # `latest` is the newest release. Set DOC_SCANNER_TAG to `1` (newest 1.x),
+    # `1.0` (newest 1.0.x) or `1.0.0` (exact) to hold a series, to `main` to
+    # follow every push to main, or to `sha-<full commit sha>` for one build.
+    # `up` reuses a cached tag, so update with:
     #   docker compose pull && docker compose up -d
     image: ghcr.io/owine/doc-scanner:${DOC_SCANNER_TAG:-latest}
     # Loopback only: the app needs HTTPS (Secure cookie, camera, service

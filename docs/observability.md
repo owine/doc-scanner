@@ -21,7 +21,7 @@ The browser DSN is **build-time**: changing it means rebuilding the image. CI bu
 
 ## Where to set them
 
-CI publishes `ghcr.io/owine/doc-scanner` (`latest` and `sha-<short>`) on every push to `main`, but no stack in `docker-piwine` / `docker-piwine-office` / `docker-zendc` runs it yet. Until one does:
+CI publishes `ghcr.io/owine/doc-scanner` (`main` and `sha-<full commit sha>`) on every push to `main`, and a GitHub Release retags it as `X.Y.Z`, `X.Y`, `X` and `latest`, but no stack in `docker-piwine` / `docker-piwine-office` / `docker-zendc` runs it yet. Until one does:
 
 - **This repo's `compose.yml`** (and the `compose.build.yml` overlay) reads all of the above from `.env` (see `.env.example`).
 - **When it moves to a homelab stack**, follow house-manager's convention: add `DOCSCANNER_SENTRY_DSN` to that host's `compose.env` and map it in the stack's `compose.yaml`. A browser DSN needs the runtime injection above first, since the stack pulls the published image.

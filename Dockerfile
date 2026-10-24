@@ -79,13 +79,14 @@ CMD ["sh", "-c", "cd server && exec node --import tsx src/index.ts"]
 
 # Volatile OCI labels — placed last so they don't bust earlier layer cache.
 # CI passes real values via --build-arg; standalone builds get the defaults.
+# No version label: a release retags an image CI already built from main, so
+# the build can't know its release number. The revision (GIT_SHA) is the
+# identity; the GitHub Release maps it to X.Y.Z.
 ARG GIT_SHA=dev
 ARG BUILD_DATE=unknown
-ARG VERSION=dev
 # Server-side Sentry release (observability/sentry.ts ignores the "dev"
 # default). Deliberately not exported as SENTRY_RELEASE: the SDK reads that
 # name on its own and would tag every local build "dev".
 ENV GIT_SHA=${GIT_SHA}
 LABEL org.opencontainers.image.revision="${GIT_SHA}" \
-      org.opencontainers.image.created="${BUILD_DATE}" \
-      org.opencontainers.image.version="${VERSION}"
+      org.opencontainers.image.created="${BUILD_DATE}"

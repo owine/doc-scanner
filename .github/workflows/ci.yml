@@ -76,8 +76,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          fetch-depth: 0  # need tags + history for `git describe`
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069  # v4.4.1
@@ -86,12 +84,14 @@ jobs:
         id: meta
         # Keep identical to push-image's copy: these are build args, part of
         # the cache key that job's rebuild must hit. The commit date (not the
-        # clock) makes BUILD_DATE the same in both jobs.
+        # clock) makes BUILD_DATE the same in both jobs. There is no VERSION:
+        # release.yml later retags this same image as X.Y.Z without
+        # rebuilding, so nothing known at build time can name the release.
+        # GIT_SHA is the identity (OCI revision label, Sentry release).
         run: |
           {
             echo "git_sha=${GITHUB_SHA}"
             echo "build_date=$(git log -1 --format=%cd --date=format-local:%Y-%m-%dT%H:%M:%SZ)"
-            echo "version=$(git describe --tags --always --dirty)"
           } >> "$GITHUB_OUTPUT"
         env:
           TZ: UTC
@@ -110,7 +110,6 @@ jobs:
           build-args: |
             GIT_SHA=${{ steps.meta.outputs.git_sha }}
             BUILD_DATE=${{ steps.meta.outputs.build_date }}
-            VERSION=${{ steps.meta.outputs.version }}
 
       - name: Smoke-test the OCR tools (${{ matrix.platform }})
         # The real ocrmypdf, img2pdf and Ghostscript in the built image. Catches
@@ -150,8 +149,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          fetch-depth: 0  # need tags + history for `git describe`
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069  # v4.4.1
@@ -163,7 +160,6 @@ jobs:
           {
             echo "git_sha=${GITHUB_SHA}"
             echo "build_date=$(git log -1 --format=%cd --date=format-local:%Y-%m-%dT%H:%M:%SZ)"
-            echo "version=$(git describe --tags --always --dirty)"
           } >> "$GITHUB_OUTPUT"
         env:
           TZ: UTC
@@ -187,7 +183,6 @@ jobs:
           build-args: |
             GIT_SHA=${{ steps.meta.outputs.git_sha }}
             BUILD_DATE=${{ steps.meta.outputs.build_date }}
-            VERSION=${{ steps.meta.outputs.version }}
           outputs: type=image,name=ghcr.io/${{ github.repository }},push-by-digest=true,name-canonical=true,push=true
 
       - name: Export digest
@@ -246,7 +241,7 @@ jobs:
       - name: Check this commit is still main's head
         id: head
         # Runs finish out of order: an older commit's run that ends after a
-        # newer one has published must not move `latest` back. It still gets
+        # newer one has published must not move `main` back. It still gets
         # its sha tag.
         env:
           GH_TOKEN: ${{ github.token }}
@@ -256,10 +251,10 @@ jobs:
             -H "Accept: application/vnd.github.sha" \
             "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/commits/main")
           if [ "$head" = "$GITHUB_SHA" ]; then
-            echo "latest=true" >> "$GITHUB_OUTPUT"
+            echo "main=true" >> "$GITHUB_OUTPUT"
           else
-            echo "::notice::main is now at ${head}; tagging sha only, not latest"
-            echo "latest=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::main is now at ${head}; tagging sha only, not main"
+            echo "main=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Compute tags
@@ -267,10 +262,13 @@ jobs:
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302  # v6.2.0
         with:
           images: ghcr.io/${{ github.repository }}
-          # sha-<short> for pinning a deploy, latest for following main.
+          # sha-<long> pins a commit's image and is what release.yml looks up
+          # to retag; main follows main's head. `latest` and the X.Y.Z / X.Y /
+          # X tags are set only by release.yml, when a GitHub Release is
+          # published, so a push here never moves them.
           tags: |
-            type=sha
-            type=raw,value=latest,enable=${{ steps.head.outputs.latest == 'true' }}
+            type=sha,format=long
+            type=raw,value=main,enable=${{ steps.head.outputs.main == 'true' }}
 
       - name: Create manifest list and push
         working-directory: /tmp/digests
@@ -288,6 +286,4 @@ jobs:
           docker buildx imagetools create "${tags[@]}" "${images[@]}"
 
       - name: Inspect image
-        env:
-          VERSION: ${{ steps.tags.outputs.version }}
-        run: docker buildx imagetools inspect "ghcr.io/${GITHUB_REPOSITORY}:${VERSION}"
+        run: docker buildx imagetools inspect "ghcr.io/${GITHUB_REPOSITORY}:sha-${GITHUB_SHA}"
