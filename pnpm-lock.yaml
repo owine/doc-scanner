@@ -195,7 +195,7 @@ importers:
         version: 2.10.6(@babel/core@7.29.7(supports-color@8.1.1))(preact@11.0.1)(supports-color@8.1.1)(vite@8.3.4(@types/node@25.9.9)(esbuild@0.28.2)(tsx@4.23.15))
       '@testing-library/jest-dom':
         specifier: 7.0.1
-        version: 7.0.1(@testing-library/dom@10.4.2)(vitest@5.0.5(@opentelemetry/api@1.9.1)(@types/node@25.9.9)(happy-dom@21.0.3)(vite@8.3.4(@types/node@25.9.9)(esbuild@0.28.2)(tsx@4.23.15)))
+        version: 7.0.1(@testing-library/dom@10.4.2)(vitest@5.0.5(@opentelemetry/api@1.9.1)(@types/node@25.9.9)(happy-dom@21.0.4)(vite@8.3.4(@types/node@25.9.9)(esbuild@0.28.2)(tsx@4.23.15)))
       '@testing-library/preact':
         specifier: 3.2.4
         version: 3.2.4(preact@11.0.1)
@@ -206,8 +206,8 @@ importers:
         specifier: 6.2.6
         version: 6.2.6
       happy-dom:
-        specifier: 21.0.3
-        version: 21.0.3
+        specifier: 21.0.4
+        version: 21.0.4
       typescript:
         specifier: 7.0.2
         version: 7.0.2
@@ -216,7 +216,7 @@ importers:
         version: 8.3.4(@types/node@25.9.9)(esbuild@0.28.2)(tsx@4.23.15)
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@25.9.9)(happy-dom@21.0.3)(vite@8.3.4(@types/node@25.9.9)(esbuild@0.28.2)(tsx@4.23.15))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@25.9.9)(happy-dom@21.0.4)(vite@8.3.4(@types/node@25.9.9)(esbuild@0.28.2)(tsx@4.23.15))
 
   server:
     dependencies:
@@ -274,7 +274,7 @@ importers:
         version: 7.0.2
       vitest:
         specifier: 5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@25.9.9)(happy-dom@21.0.3)(vite@8.3.4(@types/node@25.9.9)(esbuild@0.28.2)(tsx@4.23.15))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@25.9.9)(happy-dom@21.0.4)(vite@8.3.4(@types/node@25.9.9)(esbuild@0.28.2)(tsx@4.23.15))
 
 packages:
 
@@ -1635,8 +1635,8 @@ packages:
     resolution: {integrity: sha512-ZUKRh6/kUFoAiTAtTYPZJ3hw9wNxx+BIBOijnlG9PnrJsCcSjs1wyyD6vJpaYtgnzDrKYRSqf3OO6Rfa93xsRg==}
     engines: {node: '>= 0.4'}
 
-  happy-dom@21.0.3:
-    resolution: {integrity: sha512-PesNgu5BnIEmAwzKGewB3K1ORFeznFZJ4JrRz89ea1wkHnxskdpzX9sN/+zb4KO6k8oSMhyJSj/cwXAFrYBBNA==}
+  happy-dom@21.0.4:
+    resolution: {integrity: sha512-tFm+GaLBgo6o0awHnvHaNoraVo27qJ+2tZEtZ+cIa08hXbeitrxAJajLI05hsUy/2/YTKcUjQYzHe5mCcraLBw==}
     engines: {node: '>=20.0.0'}
 
   has-bigints@1.1.0:
@@ -3003,7 +3003,7 @@ snapshots:
       lz-string: 1.5.0
       pretty-format: 27.5.1
 
-  '@testing-library/jest-dom@7.0.1(@testing-library/dom@10.4.2)(vitest@5.0.5(@opentelemetry/api@1.9.1)(@types/node@25.9.9)(happy-dom@21.0.3)(vite@8.3.4(@types/node@25.9.9)(esbuild@0.28.2)(tsx@4.23.15)))':
+  '@testing-library/jest-dom@7.0.1(@testing-library/dom@10.4.2)(vitest@5.0.5(@opentelemetry/api@1.9.1)(@types/node@25.9.9)(happy-dom@21.0.4)(vite@8.3.4(@types/node@25.9.9)(esbuild@0.28.2)(tsx@4.23.15)))':
     dependencies:
       '@adobe/css-tools': 4.5.0
       '@testing-library/dom': 10.4.2
@@ -3013,7 +3013,7 @@ snapshots:
       picocolors: 1.1.1
       redent: 3.0.0
     optionalDependencies:
-      vitest: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@25.9.9)(happy-dom@21.0.3)(vite@8.3.4(@types/node@25.9.9)(esbuild@0.28.2)(tsx@4.23.15))
+      vitest: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@25.9.9)(happy-dom@21.0.4)(vite@8.3.4(@types/node@25.9.9)(esbuild@0.28.2)(tsx@4.23.15))
 
   '@testing-library/preact@3.2.4(preact@11.0.1)':
     dependencies:
@@ -3434,7 +3434,7 @@ snapshots:
 
   gopd@1.2.0: {}
 
-  happy-dom@21.0.3:
+  happy-dom@21.0.4:
     dependencies:
       '@types/node': 25.9.9
       '@types/whatwg-mimetype': 3.0.2
@@ -4053,7 +4053,7 @@ snapshots:
       fsevents: 2.3.3
       tsx: 4.23.15
 
-  vitest@5.0.5(@opentelemetry/api@1.9.1)(@types/node@25.9.9)(happy-dom@21.0.3)(vite@8.3.4(@types/node@25.9.9)(esbuild@0.28.2)(tsx@4.23.15)):
+  vitest@5.0.5(@opentelemetry/api@1.9.1)(@types/node@25.9.9)(happy-dom@21.0.4)(vite@8.3.4(@types/node@25.9.9)(esbuild@0.28.2)(tsx@4.23.15)):
     dependencies:
       '@types/chai': 5.2.3
       '@vitest/mocker': 5.0.5(vite@8.3.4(@types/node@25.9.9)(esbuild@0.28.2)(tsx@4.23.15))
@@ -4072,7 +4072,7 @@ snapshots:
     optionalDependencies:
       '@opentelemetry/api': 1.9.1
       '@types/node': 25.9.9
-      happy-dom: 21.0.3
+      happy-dom: 21.0.4
     transitivePeerDependencies:
       - msw
 
