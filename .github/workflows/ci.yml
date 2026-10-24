@@ -241,7 +241,7 @@ jobs:
       - name: Check this commit is still main's head
         id: head
         # Runs finish out of order: an older commit's run that ends after a
-        # newer one has published must not move `latest` back. It still gets
+        # newer one has published must not move `main` back. It still gets
         # its sha tag.
         env:
           GH_TOKEN: ${{ github.token }}
@@ -251,10 +251,10 @@ jobs:
             -H "Accept: application/vnd.github.sha" \
             "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/commits/main")
           if [ "$head" = "$GITHUB_SHA" ]; then
-            echo "latest=true" >> "$GITHUB_OUTPUT"
+            echo "main=true" >> "$GITHUB_OUTPUT"
           else
-            echo "::notice::main is now at ${head}; tagging sha only, not latest"
-            echo "latest=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::main is now at ${head}; tagging sha only, not main"
+            echo "main=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Compute tags
@@ -262,10 +262,13 @@ jobs:
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302  # v6.2.0
         with:
           images: ghcr.io/${{ github.repository }}
-          # sha-<short> for pinning a deploy, latest for following main.
+          # sha-<long> pins a commit's image and is what release.yml looks up
+          # to retag; main follows main's head. `latest` and the X.Y.Z / X.Y /
+          # X tags are set only by release.yml, when a GitHub Release is
+          # published, so a push here never moves them.
           tags: |
-            type=sha
-            type=raw,value=latest,enable=${{ steps.head.outputs.latest == 'true' }}
+            type=sha,format=long
+            type=raw,value=main,enable=${{ steps.head.outputs.main == 'true' }}
 
       - name: Create manifest list and push
         working-directory: /tmp/digests
@@ -283,6 +286,4 @@ jobs:
           docker buildx imagetools create "${tags[@]}" "${images[@]}"
 
       - name: Inspect image
-        env:
-          VERSION: ${{ steps.tags.outputs.version }}
-        run: docker buildx imagetools inspect "ghcr.io/${GITHUB_REPOSITORY}:${VERSION}"
+        run: docker buildx imagetools inspect "ghcr.io/${GITHUB_REPOSITORY}:sha-${GITHUB_SHA}"
