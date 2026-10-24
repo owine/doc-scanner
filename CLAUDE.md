@@ -84,6 +84,12 @@ The server runs its TypeScript **source** under `tsx` in dev, prod, and Docker (
 
 Renovate opens these PRs on its own — the `dependencyDashboardApproval` gate was dropped 2026-08-03 because every break of this kind is a compile error that CI's `tsc --noEmit` already catches, so the manual tick delayed PR *creation* without adding detection. A human still merges. The risk that remains is a change that typechecks but behaves differently, which only reading the diff catches — so read the diff.
 
+## Releases and image tags
+
+Every push to `main` builds the multi-arch image and tags it `main` (only while that commit is still main's head, so an out-of-order run never moves it back) and `sha-<full commit sha>`. Pushes **never** move `latest`. Publishing a GitHub Release for a strict `vX.Y.Z` tag runs `release.yml`, which **retags** that commit's existing digest (or its nearest built ancestor's, within 50 commits) as `X.Y.Z`, `X.Y`, `X` and `latest`; it never rebuilds. It first requires the commit to be on `main` and main's CI run on it to have succeeded. `X.Y.Z` is immutable, and `X.Y`, `X` and `latest` only move forward (`sort -V` against the existing semver tags), so re-running an older release changes nothing. Image tags have no `v`. A release published with `GITHUB_TOKEN` triggers no workflow, so publish releases by hand (UI or `gh`).
+
+Because a release reuses an image built before its tag existed, the build can't know its release number: there is no `VERSION` build arg or `org.opencontainers.image.version` label. The image's identity is `GIT_SHA` (the `revision` label, and the Sentry release on both server and PWA); the GitHub Release maps it to a version.
+
 ## Conventions
 
 - **Conventional Commits** with scopes (`feat(drive):`, `fix(...)`, `test(...)`, `chore(renovate):`). Prefer **atomic commits** (split logically distinct changes even when developed together). Commits are signed.
