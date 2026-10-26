@@ -9,8 +9,8 @@
     "test:integration": "INTEGRATION=1 pnpm -r --if-present run test:integration"
   },
   "engines": {
-    "node": "24.22.0",
-    "pnpm": "12.14.0"
+    "node": "24.22.1",
+    "pnpm": "12.15.0"
   },
-  "packageManager": "pnpm@12.14.0"
+  "packageManager": "pnpm@12.15.0"
 }
