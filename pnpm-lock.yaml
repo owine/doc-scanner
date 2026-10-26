@@ -233,8 +233,8 @@ importers:
         specifier: 2.2.0
         version: 2.2.0(@types/node@25.9.9)(typescript@7.0.2)
       '@protontech/drive-sdk':
-        specifier: 0.22.2
-        version: 0.22.2(@protontech/crypto@2.2.0(@types/node@25.9.9)(typescript@7.0.2))
+        specifier: 0.23.0
+        version: 0.23.0(@protontech/crypto@2.2.0(@types/node@25.9.9)(typescript@7.0.2))
       '@sentry/hono':
         specifier: 11.9.0
         version: 11.9.0(@sentry/node@11.9.0)(hono@4.13.13)
@@ -927,8 +927,8 @@ packages:
   '@protontech/crypto@2.2.0':
     resolution: {integrity: sha512-WjoNBMn07LxnYE6QLgniEnNfP0Apmvqgi8P48udFtvAxhSnVwiHqmXxMaVHJxBRaJev/DlOKJ67OGYj+3yGYPA==}
 
-  '@protontech/drive-sdk@0.22.2':
-    resolution: {integrity: sha512-J5qM6SkQ2TsymagFJR3Al+f3TjFzwxb+eUUK6ZDMlzv52MOCDjNNaOIHF3+44uXI/Lka0g1kaSaTF2tFISL6tw==}
+  '@protontech/drive-sdk@0.23.0':
+    resolution: {integrity: sha512-64oDsEBwjRiuQCxVi/ogoiked8Whm+I3DorUkD4n4esaqREBQ1qHTobzwkKFR+4h8kkc7K5KcjPMPDfZiD8lHw==}
     peerDependencies:
       '@protontech/crypto': ^2.0.0
 
@@ -2552,7 +2552,7 @@ snapshots:
       - '@types/node'
       - typescript
 
-  '@protontech/drive-sdk@0.22.2(@protontech/crypto@2.2.0(@types/node@25.9.9)(typescript@7.0.2))':
+  '@protontech/drive-sdk@0.23.0(@protontech/crypto@2.2.0(@types/node@25.9.9)(typescript@7.0.2))':
     dependencies:
       '@boltffi/runtime': 0.31.0
       '@noble/hashes': 1.8.0

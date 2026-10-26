@@ -20,7 +20,7 @@
     "@cantoo/pdf-lib": "2.11.1",
     "@hono/node-server": "2.1.5",
     "@protontech/crypto": "2.2.0",
-    "@protontech/drive-sdk": "0.22.2",
+    "@protontech/drive-sdk": "0.23.0",
     "@sentry/hono": "11.9.0",
     "@sentry/node": "11.9.0",
     "bcryptjs": "3.0.3",
