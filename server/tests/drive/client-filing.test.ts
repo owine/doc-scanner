@@ -117,7 +117,7 @@ describe('DriveClient filing helpers', () => {
       mockSdk.experimental.getNodeUrl.mockResolvedValue('https://drive.example/N1');
       const res = await client.uploadFile('Bill.pdf', new Uint8Array([1]), 'application/pdf', { parentFolderUid: 'F9' });
       expect(mockSdk.getMyFilesRootFolder).not.toHaveBeenCalled();
-      expect(mockSdk.getAvailableName).toHaveBeenCalledWith('F9', 'Bill.pdf');
+      expect(mockSdk.getAvailableName).toHaveBeenCalledWith('F9', 'Bill.pdf', 'file');
       expect(mockSdk.getFileUploader.mock.calls[0]![0]).toBe('F9');
       expect(res).toMatchObject({ nodeUid: 'N1', name: 'Bill.pdf' });
     } finally {
