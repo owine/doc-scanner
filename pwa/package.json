@@ -14,7 +14,7 @@
     "@cantoo/pdf-lib": "2.11.1",
     "@fontsource-variable/geist": "5.3.0",
     "@fontsource-variable/geist-mono": "5.3.0",
-    "@sentry/browser": "11.8.0",
+    "@sentry/browser": "11.9.0",
     "idb": "8.0.4",
     "preact": "11.0.1",
     "ulid": "3.0.2"
