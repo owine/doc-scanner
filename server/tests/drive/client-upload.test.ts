@@ -108,7 +108,7 @@ describe('DriveClient.uploadFile', () => {
       const client = await makeClient(db);
       const result = await client.uploadFile('scan.pdf', new Uint8Array([1, 2, 3]), 'application/pdf');
 
-      expect(mockSdk.getAvailableName).toHaveBeenCalledWith('root-uid', 'scan.pdf');
+      expect(mockSdk.getAvailableName).toHaveBeenCalledWith('root-uid', 'scan.pdf', 'file');
       expect(mockSdk.getFileUploader).toHaveBeenCalledWith(
         'root-uid',
         'scan (1).pdf',

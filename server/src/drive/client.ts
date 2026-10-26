@@ -206,8 +206,9 @@ export class DriveClient {
       const parentUid = opts.parentFolderUid ?? (await this.sdk.getMyFilesRootFolder()).uid;
       // `getFileUploader` rejects outright when the name is taken, so resolve
       // a free name first ("scan.pdf" -> "scan (1).pdf") instead of surfacing
-      // a collision as an upload failure.
-      const availableName = await this.sdk.getAvailableName(parentUid, name);
+      // a collision as an upload failure. `NodeType.File` keeps the index
+      // before the extension; folders get it appended at the very end.
+      const availableName = await this.sdk.getAvailableName(parentUid, name, NodeType.File);
       return { parentUid, availableName };
     }, [name]);
 
