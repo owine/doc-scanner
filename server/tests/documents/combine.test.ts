@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { PDFDocument, PDFName, PDFNumber, PDFBool, PDFString } from '@cantoo/pdf-lib';
+import { PDFDocument, PDFName, PDFNumber, PDFBool, PDFString, type PDFObject } from '@cantoo/pdf-lib';
 import sharp from 'sharp';
 import { combineParts } from '../../src/documents/combine.js';
 
@@ -12,7 +12,7 @@ async function pdf(sizes: number[], opts: { encrypt?: boolean } = {}): Promise<U
   return d.save();
 }
 
-async function withAcroForm(entries: Record<string, ReturnType<PDFDocument['context']['obj']>>, needsRendering = false): Promise<Uint8Array> {
+async function withAcroForm(entries: Record<string, PDFObject | PDFObject[]>, needsRendering = false): Promise<Uint8Array> {
   const d = await PDFDocument.create();
   d.addPage([100, 100]);
   d.catalog.set(PDFName.of('AcroForm'), d.context.obj(entries));
