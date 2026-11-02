@@ -1,10 +1,10 @@
 // Polyfill for TC39 Stage-3 Uint8Array base64/hex methods.
 //
 // `Uint8Array.fromBase64`, `Uint8Array.prototype.toBase64`, and
-// `Uint8Array.prototype.toHex` are Stage-3 proposals available in modern
-// browsers (Safari 17+, Chrome 117+) but not yet shipped by default in any
-// Node.js release (V8 has them behind `--js-base-64`; Node has not enabled
-// this flag by default through Node 24).
+// `Uint8Array.prototype.toHex` are TC39 methods available in modern browsers
+// (Safari 17+, Chrome 117+). Node 24 and earlier lack them; Node 25+ ships
+// them natively, so on the pinned Node 26 every branch below is skipped and
+// the native versions run. Kept so the vendored code never depends on that.
 //
 // The vendored `@proton/srp` code targets browsers and uses these methods.
 // This polyfill backs them with `Buffer` so the same source runs in Node.

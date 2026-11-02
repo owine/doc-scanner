@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.28.0@sha256:bb22d9815c728170f72750f4e5b0d672e06176142e1d602c7e66c050100b7e5b
 
-FROM node:24.22.2-alpine@sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85 AS deps
+FROM node:26.12.1-alpine@sha256:40cd011b55415bc894e45b02fdd5a5dfde056921b7d23a64c74f80497af48797 AS deps
 WORKDIR /app
 # Node 25+ no longer bundles Corepack, so pnpm is installed with the bundled
 # npm. PNPM_VERSION must equal package.json's `packageManager`; Renovate's
@@ -33,7 +33,7 @@ RUN VITE_SENTRY_DSN="$SENTRY_BROWSER_DSN" \
     VITE_SENTRY_RELEASE="$GIT_SHA" \
     pnpm --filter @doc-scanner/pwa run build
 
-FROM node:24.22.2-alpine@sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85 AS runtime
+FROM node:26.12.1-alpine@sha256:40cd011b55415bc894e45b02fdd5a5dfde056921b7d23a64c74f80497af48797 AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 
