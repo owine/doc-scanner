@@ -32,6 +32,8 @@ const { mockSdk, sdkErrors } = vi.hoisted(() => {
     iterateFolderChildrenNodeUids: vi.fn(),
     iterateNodes: vi.fn(),
     createFolder: vi.fn(),
+    trashNodes: vi.fn(),
+    deleteNodes: vi.fn(),
     experimental: { getNodeUrl: vi.fn() },
   },
   };
@@ -280,5 +282,24 @@ describe('DriveClient filing helpers', () => {
       mockSdk.iterateFolderChildrenNodeUids.mockReturnValue(gen(['a']));
       mockSdk.iterateNodes.mockReturnValue(wrapperAfterNode([new Error('cannot decrypt')])());
       await expect(client.findFileBySha1('P', 'aaa')).rejects.toBeInstanceOf(sdkErrors.ProtonDriveError);
+    }));
+
+  it('deletes a file by trashing it, then deleting it from the trash', () =>
+    withClient(async (client) => {
+      const calls: string[] = [];
+      mockSdk.trashNodes.mockImplementation((uids: string[]) => { calls.push('trash'); return gen(uids.map((uid) => ({ uid, ok: true }))); });
+      mockSdk.deleteNodes.mockImplementation((uids: string[]) => { calls.push('delete'); return gen(uids.map((uid) => ({ uid, ok: true }))); });
+      await client.deleteFile('n1');
+      expect(mockSdk.trashNodes).toHaveBeenCalledWith(['n1']);
+      expect(mockSdk.deleteNodes).toHaveBeenCalledWith(['n1']);
+      expect(calls).toEqual(['trash', 'delete']);
+    }));
+
+  it('throws the node error when trashing fails, and deletes nothing', () =>
+    withClient(async (client) => {
+      const error = new Error('not allowed');
+      mockSdk.trashNodes.mockReturnValue(gen([{ uid: 'n1', ok: false, error }]));
+      await expect(client.deleteFile('n1')).rejects.toBe(error);
+      expect(mockSdk.deleteNodes).not.toHaveBeenCalled();
     }));
 });

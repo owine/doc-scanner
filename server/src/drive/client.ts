@@ -321,6 +321,16 @@ export class DriveClient {
     });
   }
 
+  /**
+   * Moves a file to the trash, then deletes it from there for good. Only the
+   * upload integration test calls this, to remove the file it uploaded;
+   * nothing in the app deletes from Drive, so it is not failure-reported.
+   */
+  async deleteFile(nodeUid: string): Promise<void> {
+    for await (const r of this.sdk.trashNodes([nodeUid])) if (!r.ok) throw r.error;
+    for await (const r of this.sdk.deleteNodes([nodeUid])) if (!r.ok) throw r.error;
+  }
+
   /** Every folder in My files with its files; see folder-tree.ts. */
   async walkFolderTree(opts?: WalkOptions): Promise<TreeFolder[]> {
     return reportingDriveFailure('folder-walk', () => walkFolderTree(this.sdk, opts));
