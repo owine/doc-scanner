@@ -27,7 +27,7 @@ jobs:
         # with `--frozen-lockfile` and fail outright if the lockfile is missing.
         # No `working-directory`: the install must run at the repo root so the
         # whole workspace is present for the `pnpm --filter` steps below.
-        uses: pnpm/setup@a0881977cd8ea73b1ed212236c99ca10dcc80cf4 # v3.1.1
+        uses: pnpm/setup@fa36a5ef7dcdefc3a7cb25655c122e00cf6e636e # v3.1.2
         with:
           cache: true
           require-lockfile: true
