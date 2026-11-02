@@ -73,6 +73,17 @@ export async function getSharedSession(): Promise<SharedSession> {
   return c.promise;
 }
 
+/**
+ * DriveClient's `onSessionRefreshed` for an integration test. Proton rotates
+ * the refresh token, so a client that refreshes must write the new session
+ * back, or a later file's client would start from the spent one.
+ */
+export function keepRefreshedSession(shared: SharedSession): (session: ProtonSession) => void {
+  return (session) => {
+    shared.session = session;
+  };
+}
+
 /** Releases the cached session. Call from the last integration test if you want explicit cleanup. */
 export function disposeSharedSession(): void {
   const c = cache();
