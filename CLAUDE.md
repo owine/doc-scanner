@@ -38,7 +38,7 @@ cd server && NODE_OPTIONS=--import=tsx pnpm exec vitest run -t "clearCaches"
 
 **Server tests need the `NODE_OPTIONS=--import=tsx` loader** (the `test` script sets it; supply it yourself when invoking `vitest` directly). Without it, any test importing the Drive SDK crashes with `ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING` (see "tsx runtime" below).
 
-Integration tests (`server/tests/**/*.integration.test.ts`) are `describe.skipIf`-gated on `INTEGRATION=1` and require `PROTON_TEST_EMAIL` / `PROTON_TEST_PASSWORD`. They run single-fork on purpose to share one login (Proton rate-limits repeated logins).
+Integration tests (`server/tests/**/*.integration.test.ts`) are `describe.skipIf`-gated on `INTEGRATION=1` and require `PROTON_TEST_EMAIL` / `PROTON_TEST_PASSWORD`, plus `PROTON_TEST_TOTP` (a current code) for an account with 2FA. They run single-fork on purpose to share one login (Proton rate-limits repeated logins).
 
 ## Required environment
 
