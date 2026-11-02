@@ -1,10 +1,15 @@
 # syntax=docker/dockerfile:1.28.0@sha256:bb22d9815c728170f72750f4e5b0d672e06176142e1d602c7e66c050100b7e5b
 
-FROM node:24.22.2-alpine@sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85 AS deps
+FROM node:26.13.0-alpine@sha256:c6ad9e9c1d80f6eb607c26b4b0a132ff7a2344fad1c78ea3baa2a7d4c8de6d94 AS deps
 WORKDIR /app
-# Corepack ships with Node and pins pnpm to the version recorded in
-# package.json's `packageManager` field. No network install of pnpm needed.
-RUN corepack enable
+# Node 25+ no longer bundles Corepack, so pnpm is installed with the bundled
+# npm. PNPM_VERSION must equal package.json's `packageManager`; Renovate's
+# `ARG PNPM_VERSION` manager moves both in the same toolchain-versions PR.
+# The pnpm package's install script links the native pnpm 12 binary for this
+# platform, so it is allowed by name (npm 11 warns that scripts outside
+# `allowScripts` will be blocked); runs before .npmrc is copied.
+ARG PNPM_VERSION=12.16.1
+RUN npm install -g --allow-scripts=pnpm pnpm@${PNPM_VERSION} && pnpm --version
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
 COPY server/package.json ./server/
 COPY pwa/package.json ./pwa/
@@ -28,7 +33,7 @@ RUN VITE_SENTRY_DSN="$SENTRY_BROWSER_DSN" \
     VITE_SENTRY_RELEASE="$GIT_SHA" \
     pnpm --filter @doc-scanner/pwa run build
 
-FROM node:24.22.2-alpine@sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85 AS runtime
+FROM node:26.13.0-alpine@sha256:c6ad9e9c1d80f6eb607c26b4b0a132ff7a2344fad1c78ea3baa2a7d4c8de6d94 AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 

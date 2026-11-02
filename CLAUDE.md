@@ -8,8 +8,8 @@ A personal-use, self-hosted PWA for scanning paper documents from a phone camera
 
 ## Toolchain (strict)
 
-- **Node 24, the exact version pinned in `.nvmrc`** (enforced by `engineStrict` — `pnpm install` **fails** on any other version). Run `fnm use` / `nvm use` first. Node 26 breaks some happy-dom tests — that's an environment mismatch, not a real failure.
-- **pnpm** at the version pinned in `packageManager` (via Corepack; Renovate bumps it, so don't hard-code a version). This is a pnpm workspace; **do not use npm**.
+- **Node 26 LTS, the exact version pinned in `.nvmrc`** (enforced by `engineStrict` — `pnpm install` **fails** on any other version). Run `fnm use` / `nvm use` first. `.nvmrc`, `engines.node` and the Dockerfile's `FROM node:` lines move together in Renovate's `toolchain-versions` PR.
+- **pnpm** at the version pinned in `packageManager` (Renovate bumps it, so don't hard-code a version). Node 25+ no longer bundles Corepack: any pnpm 12 switches itself to the pinned version, and the Dockerfile installs it with npm from `ARG PNPM_VERSION`, which Renovate keeps equal to `packageManager`. This is a pnpm workspace; **do not use npm** for dependencies.
 - Install with `pnpm install`. All pnpm settings live in **`pnpm-workspace.yaml`**, not `.npmrc` — pnpm reads only auth/registry keys from `.npmrc` and silently ignores the rest, so anything put there looks enforced while doing nothing (pnpm 12 does now reject an unknown key in `pnpm-workspace.yaml` itself, with `ERR_PNPM_UNRECOGNIZED_WORKSPACE_SETTINGS`). The hardening block sets a 7-day `minimumReleaseAge`, exact pins, strict engines, and gates package build scripts through `allowBuilds`. `minimumReleaseAgeStrict` and `trustLockfile` are load-bearing for different reasons; the comments in that file are the canonical explanation, so read them before changing anything in the block.
 
 ## Common commands
@@ -48,7 +48,7 @@ Integration tests (`server/tests/**/*.integration.test.ts`) are `describe.skipIf
 
 The server runs its TypeScript **source** under `tsx` in dev, prod, and Docker (`node --import tsx server/src/index.ts`) — there is intentionally **no compiled `dist/`** and no server `build` script. Reason: `@protontech/drive-sdk`'s peer `@protontech/crypto` ships raw `.ts` source with no compiled JS, and plain `node` refuses to type-strip `.ts` under `node_modules`. tsx's esbuild loader compiles it on demand. Consequences to remember:
 
-- The server `tsconfig.json` sets `allowImportingTsExtensions: true`; `src/types/protontech-crypto-shims.d.ts` declares `Uint8Array.toHex` (a TC39 method the peer uses; the runtime polyfill is `src/polyfills/typed-array-base64.ts`, **not** core-js — don't delete it).
+- The server `tsconfig.json` sets `allowImportingTsExtensions: true`; `src/types/protontech-crypto-shims.d.ts` declares `Uint8Array.toHex` (a TC39 method the peer uses; the runtime polyfill is `src/polyfills/typed-array-base64.ts`, **not** core-js — don't delete it). Node 26 ships these methods natively, so the polyfill skips every branch there and the vendored SRP code runs on V8's own implementation; the polyfill only matters if the runtime ever lacks them.
 - Migrations load from `src/migrations` relative to `import.meta.url`, so running source directly is required; the Docker image copies `server/src` (+ `server/node_modules` for the tsx symlink), not a build output.
 
 ## Architecture
