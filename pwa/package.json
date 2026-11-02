@@ -23,7 +23,7 @@
     "@preact/preset-vite": "2.10.6",
     "@testing-library/jest-dom": "7.0.1",
     "@testing-library/preact": "3.2.6",
-    "@types/node": "26.6.5",
+    "@types/node": "26.6.6",
     "fake-indexeddb": "6.2.7",
     "happy-dom": "21.0.4",
     "typescript": "7.0.2",
