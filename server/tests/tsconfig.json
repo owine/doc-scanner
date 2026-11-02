@@ -1,0 +1,12 @@
+{
+  // Typechecks the server's tests, which the main project excludes (rootDir is
+  // src). Vitest strips types without checking them, so without this project a
+  // type error in a test never fails CI. Run by the server's typecheck script.
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": ".."
+  },
+  "include": ["**/*", "../src/types/**/*"],
+  "exclude": []
+}

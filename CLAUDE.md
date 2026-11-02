@@ -27,7 +27,7 @@ Per-workspace (`@doc-scanner/server`, `@doc-scanner/pwa`):
 
 ```bash
 pnpm --filter @doc-scanner/server test          # vitest run (server)
-pnpm --filter @doc-scanner/server run typecheck # tsc --noEmit (main + vendor projects)
+pnpm --filter @doc-scanner/server run typecheck # tsc --noEmit (main, vendor, evals and tests projects)
 pnpm --filter @doc-scanner/pwa run typecheck
 
 # Single file / single test by name — run the vitest binary directly WITH the
