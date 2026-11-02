@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { DriveClient } from '../../src/drive/client.js';
 import { createTestDb } from '../helpers/test-db.js';
-import { getSharedSession } from '../helpers/integration-session.js';
+import { getSharedSession, keepRefreshedSession } from '../helpers/integration-session.js';
 
 const RUN = process.env.INTEGRATION === '1';
 
@@ -17,6 +17,7 @@ describe.skipIf(!RUN)('Drive upload (integration)', () => {
         user: shared.decryptedKeys,
         session: shared.session,
         protonAuth: shared.auth,
+        onSessionRefreshed: keepRefreshedSession(shared),
       });
 
       const filename = `docscanner-int-test-${Date.now()}.txt`;

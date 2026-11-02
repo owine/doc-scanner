@@ -1,5 +1,5 @@
 import { ProtonApi } from '../../src/auth/proton-api.js';
-import { ProtonAuth } from '../../src/auth/srp.js';
+import { ProtonAuth, TwoFactorRequiredError } from '../../src/auth/srp.js';
 import type { DecryptedUserKey } from '../../src/auth/keys.js';
 import type { ProtonSession } from '../../src/auth/srp.js';
 import type { MailboxSecret } from '../../src/auth/secrets/mailbox-password.js';
@@ -50,11 +50,19 @@ export async function getSharedSession(): Promise<SharedSession> {
   if (!email || !password) {
     throw new Error('Set PROTON_TEST_EMAIL and PROTON_TEST_PASSWORD');
   }
+  // Optional: a current 6-digit code, for an account with 2FA. One run logs
+  // in once (single fork), so a single code covers every integration file.
+  const totp = process.env.PROTON_TEST_TOTP || undefined;
 
   const api = new ProtonApi('https://mail.proton.me/api', 'external-drive-docscanner@0.1.0');
   const auth = new ProtonAuth(api);
 
-  c.promise = auth.login(email, password).then((result) => ({
+  c.promise = auth.login(email, password, totp).catch((err: unknown) => {
+    if (err instanceof TwoFactorRequiredError && !totp) {
+      throw new Error('The test account has 2FA: set PROTON_TEST_TOTP to a current code', { cause: err });
+    }
+    throw err;
+  }).then((result) => ({
     api,
     auth,
     session: result.session,
@@ -63,6 +71,17 @@ export async function getSharedSession(): Promise<SharedSession> {
   }));
 
   return c.promise;
+}
+
+/**
+ * DriveClient's `onSessionRefreshed` for an integration test. Proton rotates
+ * the refresh token, so a client that refreshes must write the new session
+ * back, or a later file's client would start from the spent one.
+ */
+export function keepRefreshedSession(shared: SharedSession): (session: ProtonSession) => void {
+  return (session) => {
+    shared.session = session;
+  };
 }
 
 /** Releases the cached session. Call from the last integration test if you want explicit cleanup. */
