@@ -10,7 +10,7 @@ vi.mock('../../src/vendor/proton-srp/srp.js', () => ({
   getSrp: vi.fn().mockResolvedValue({ clientEphemeral: 'ce', clientProof: 'cp', expectedServerProof: 'sp' }),
 }));
 
-const { ProtonAuth, SessionEndedError, isTransientProtonError, keySaltFingerprint } = await import('../../src/auth/srp.js');
+const { ProtonAuth, ServerProofError, SessionEndedError, isTransientProtonError, keySaltFingerprint } = await import('../../src/auth/srp.js');
 
 const PASSWORD = 'correct horse battery staple';
 /** 16 bytes in base64: 24 characters, as Proton sends a KeySalt. */
@@ -54,7 +54,7 @@ beforeAll(async () => {
 function fakeApi(overrides: Partial<Record<keyof ProtonApi, unknown>> = {}): ProtonApi {
   return {
     getAuthInfo: vi.fn().mockResolvedValue({ Version: 4, Modulus: 'm', ServerEphemeral: 'se', Salt: 's', SRPSession: 'srp' }),
-    submitAuth: vi.fn().mockResolvedValue({ UID: 'uid-1', AccessToken: 'at-1', RefreshToken: 'rt-1' }),
+    submitAuth: vi.fn().mockResolvedValue({ UID: 'uid-1', AccessToken: 'at-1', RefreshToken: 'rt-1', ServerProof: 'sp' }),
     submit2FA: vi.fn(),
     getKeySalts: vi.fn().mockResolvedValue({ KeySalts: [{ ID: 'uk1', KeySalt: KEY_SALT }] }),
     getUser: vi.fn().mockResolvedValue({ User: user }),
@@ -71,6 +71,17 @@ describe('ProtonAuth.login', () => {
     expect(result.keySaltFingerprint).toBe(createHash('sha256').update(KEY_SALT).digest('hex'));
     expect(keySaltFingerprint(KEY_SALT)).toBe(result.keySaltFingerprint);
     result.mailboxSecret.dispose();
+  });
+
+  it.each([
+    ['a wrong', { ServerProof: 'not-the-expected-proof' }],
+    ['no', { ServerProof: undefined }],
+  ])('refuses %s SRP server proof before trusting anything else in the answer', async (_label, proof) => {
+    const answer = { UID: 'uid-1', AccessToken: 'at-1', RefreshToken: 'rt-1', '2FA': { Enabled: 1 }, ...proof };
+    const api = fakeApi({ submitAuth: vi.fn().mockResolvedValue(answer) });
+    await expect(new ProtonAuth(api).login('e@x.test', PASSWORD, '123456')).rejects.toBeInstanceOf(ServerProofError);
+    expect(api.submit2FA).not.toHaveBeenCalled();
+    expect(api.getUser).not.toHaveBeenCalled();
   });
 });
 
