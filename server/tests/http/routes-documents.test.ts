@@ -604,6 +604,27 @@ describe('restore and retry', () => {
     expect(pipeline.repo.get(doc.id)).toMatchObject({ state: 'needs_review', reviewReason: 'restored after discard', error: null, attempts: 0 });
   });
 
+  it('drops an approval from before the discard, so a later retry cannot file it unreviewed', async () => {
+    const { app, cookie, pipeline } = await setup();
+    const doc = inReview(pipeline, 'ap1');
+    // Approved, then discarded while preparing had not finished (nothing prepared, no upload yet).
+    pipeline.repo.transition(doc.id, 'needs_review', 'failed', {
+      decision: { name: 'Northwind Energy Sep 2026', folder: { kind: 'existing', linkId: 'BILLS', path: '/Bills' } },
+      userEdited: true,
+      preparedMime: null,
+      error: 'boom',
+      attempts: 3,
+    });
+    expect((await post(app, cookie, doc.id, 'discard')).status).toBe(200);
+    expect((await post(app, cookie, doc.id, 'restore')).status).toBe(200);
+    expect(pipeline.repo.get(doc.id)).toMatchObject({ decision: null, userEdited: false, autoFiled: false });
+    await pipeline.worker.wake(); // let the drain the restore started finish
+    // Should it later fail for good, Retry prepares again and goes to review, not to filing.
+    pipeline.repo.transition(doc.id, pipeline.repo.get(doc.id)!.state, 'failed', { error: 'boom', attempts: 3 }, { ignorePendingDiscard: true });
+    const retried = (await (await post(app, cookie, doc.id, 'retry')).json()) as { state: string };
+    expect(retried.state).toBe('preparing');
+  });
+
   it('prepares a document restored after a discard won during preparing, then sends it to review', async () => {
     const { app, cookie, pipeline } = await setup();
     const doc = pipeline.repo.insert({ source: 'picker', originalName: 'a.pdf', mime: 'application/pdf', size: 9, sha256: 'p1', sourceContext: null });
@@ -640,6 +661,17 @@ describe('restore and retry', () => {
     expect((await post(app, cookie, doc.id, 'discard')).status).toBe(200);
     expect((await post(app, cookie, doc.id, 'restore')).status).toBe(200);
     expect(pipeline.repo.get(doc.id)).toMatchObject({ state: 'needs_review', preparedMime: null, filingTarget: target });
+  });
+
+  it('keeps the approval of a document that may already be in Drive, so its filing finishes as decided', async () => {
+    const { app, cookie, pipeline } = await setup();
+    const doc = inReview(pipeline, 'ap2');
+    const decision = { name: 'Northwind Energy Sep 2026', folder: { kind: 'existing' as const, linkId: 'BILLS', path: '/Bills' } };
+    const target = { folderLinkId: 'BILLS', name: 'Northwind Energy Sep 2026.pdf' };
+    pipeline.repo.transition(doc.id, 'needs_review', 'failed', { decision, filingTarget: target, error: 'boom', attempts: 3 });
+    expect((await post(app, cookie, doc.id, 'discard')).status).toBe(200);
+    expect((await post(app, cookie, doc.id, 'restore')).status).toBe(200);
+    expect(pipeline.repo.get(doc.id)).toMatchObject({ decision, filingTarget: target });
   });
 
   it('restores an unanalysed document without a review reason', async () => {

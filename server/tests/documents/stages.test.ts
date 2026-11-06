@@ -24,6 +24,21 @@ describe('analyzeStage', () => {
     expect(h.analyze).not.toHaveBeenCalled();
   });
 
+  it('forgets an approval of an earlier analysis, unless the document may already be in Drive', async () => {
+    h = makeHarness();
+    const decision = { name: 'Old name', folder: { kind: 'existing' as const, linkId: 'BILLS', path: '/Bills' } };
+    const fresh = h.add();
+    h.repo.transition(fresh.id, 'received', 'received', { decision, userEdited: true, autoFiled: true });
+    await analyzeStage(h.repo.get(fresh.id)!, h.ctx);
+    expect(h.repo.get(fresh.id)).toMatchObject({ state: 'preparing', decision: null, userEdited: false, autoFiled: false });
+
+    const target = { folderLinkId: 'BILLS', name: 'Old name.txt' };
+    const inDrive = h.add();
+    h.repo.transition(inDrive.id, 'received', 'received', { decision, filingTarget: target });
+    await analyzeStage(h.repo.get(inDrive.id)!, h.ctx);
+    expect(h.repo.get(inDrive.id)).toMatchObject({ state: 'preparing', decision, filingTarget: target });
+  });
+
   it('stores the analysis and moves on to preparing', async () => {
     h = makeHarness();
     const doc = h.add();

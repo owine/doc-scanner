@@ -410,6 +410,11 @@ export function documentRoutes(deps: { store: SessionStore; pipeline: Pipeline; 
     const moved = repo.transition(doc.id, 'discarded', to, {
       discardedAt: null,
       combinedInto: null,
+      // A restored document is reviewed afresh, so an approval from before the
+      // discard goes: kept, a later Retry would file it unreviewed (restartState
+      // sends a row with a decision straight to filing). Not one that may be in
+      // Drive: its filing has to finish with what was decided.
+      ...(doc.filingTarget ? {} : { decision: null, autoFiled: false, userEdited: false }),
       // decideStage keeps a recorded reason, so a restored document is always reviewed.
       reviewReason: doc.analysis ? 'restored after discard' : null,
       error: null,
