@@ -63,6 +63,15 @@ const IMG2PDF_NATIVE: Record<string, readonly (readonly number[])[]> = {
   'image/bmp': [[0x42, 0x4d]],
 };
 
+/**
+ * The most pixels imageToPdf decodes: more than 600 dpi on Letter or A4. That
+ * re-encode holds the whole image in this process (no resize shrinks it on
+ * load), so its memory follows the pixel count the header claims, not the file
+ * size: a sub-megabyte PNG can declare enough to have the server killed. sharp
+ * checks the limit against the header before it decodes anything.
+ */
+export const MAX_DOCUMENT_PIXELS = 40_000_000;
+
 /** The formats sharp may decode here; anything else (SVG above all) is refused. */
 export const SHARP_FORMATS = new Set(['jpeg', 'png', 'webp', 'tiff', 'gif', 'heif']);
 
@@ -193,7 +202,17 @@ export function createPrepareTools(o: { atStartup?: boolean } = {}): PrepareTool
         throw new ToolFailedError('not the image type it was declared as');
       }
       // JPEG has no transparency: put it on white (paper), not sharp's default black.
-      const jpeg = await sharp(image).rotate().flatten({ background: '#ffffff' }).jpeg({ quality: 90 }).toBuffer();
+      let jpeg: Buffer;
+      try {
+        jpeg = await sharp(image, { limitInputPixels: MAX_DOCUMENT_PIXELS })
+          .rotate()
+          .flatten({ background: '#ffffff' })
+          .jpeg({ quality: 90 })
+          .toBuffer();
+      } catch {
+        // Fixed text: sharp's message is not ours to report.
+        throw new ToolFailedError('image too large or unreadable');
+      }
       return img2pdf(new Uint8Array(jpeg), 'in.jpeg');
     },
 
