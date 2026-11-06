@@ -58,6 +58,17 @@ export function createApp(deps: AppDeps): Hono {
     logger.error({ errName: errorName(err), method: c.req.method, route: c.req.routePath }, 'unhandled route error');
     return c.json({ error: 'internal' }, 500);
   });
+  // Nothing may frame the app, on any response (API, static, fallback, error):
+  // a page on another host, even a sibling subdomain the proxy also serves,
+  // could otherwise lay the app under its own content and have Approve or
+  // Sign out clicked. Those clicks are same-origin requests, so the header-mode
+  // Sec-Fetch-Site check can't tell them apart. A frame-ancestors-only policy
+  // restricts nothing else; X-Frame-Options covers browsers without CSP 2.
+  app.use('*', async (c, next) => {
+    await next();
+    c.res.headers.set('Content-Security-Policy', "frame-ancestors 'none'");
+    c.res.headers.set('X-Frame-Options', 'DENY');
+  });
   app.get('/api/health', (c) => c.json({ ok: true }));
   app.route('/api/auth', authRoutes({
     store,
