@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { PDFDocument, PDFName, PDFNumber, PDFBool, PDFString, type PDFObject } from '@cantoo/pdf-lib';
 import sharp from 'sharp';
 import { combineParts } from '../../src/documents/combine.js';
+import { sharedPageTreePdf } from '../helpers/pdf-fixtures.js';
 
 const MAX = 50 * 1024 * 1024;
 
@@ -57,6 +58,11 @@ describe('combineParts', () => {
     expect(await combineParts([part('a', await pdf([100])), part('bad', corrupt)], MAX)).toEqual({ kind: 'refused', documentId: 'bad', reason: 'unreadable' });
     const noHeader = new TextEncoder().encode('hello');
     expect(await combineParts([part('x', noHeader), part('a', await pdf([100]))], MAX)).toEqual({ kind: 'refused', documentId: 'x', reason: 'unreadable' });
+  });
+
+  it('refuses a PDF whose page tree reuses its nodes, without walking it', async () => {
+    const out = await combineParts([part('a', await pdf([100])), part('bomb', sharedPageTreePdf(16))], MAX);
+    expect(out).toEqual({ kind: 'refused', documentId: 'bomb', reason: 'unreadable' });
   });
 
   it('refuses a type that has no pages', async () => {

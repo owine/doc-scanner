@@ -1,5 +1,6 @@
 import { PDFBool, PDFDict, PDFDocument, PDFName, PDFNumber } from '@cantoo/pdf-lib';
 import sharp, { type OutputInfo } from 'sharp';
+import { pageTreeIsSane } from '../analyze/pdf.js';
 import { pdfFromHeader, SHARP_FORMATS } from '../prepare/tools.js';
 
 /** A photo's page: its long edge is A4's height, in points. */
@@ -30,9 +31,10 @@ export type CombineResult =
  * the form's placeholder page.
  *
  * Accepted risk: pdf-lib parses in-process with no memory or time limit, as the
- * analyzer already does for every upload; acceptable for a single-user app,
- * revisit (a worker thread with resourceLimits) before untrusted senders such
- * as email-in.
+ * analyzer already does for every upload (a page tree that reuses its nodes,
+ * the known way to make a small file cost exponential work, is refused first);
+ * acceptable for a single-user app, revisit (a worker thread with
+ * resourceLimits) before untrusted senders such as email-in.
  */
 export async function combineParts(parts: readonly CombinePart[], maxBytes: number): Promise<CombineResult> {
   const out = await PDFDocument.create();
@@ -70,6 +72,8 @@ async function addPdf(out: PDFDocument, bytes: Uint8Array): Promise<CombineRefus
     return 'unreadable';
   }
   if (protection) return protection;
+  // A shared or cyclic page tree would make copying walk it without end.
+  if (!pageTreeIsSane(src)) return 'unreadable';
   try {
     const pages = await out.copyPages(src, src.getPageIndices());
     for (const page of pages) out.addPage(page);
