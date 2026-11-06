@@ -11,7 +11,7 @@ vi.mock('../../src/prepare/run.js', async (importOriginal) => ({
 
 import { runTool } from '../../src/prepare/run.js';
 import { ToolMissingError, ToolTimeoutError } from '../../src/prepare/run.js';
-import { createPrepareTools, sweepStaleTempDirs, TEMP_PREFIX, ToolFailedError } from '../../src/prepare/tools.js';
+import { createPrepareTools, MAX_DOCUMENT_PIXELS, sweepStaleTempDirs, TEMP_PREFIX, ToolFailedError } from '../../src/prepare/tools.js';
 
 const run = vi.mocked(runTool);
 interface Call {
@@ -162,6 +162,18 @@ describe('PrepareTools (fake binaries)', () => {
       const { data } = await sharp(jpeg).raw().toBuffer({ resolveWithObject: true });
       expect([...data.subarray(0, 3)]).toEqual([255, 255, 255]);
     }
+  });
+
+  it('refuses to decode a photo of more pixels than a document needs, before img2pdf runs', async () => {
+    fakeTool({ 'out.pdf': '%PDF-' });
+    // A small file that claims more pixels than the limit: the memory would follow the pixels.
+    const side = Math.ceil(Math.sqrt(MAX_DOCUMENT_PIXELS)) + 1;
+    const big = await sharp({ create: { width: side, height: side, channels: 3, background: '#ffffff' } }).webp().toBuffer();
+    expect(big.byteLength).toBeLessThan(1024 * 1024);
+    await expect(createPrepareTools().imageToPdf(new Uint8Array(big), 'image/webp')).rejects.toThrow(
+      new ToolFailedError('image too large or unreadable'),
+    );
+    expect(calls).toHaveLength(0);
   });
 
   it('does not retry what sharp cannot read, or a missing or timed-out img2pdf', async () => {
