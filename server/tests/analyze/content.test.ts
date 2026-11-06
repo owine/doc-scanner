@@ -2,7 +2,8 @@ import { describe, it, expect, vi } from 'vitest';
 import { PDFDocument } from '@cantoo/pdf-lib';
 import sharp from 'sharp';
 import { buildDocumentContent, MAX_FILE_BYTES } from '../../src/analyze/content.js';
-import { preparePdf, MAX_ANALYZED_PAGES } from '../../src/analyze/pdf.js';
+import { preparePdf, pageTreeIsSane, MAX_ANALYZED_PAGES } from '../../src/analyze/pdf.js';
+import { sharedPageTreePdf } from '../helpers/pdf-fixtures.js';
 import { normaliseImage } from '../../src/analyze/image.js';
 
 async function pdfWithPages(n: number, opts: { encrypt?: boolean } = {}): Promise<Uint8Array> {
@@ -57,6 +58,29 @@ describe('preparePdf', () => {
 
   it('reports a corrupt PDF instead of throwing', async () => {
     expect(await preparePdf(new TextEncoder().encode('not a pdf'))).toEqual({ kind: 'unreadable', reason: 'corrupt' });
+  });
+
+  it('reports a page tree that reuses its nodes as corrupt, before anything walks it', async () => {
+    const bytes = sharedPageTreePdf(16);
+    // Unguarded, pdf-lib sees 2^16 pages in a file this small; each level more doubles it.
+    expect(bytes.byteLength).toBeLessThan(2048);
+    expect((await PDFDocument.load(bytes, { updateMetadata: false })).getPageCount()).toBe(2 ** 16);
+    const spy = vi.spyOn(PDFDocument.prototype, 'getPageCount');
+    expect(await preparePdf(sharedPageTreePdf(16))).toEqual({ kind: 'unreadable', reason: 'corrupt' });
+    expect(spy).not.toHaveBeenCalled();
+  });
+});
+
+describe('pageTreeIsSane', () => {
+  const load = (bytes: Uint8Array) => PDFDocument.load(bytes, { updateMetadata: false });
+
+  it('accepts an ordinary page tree', async () => {
+    expect(pageTreeIsSane(await load(await pdfWithPages(30)))).toBe(true);
+  });
+
+  it('refuses a node listed twice, and a tree that leads back to its root', async () => {
+    expect(pageTreeIsSane(await load(sharedPageTreePdf(1)))).toBe(false);
+    expect(pageTreeIsSane(await load(sharedPageTreePdf(3, { cycle: true })))).toBe(false);
   });
 });
 
