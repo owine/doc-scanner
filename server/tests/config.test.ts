@@ -83,6 +83,17 @@ describe('loadConfig', () => {
     );
   });
 
+  it('requires a proxy secret in header mode, unless explicitly allowed without one', () => {
+    expect(() => loadConfig({ ...base, AUTH_PROXY_USER: 'owine' })).toThrow(/AUTH_PROXY_SECRET: required with AUTH_PROXY_USER/);
+    expect(() => loadConfig({ ...base, AUTH_PROXY_USER: 'owine', AUTH_PROXY_SECRET: '' })).toThrow(/AUTH_PROXY_SECRET: required/);
+    expect(() => loadConfig({ ...base, AUTH_PROXY_USER: 'owine', AUTH_PROXY_ALLOW_NO_SECRET: 'false' })).toThrow(/AUTH_PROXY_SECRET: required/);
+    const cfg = loadConfig({ ...base, AUTH_PROXY_USER: 'owine', AUTH_PROXY_ALLOW_NO_SECRET: 'true' });
+    expect(cfg).toMatchObject({ AUTH_PROXY_USER: 'owine', AUTH_PROXY_ALLOW_NO_SECRET: true });
+    expect(cfg.AUTH_PROXY_SECRET).toBeUndefined();
+    // Cookie mode needs neither.
+    expect(loadConfig(base).AUTH_PROXY_ALLOW_NO_SECRET).toBe(false);
+  });
+
   it('rejects a proxy secret without a proxy user, which would do nothing', () => {
     expect(() => loadConfig({ ...base, AUTH_PROXY_SECRET: 's'.repeat(32) })).toThrow(/AUTH_PROXY_SECRET: needs AUTH_PROXY_USER/);
   });

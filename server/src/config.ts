@@ -59,12 +59,25 @@ const ConfigSchema = z.object({
   // Header mode (passkey-unlock spec §1): the reverse proxy (Authelia) says who
   // the user is, through Remote-User. Unset: the app's own cookie sign-in.
   AUTH_PROXY_USER: z.preprocess(blankToUndefined, z.string().refine(noEdgeSpace, EDGE_SPACE_MESSAGE).optional()),
-  // For a published port: the proxy also sends this, so nothing else can claim Remote-User.
+  // The proxy also sends this, so nothing else that reaches the port can claim Remote-User.
   AUTH_PROXY_SECRET: z.preprocess(blankToUndefined, z.string().refine(noEdgeSpace, EDGE_SPACE_MESSAGE).pipe(z.string().min(32, 'must be at least 32 characters')).optional()),
+  // Header mode without a secret, for a port only the proxy can reach. Explicit,
+  // because a forgotten secret on a published port lets anything sign in by header.
+  AUTH_PROXY_ALLOW_NO_SECRET: z
+    .string()
+    .default('false')
+    .transform((v) => v === 'true' || v === '1'),
 }).superRefine((c, ctx) => {
   // Without a proxy user the secret would silently do nothing.
   if (c.AUTH_PROXY_SECRET !== undefined && c.AUTH_PROXY_USER === undefined) {
     ctx.addIssue({ code: 'custom', path: ['AUTH_PROXY_SECRET'], message: 'needs AUTH_PROXY_USER' });
+  }
+  if (c.AUTH_PROXY_USER !== undefined && c.AUTH_PROXY_SECRET === undefined && !c.AUTH_PROXY_ALLOW_NO_SECRET) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['AUTH_PROXY_SECRET'],
+      message: 'required with AUTH_PROXY_USER (or set AUTH_PROXY_ALLOW_NO_SECRET=true when only the proxy can reach the port)',
+    });
   }
 });
 
