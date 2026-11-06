@@ -16,6 +16,8 @@ export interface AuthResponse {
   UserID: string;
   EventID: string;
   '2FA'?: { Enabled: number };
+  /** Login only: Proton's SRP proof that it holds the password verifier (base64). */
+  ServerProof?: string;
 }
 
 export interface ProtonUserKey {

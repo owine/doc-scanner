@@ -22,7 +22,7 @@ const AUTH_INFO = { Version: 4, Modulus: 'm', ServerEphemeral: 'se', Salt: 's', 
 function fakeApi(overrides: Partial<Record<keyof ProtonApi, unknown>> = {}): ProtonApi {
   return {
     getAuthInfo: vi.fn().mockResolvedValue(AUTH_INFO),
-    submitAuth: vi.fn().mockResolvedValue({ UID: 'uid-1', AccessToken: accessToken, RefreshToken: refreshToken }),
+    submitAuth: vi.fn().mockResolvedValue({ UID: 'uid-1', AccessToken: accessToken, RefreshToken: refreshToken, ServerProof: 'sp' }),
     submit2FA: vi.fn().mockResolvedValue({ Code: 1000 }),
     getKeySalts: vi.fn().mockResolvedValue({ KeySalts: [] }),
     getUser: vi.fn().mockResolvedValue({ User: { Keys: [] } }),
@@ -52,7 +52,7 @@ describe('login failure reporting', () => {
 
   it('does not report a missing TOTP code', async () => {
     const api = fakeApi({
-      submitAuth: vi.fn().mockResolvedValue({ UID: 'u', AccessToken: accessToken, RefreshToken: refreshToken, '2FA': { Enabled: 1 } }),
+      submitAuth: vi.fn().mockResolvedValue({ UID: 'u', AccessToken: accessToken, RefreshToken: refreshToken, ServerProof: 'sp', '2FA': { Enabled: 1 } }),
     });
 
     await expect(new ProtonAuth(api).login('me@example.test', typedSecret)).rejects.toBeInstanceOf(TwoFactorRequiredError);
@@ -63,7 +63,7 @@ describe('login failure reporting', () => {
 
   it('does not report a rejected TOTP code', async () => {
     const api = fakeApi({
-      submitAuth: vi.fn().mockResolvedValue({ UID: 'u', AccessToken: accessToken, RefreshToken: refreshToken, '2FA': { Enabled: 1 } }),
+      submitAuth: vi.fn().mockResolvedValue({ UID: 'u', AccessToken: accessToken, RefreshToken: refreshToken, ServerProof: 'sp', '2FA': { Enabled: 1 } }),
       submit2FA: vi.fn().mockRejectedValue(new ProtonApiError('Incorrect code', 401)),
     });
 

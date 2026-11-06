@@ -87,6 +87,18 @@ export function isExpectedLoginFailure(error: unknown, stage: LoginStage): boole
   return stage === '2fa' && (error.status === 401 || error.status === 422);
 }
 
+/**
+ * The login answer's ServerProof is not the one the SRP exchange expects: the
+ * other end does not hold this account's password verifier, so it is not
+ * Proton (an interception, a server answering in Proton's place).
+ */
+export class ServerProofError extends Error {
+  constructor() {
+    super('Proton login answer has the wrong SRP server proof');
+    this.name = 'ServerProofError';
+  }
+}
+
 export class AuthVersionError extends Error {
   constructor(version: number) {
     super(`Unsupported Proton auth version ${version} (expected ${AUTH_VERSION})`);
@@ -138,6 +150,10 @@ export class ProtonAuth {
       ClientProof: proof.clientProof,
       SRPSession: info.SRPSession,
     });
+    // SRP is mutual: the client proof shows Proton we know the password, and
+    // this shows us Proton knows the verifier. Checked before anything else
+    // trusts the answer (2FA, tokens, keys), as Proton's own clients do.
+    if (auth.ServerProof !== proof.expectedServerProof) throw new ServerProofError();
 
     if (auth['2FA']?.Enabled) {
       if (!totp) throw new TwoFactorRequiredError(auth);
