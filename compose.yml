@@ -43,13 +43,16 @@ services:
       # session expires, the app says "Your sign-in has expired." with Reload.
       # Empty: the app's own sign-in.
       AUTH_PROXY_USER: ${AUTH_PROXY_USER:-}
-      # Needed while `ports` publishes the app (even on 127.0.0.1): anything that
-      # reaches the port could send a forged Remote-User. At least 32 characters;
-      # the proxy sends it as X-Doc-Scanner-Proxy-Secret on every request
-      # (Traefik: a headers middleware's customRequestHeaders; nginx:
-      # proxy_set_header). Not needed when the port is unpublished and only the
-      # proxy shares a network.
+      # Required with AUTH_PROXY_USER: while `ports` publishes the app (even on
+      # 127.0.0.1), anything that reaches the port could send a forged
+      # Remote-User. At least 32 characters; the proxy sends it as
+      # X-Doc-Scanner-Proxy-Secret on every request (Traefik: a headers
+      # middleware's customRequestHeaders; nginx: proxy_set_header).
       AUTH_PROXY_SECRET: ${AUTH_PROXY_SECRET:-}
+      # Header mode without the secret, only when the port is unpublished and
+      # only the proxy shares the app's network. The app refuses to start
+      # otherwise, so a forgotten secret can't go unnoticed.
+      AUTH_PROXY_ALLOW_NO_SECRET: ${AUTH_PROXY_ALLOW_NO_SECRET:-false}
       PWA_DIST_PATH: /app/pwa/dist
       # Optional error reporting (GlitchTip); empty disables it.
       SENTRY_DSN: ${SENTRY_DSN:-}
