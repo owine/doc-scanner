@@ -1,6 +1,7 @@
 import { logger } from '../logger.js';
 import { errorName } from '../observability/error-name.js';
 import type { DocumentStage } from '../observability/report.js';
+import { MAX_ATTEMPTS, StageDidNotFinishError } from './attempts.js';
 import type { PipelineDeps, StageContext } from './deps.js';
 import { InboxBlobMissingError } from './inbox-store.js';
 import { analyzeStage } from './stages/analyze.js';
@@ -10,7 +11,7 @@ import { prepareStage } from './stages/prepare.js';
 import type { DocumentRow, DocumentState } from './types.js';
 import type { LiveSession } from '../auth/live-session.js';
 
-export const MAX_ATTEMPTS = 3;
+export { MAX_ATTEMPTS };
 const BACKOFF_MS = [30_000, 2 * 60_000];
 const POLL_MS = 60_000;
 const FOLDER_REFRESH_MS = 6 * 3600_000;
@@ -185,7 +186,11 @@ export class DocumentWorker {
 
   private recordFailure(doc: DocumentRow, err: unknown): void {
     // A missing inbox blob can never come back: fail now instead of retrying.
-    const attempts = err instanceof InboxBlobMissingError ? MAX_ATTEMPTS : doc.attempts + 1;
+    // A stage that never finished has used every attempt already. Otherwise the
+    // stage counted this attempt when it began (beginAttempt), from the same
+    // `doc.attempts`, so this writes that count again rather than adding one more.
+    const attempts =
+      err instanceof InboxBlobMissingError || err instanceof StageDidNotFinishError ? MAX_ATTEMPTS : doc.attempts + 1;
     const error = err instanceof Error ? err.message : String(err);
     // The stage may have moved the row (received → analyzing) before throwing.
     const current = this.d.repo.get(doc.id);

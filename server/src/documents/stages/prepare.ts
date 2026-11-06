@@ -2,6 +2,7 @@ import { logger } from '../../logger.js';
 import { errorName } from '../../observability/error-name.js';
 import { ToolMissingError, ToolTimeoutError } from '../../prepare/run.js';
 import { ToolFailedError } from '../../prepare/tools.js';
+import { beginAttempt } from '../attempts.js';
 import type { StageContext } from '../deps.js';
 import type { DocumentRow } from '../types.js';
 
@@ -47,8 +48,10 @@ export async function prepareStage(doc: DocumentRow, ctx: StageContext): Promise
   // Forget the last run's result before this one writes any blob: the row
   // then describes a prepared blob or thumbnail only once the run that made
   // it has finished. A run that dies part-way (crash, then discard and
-  // restore) leaves blobs that nothing will file or serve.
-  if (!ctx.repo.transition(doc.id, 'preparing', 'preparing', { preparedMime: null, prepareNote: null, hasThumbnail: false })) {
+  // restore) leaves blobs that nothing will file or serve. The attempt is
+  // counted with it, before sharp or a tool reads the file: one that kills the
+  // process still uses it up.
+  if (!beginAttempt(doc, ctx, 'preparing', { preparedMime: null, prepareNote: null, hasThumbnail: false })) {
     ctx.repo.applyRequestedDiscard(doc.id);
     return;
   }

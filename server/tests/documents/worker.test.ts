@@ -127,6 +127,79 @@ describe('DocumentWorker', () => {
     expect(h.repo.get(doc.id)?.state).toBe('filed');
   });
 
+  describe('a stage the server never finishes (killed for memory, or hung until a restart)', () => {
+    /** Runs one worker until the stage under test has started `n` times, then abandons it, as a dead process would. */
+    async function crashAt(n: number, started: () => number) {
+      void new DocumentWorker(h.ctx).wake();
+      await vi.waitFor(() => expect(started()).toBe(n));
+    }
+
+    it('counts each run as an attempt, then fails the document and lets the queue move on', async () => {
+      h = makeHarness({ settings: { autoFileEnabled: false } });
+      let started = 0;
+      h.analyze.mockImplementation(() => {
+        started++;
+        return new Promise(() => {});
+      });
+      const bomb = h.add();
+      for (let run = 1; run <= MAX_ATTEMPTS; run++) {
+        await crashAt(run, () => started);
+        expect(h.repo.get(bomb.id)).toMatchObject({ state: 'analyzing', attempts: run });
+      }
+      h.analyze.mockResolvedValue(okOutcome());
+      const next = h.add();
+      await new DocumentWorker(h.ctx).wake();
+      expect(started).toBe(MAX_ATTEMPTS);
+      expect(h.repo.get(bomb.id)).toMatchObject({ state: 'failed', attempts: MAX_ATTEMPTS, error: expect.stringContaining('did not finish') });
+      expect(h.report).toHaveBeenCalledOnce();
+      expect(h.report.mock.calls[0]![1]).toBe('analyze');
+      expect(h.repo.get(next.id)?.state).toBe('needs_review');
+    });
+
+    it('counts preparation runs the same way', async () => {
+      h = makeHarness({ settings: { autoFileEnabled: false } });
+      let started = 0;
+      h.prepare.ocrPdf.mockImplementation(() => {
+        started++;
+        return new Promise(() => {});
+      });
+      const bomb = h.add(new TextEncoder().encode('%PDF- scan'), 'application/pdf');
+      for (let run = 1; run <= MAX_ATTEMPTS; run++) {
+        await crashAt(run, () => started);
+        expect(h.repo.get(bomb.id)).toMatchObject({ state: 'preparing', attempts: run });
+      }
+      await new DocumentWorker(h.ctx).wake();
+      expect(started).toBe(MAX_ATTEMPTS);
+      expect(h.repo.get(bomb.id)).toMatchObject({ state: 'failed', attempts: MAX_ATTEMPTS });
+      expect(h.report.mock.calls[0]![1]).toBe('prepare');
+    });
+
+    it('still counts a caught failure once, and a success clears the count', async () => {
+      h = makeHarness({ settings: { autoFileEnabled: false } });
+      h.analyze.mockRejectedValueOnce(new Error('overloaded'));
+      const doc = h.add();
+      const w = new DocumentWorker(h.ctx);
+      await w.wake();
+      expect(h.repo.get(doc.id)).toMatchObject({ state: 'analyzing', attempts: 1 });
+      h.advance(10 * 60_000);
+      await w.wake();
+      expect(h.repo.get(doc.id)).toMatchObject({ state: 'needs_review', attempts: 0 });
+    });
+
+    it('uses up no attempt while it waits for a folder tree', async () => {
+      h = makeHarness({ withTree: false });
+      h.setLive(undefined); // nobody signed in, so nothing can walk the tree
+      const doc = h.add();
+      const w = new DocumentWorker(h.ctx);
+      for (let i = 0; i < MAX_ATTEMPTS + 1; i++) {
+        await w.wake();
+        h.advance(60 * 60_000);
+      }
+      expect(h.repo.get(doc.id)).toMatchObject({ state: 'received', attempts: 0 });
+      expect(h.analyze).not.toHaveBeenCalled();
+    });
+  });
+
   it('fails a document at once when its inbox blob is missing', async () => {
     h = makeHarness();
     const doc = h.add();

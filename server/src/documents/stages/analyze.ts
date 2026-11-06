@@ -1,6 +1,7 @@
 import type { FolderChoice } from '../../analyze/types.js';
 import { toFolderContexts } from '../../drive/folder-tree.js';
 import { logger } from '../../logger.js';
+import { beginAttempt } from '../attempts.js';
 import type { StageContext } from '../deps.js';
 import { currentAnchorFolder } from '../anchor.js';
 import { folderPath } from '../folders.js';
@@ -31,7 +32,10 @@ export async function analyzeStage(doc: DocumentRow, ctx: StageContext): Promise
     ctx.repo.transition(doc.id, doc.state, 'received', { nextAttemptAt: new Date(ctx.now().getTime() + NO_TREE_RETRY_MS) });
     return;
   }
-  if (doc.state === 'received' && !ctx.repo.transition(doc.id, 'received', 'analyzing')) {
+  // Counted now, before the analyzer parses the document: a file that kills
+  // the process still uses up an attempt (received → analyzing, or a re-run
+  // of an analysis a crash left in 'analyzing').
+  if (!beginAttempt(doc, ctx, 'analyzing')) {
     ctx.repo.applyRequestedDiscard(doc.id);
     return;
   }
