@@ -35,13 +35,19 @@ beforeAll(async () => {
     encryptionKeys: unlocked.toPublic(),
     format: 'armored',
   })) as string;
+  const Signature = (await openpgp.sign({
+    message: await openpgp.createMessage({ text: tokenPassphrase }),
+    signingKeys: unlocked,
+    detached: true,
+    format: 'armored',
+  })) as string;
   user = {
     ID: 'user-123', Name: 'e', Currency: 'USD', Email: 'e@x.test', DisplayName: 'E',
     Keys: [{ ID: 'uk1', Version: 4, Primary: 1, Active: 1, Flags: 3, PrivateKey: userKey, Fingerprint: 'f1' }],
   };
   address = {
     ID: 'addr-1', Email: 'e@x.test', Status: 1, Type: 1, Order: 1, Receive: 1, Send: 1,
-    Keys: [{ ID: 'ak1', Version: 3, Primary: 1, Active: 1, Flags: 3, PrivateKey: addressKey, Token, Signature: null, Fingerprint: 'f2' }],
+    Keys: [{ ID: 'ak1', Version: 3, Primary: 1, Active: 1, Flags: 3, PrivateKey: addressKey, Token, Signature, Fingerprint: 'f2' }],
   };
 });
 
