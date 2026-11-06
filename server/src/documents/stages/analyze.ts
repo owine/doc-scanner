@@ -75,6 +75,10 @@ export async function analyzeStage(doc: DocumentRow, ctx: StageContext): Promise
     'document analysed',
   );
 
+  // A new analysis needs a new review: any approval of an earlier one goes,
+  // so a later Retry can't file it unreviewed. Not for a row that may already
+  // be in Drive, whose filing must finish with what was decided.
+  const forgetApproval = doc.filingTarget ? {} : { decision: null, autoFiled: false, userEdited: false };
   let moved: boolean;
   if (outcome.status === 'ok') {
     const { textSnippet: _unused, ...analysis } = outcome.analysis;
@@ -85,6 +89,7 @@ export async function analyzeStage(doc: DocumentRow, ctx: StageContext): Promise
       reviewReason: reanalysisReason(doc, anchorFolder),
       attempts: 0,
       error: null,
+      ...forgetApproval,
     });
   } else {
     // Still prepared, so the review card gets a thumbnail and the file its
@@ -94,6 +99,7 @@ export async function analyzeStage(doc: DocumentRow, ctx: StageContext): Promise
       reviewReason: `analysis ${outcome.status}: ${outcome.detail}`,
       attempts: 0,
       error: null,
+      ...forgetApproval,
     });
   }
   if (!moved) ctx.repo.applyRequestedDiscard(doc.id);
