@@ -185,12 +185,21 @@ async function decryptAddressKey(args: DecryptAddressKeyArgs): Promise<openpgp.P
   const armored = await openpgp.readPrivateKey({ armoredKey });
 
   // Modern (migrated) address key: Token holds the passphrase encrypted to
-  // the user key. Decrypt it to retrieve the passphrase.
+  // the user key, and Signature is the user key's detached signature over it.
+  // Anyone can encrypt to our public user key, so only the signature shows
+  // the account itself made this key: without it, whoever controls the API
+  // responses could slip in a key of their own (as Proton's clients check).
   if (addressKey.Token) {
+    if (!addressKey.Signature) throw new Error('Address key token is unsigned');
     const message = await openpgp.readMessage({ armoredMessage: addressKey.Token });
+    const signature = await openpgp.readSignature({ armoredSignature: addressKey.Signature });
     const { data } = await openpgp.decrypt({
       message,
+      signature,
       decryptionKeys: userKeys,
+      verificationKeys: userKeys.map((k) => k.toPublic()),
+      // Throws unless one of the account's own user keys made the signature.
+      expectSigned: true,
       format: 'utf8',
     });
     const tokenPassphrase = typeof data === 'string' ? data : new TextDecoder().decode(data as Uint8Array);
