@@ -93,6 +93,24 @@ describe('sessionMiddleware in header mode', () => {
     }
     expect((await probe(app, 'GET', { ...user, 'Sec-Fetch-Site': 'cross-site' })).body.auth?.sid).toBe('proxy');
   });
+
+  it('falls back to Origin when a browser sends no Sec-Fetch-Site', async () => {
+    const { app } = setup(HEADER);
+    const user = { 'Remote-User': 'owine' };
+    // app.request addresses http://localhost.
+    for (const origin of ['https://evil.example', 'http://localhost.evil.example', 'http://localhost:8080', 'null', 'not a url']) {
+      const res = await probe(app, 'POST', { ...user, Origin: origin });
+      expect([origin, res.status]).toEqual([origin, 403]);
+    }
+    expect((await probe(app, 'POST', { ...user, Origin: 'http://localhost' })).body.auth?.sid).toBe('proxy');
+    // A proxy that rewrites Host still passes the host the browser used.
+    const proxied = { ...user, Origin: 'https://docs.example.test', 'X-Forwarded-Host': 'docs.example.test' };
+    expect((await probe(app, 'DELETE', proxied)).body.auth?.sid).toBe('proxy');
+    // Sec-Fetch-Site, when present, decides: Origin can't overrule it.
+    expect((await probe(app, 'POST', { ...user, 'Sec-Fetch-Site': 'cross-site', Origin: 'http://localhost' })).status).toBe(403);
+    // Reads stay allowed from anywhere, as before.
+    expect((await probe(app, 'GET', { ...user, Origin: 'https://evil.example' })).body.auth?.sid).toBe('proxy');
+  });
 });
 
 describe('header mode rejection warning', () => {

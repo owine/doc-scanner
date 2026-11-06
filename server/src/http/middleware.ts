@@ -47,6 +47,27 @@ type Env = { Variables: { auth?: AuthContext } };
 /** Methods that change state: header mode refuses them from another site. */
 const UNSAFE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
+/**
+ * Whether a browser sent this request from another origin. Sec-Fetch-Site says
+ * so directly, and every current browser sends it. A browser too old for it
+ * (Safari before 16.4) still sends Origin on a cross-origin POST, so that is
+ * checked instead, against the host the request was sent to: the Host header
+ * (the URL here) or, behind a proxy that rewrites Host, X-Forwarded-Host. A
+ * page can't set either, so they can't be forged to match. Neither header:
+ * not a browser (curl), so not a browser being tricked.
+ */
+function fromAnotherOrigin(site: string | undefined, origin: string | undefined, requestHost: string, forwardedHost: string | undefined): boolean {
+  if (site !== undefined) return site !== 'same-origin';
+  if (origin === undefined) return false;
+  let originHost: string;
+  try {
+    originHost = new URL(origin).host; // 'null' (a sandboxed frame, a file) throws
+  } catch {
+    return true;
+  }
+  return originHost !== requestHost && originHost !== forwardedHost;
+}
+
 /** Compares SHA-256 digests: equal lengths for timingSafeEqual, whatever was sent. */
 function secretMatches(given: string | undefined, expected: string): boolean {
   if (given === undefined) return false;
@@ -82,10 +103,11 @@ function warnRejected(reason: Rejection): void {
 export const sessionMiddleware = (store: SessionStore, mode: AuthMode = COOKIE_MODE): MiddlewareHandler<Env> => async (c, next) => {
   if (mode.kind === 'header') {
     // The app's own SameSite=Strict cookie used to stop cross-site requests;
-    // Authelia's cookie is usually Lax. Browsers send Sec-Fetch-Site on every
-    // request; a client without it (curl) is not a browser being tricked.
-    const site = c.req.header('Sec-Fetch-Site');
-    if (UNSAFE_METHODS.has(c.req.method) && site !== undefined && site !== 'same-origin') {
+    // Authelia's cookie is usually Lax.
+    if (
+      UNSAFE_METHODS.has(c.req.method) &&
+      fromAnotherOrigin(c.req.header('Sec-Fetch-Site'), c.req.header('Origin'), new URL(c.req.url).host, c.req.header('X-Forwarded-Host'))
+    ) {
       return c.json({ error: 'cross_site' }, 403);
     }
     const remoteUser = c.req.header('Remote-User');
