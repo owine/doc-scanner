@@ -57,6 +57,13 @@ LABEL org.opencontainers.image.title="doc-scanner" \
 # pulled in unpinned, so they follow the pinned versions. Renovate's `apk`
 # datasource bumps these pins too (renovate.json, `branch=v3.24`, `community`
 # merged), and CI's smoke step runs every bump against the real tools.
+#
+# APK_CLOSURE is a cache key, not a setting: CI passes a hash of the package
+# set this `apk add` resolves to today (about 185 packages from 5 pins), so the
+# layer rebuilds when an unpinned dependency gets a new build instead of the
+# gha cache shipping the old one until a pin or the base digest moves. Empty
+# for local builds.
+ARG APK_CLOSURE=
 RUN apk add --no-cache \
   tini=0.19.0-r3 \
   ocrmypdf=16.11.1-r2 \
