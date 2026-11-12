@@ -48,8 +48,10 @@ LABEL org.opencontainers.image.title="doc-scanner" \
 # extracts this `apk add` pin natively (datasource `apk`) and looks it up against
 # the registryUrls branch in renovate.json.
 # NOTE: the node base tag floats its Alpine version (node:<version>-alpine), so
-# when node's default Alpine moves to 3.25 both this pin and that `branch=v3.24`
-# must be hand-updated — the build fails loudly until then.
+# when node's default Alpine moves to 3.25 this pin, that `branch=v3.24` and
+# `alpine-branch: v3.24` in .github/workflows/apk-arch-rerun.yml must all be
+# hand-updated. The build fails loudly until the first two move; a stale
+# alpine-branch fails silently (arch-lag failures are just never rerun).
 # ocrmypdf, tesseract-ocr-data-eng, py3-img2pdf and ghostscript are slice 3's
 # OCR tools (spec §4): searchable PDFs and first-page thumbnails before filing.
 # They add about 319 MB (measured 2026-10-12). Their own dependencies
