@@ -8,7 +8,7 @@ WORKDIR /app
 # The pnpm package's install script links the native pnpm 12 binary for this
 # platform, so it is allowed by name (npm 11 warns that scripts outside
 # `allowScripts` will be blocked); runs before .npmrc is copied.
-ARG PNPM_VERSION=12.20.0
+ARG PNPM_VERSION=12.21.0
 RUN npm install -g --allow-scripts=pnpm pnpm@${PNPM_VERSION} && pnpm --version
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
 COPY server/package.json ./server/
