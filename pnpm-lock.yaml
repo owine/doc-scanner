@@ -242,8 +242,8 @@ importers:
         specifier: 2.2.0
         version: 2.2.0(@types/node@26.6.6)(typescript@7.0.2)
       '@protontech/drive-sdk':
-        specifier: 0.23.0
-        version: 0.23.0(@protontech/crypto@2.2.0(@types/node@26.6.6)(typescript@7.0.2))
+        specifier: 0.24.0
+        version: 0.24.0(@protontech/crypto@2.2.0(@types/node@26.6.6)(typescript@7.0.2))
       '@sentry/hono':
         specifier: 11.15.0
         version: 11.15.0(@sentry/node@11.15.0)(hono@4.13.19)
@@ -396,8 +396,8 @@ packages:
     resolution: {integrity: sha512-UjI/dKmwJwT9pOszJitq2G6EObZPnsZUfdCr92z2TlF3EZK9J3EdfOKUrCzHl6wFthbzwhzl1Soc/UIwxRiq6w==}
     engines: {node: '>=6.9.0'}
 
-  '@boltffi/runtime@0.31.0':
-    resolution: {integrity: sha512-nxht21tsG0KLzkdN2gHqSAZv7Ainht5v/Q6ZGVT8xXAmJKdewk4PwwryLeQR4xrejwDOtuWRD7p7OGkKGw8JIQ==}
+  '@boltffi/runtime@0.31.1':
+    resolution: {integrity: sha512-yo9jK8vSKrTW5/SU5J3zB3QuhCx3Z5m/jrX5CyCWIkVKHokv5hNgjz4urFj23aXHR46aItz2F5cOIs/m+TYKIg==}
 
   '@cantoo/pdf-lib@2.11.1':
     resolution: {integrity: sha512-lYuRJFfXgoP8WVE8HYSeoLfDcnSXmjMLmdZS7YvmYHngbcZfiqDOruHrZBqjYizkrNa4ad1yW4WCrPYyb26T3Q==}
@@ -955,10 +955,10 @@ packages:
   '@protontech/crypto@2.2.0':
     resolution: {integrity: sha512-WjoNBMn07LxnYE6QLgniEnNfP0Apmvqgi8P48udFtvAxhSnVwiHqmXxMaVHJxBRaJev/DlOKJ67OGYj+3yGYPA==}
 
-  '@protontech/drive-sdk@0.23.0':
-    resolution: {integrity: sha512-64oDsEBwjRiuQCxVi/ogoiked8Whm+I3DorUkD4n4esaqREBQ1qHTobzwkKFR+4h8kkc7K5KcjPMPDfZiD8lHw==}
+  '@protontech/drive-sdk@0.24.0':
+    resolution: {integrity: sha512-A4h61EPWhq+9yYpE9VLOwnnlpTxjWSOWJHI9rrpjlDrUoQlWLT1ngw/6JUestAy2HsahkljcZk9h1EuKumjJ9g==}
     peerDependencies:
-      '@protontech/crypto': ^2.0.0
+      '@protontech/crypto': ^2.2.0
 
   '@protontech/openpgp@6.3.1':
     resolution: {integrity: sha512-+NUfnF0rbw553xwT09YROb3TBmitumSSgOEx3eQh8LOx7CAKQzo2CLfsbBQz7KFc3+d9iMIMOKLrLzerYCtLIw==}
@@ -2227,7 +2227,7 @@ snapshots:
       '@babel/helper-string-parser': 7.29.14
       '@babel/helper-validator-identifier': 7.29.7
 
-  '@boltffi/runtime@0.31.0': {}
+  '@boltffi/runtime@0.31.1': {}
 
   '@cantoo/pdf-lib@2.11.1(html-entities@2.6.0)':
     dependencies:
@@ -2605,9 +2605,9 @@ snapshots:
       - '@types/node'
       - typescript
 
-  '@protontech/drive-sdk@0.23.0(@protontech/crypto@2.2.0(@types/node@26.6.6)(typescript@7.0.2))':
+  '@protontech/drive-sdk@0.24.0(@protontech/crypto@2.2.0(@types/node@26.6.6)(typescript@7.0.2))':
     dependencies:
-      '@boltffi/runtime': 0.31.0
+      '@boltffi/runtime': 0.31.1
       '@noble/hashes': 1.8.0
       '@protontech/crypto': 2.2.0(@types/node@26.6.6)(typescript@7.0.2)
       comlink: 4.4.2
