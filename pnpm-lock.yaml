@@ -236,8 +236,8 @@ importers:
         specifier: 2.11.1
         version: 2.11.1(html-entities@2.6.0)
       '@hono/node-server':
-        specifier: 2.1.8
-        version: 2.1.8(hono@4.13.18)
+        specifier: 2.1.10
+        version: 2.1.10(hono@4.13.19)
       '@protontech/crypto':
         specifier: 2.2.0
         version: 2.2.0(@types/node@26.6.6)(typescript@7.0.2)
@@ -246,7 +246,7 @@ importers:
         version: 0.23.0(@protontech/crypto@2.2.0(@types/node@26.6.6)(typescript@7.0.2))
       '@sentry/hono':
         specifier: 11.15.0
-        version: 11.15.0(@sentry/node@11.15.0)(hono@4.13.18)
+        version: 11.15.0(@sentry/node@11.15.0)(hono@4.13.19)
       '@sentry/node':
         specifier: 11.15.0
         version: 11.15.0
@@ -254,8 +254,8 @@ importers:
         specifier: 3.0.3
         version: 3.0.3
       hono:
-        specifier: 4.13.18
-        version: 4.13.18
+        specifier: 4.13.19
+        version: 4.13.19
       openpgp:
         specifier: 6.3.2
         version: 6.3.2(@openpgp/web-stream-tools@0.3.1(@types/node@26.6.6)(typescript@7.0.2))
@@ -578,8 +578,8 @@ packages:
   '@fontsource-variable/geist@5.3.0':
     resolution: {integrity: sha512-j0m+vLQuG5XAYoHtGCVu0spvlGreR3EzpECUVzkFmI1mTVnAO38l/NEPDCFgZ177JxzYJCLSmTQibIiYPilGrA==}
 
-  '@hono/node-server@2.1.8':
-    resolution: {integrity: sha512-jdf7FHh6A1lzjpHHQUgxsg2GeER2vMetnAOfeActzcoli6jamlK+NAwL6Dsr5Fl3BS3tYUQzCdtZjU8Qxv7bEA==}
+  '@hono/node-server@2.1.10':
+    resolution: {integrity: sha512-rEdjdRArcFWSAAy5K4NBbo4rXfJTnuAOxyHuGqnCSQVdpWh/DWN9H/7nIoqiteZxPL2t21PLYi8cSte+wxS4aw==}
     engines: {node: '>=20'}
     peerDependencies:
       hono: ^4 || ^5.0.0-0
@@ -1581,8 +1581,8 @@ packages:
   help-me@5.0.0:
     resolution: {integrity: sha512-7xgomUX6ADmcYzFik0HzAxh/73YlKR9bmFzf51CZwR+b6YtzU2m0u49hQCqV6SvlqIqsaxovfwdvbnsw3b/zpg==}
 
-  hono@4.13.18:
-    resolution: {integrity: sha512-H9q/E1XizaWstJxUW881dmLxEj+t/TrGGnyxINkm4+sK0qUwsMtFdo2BWI9Vs3cIS19MU6b6iCijoUoEf4f3DA==}
+  hono@4.13.19:
+    resolution: {integrity: sha512-KmXvQAXwcAHV+muzbIwoJ23niEB5nMoDVr9WcRkU8mvjUECm/1+7v4Jgp7P7a+H6MLFrh+vXrGonGrGS+RQfkA==}
     engines: {node: '>=16.9.0'}
 
   html-entities@2.6.0:
@@ -2340,9 +2340,9 @@ snapshots:
 
   '@fontsource-variable/geist@5.3.0': {}
 
-  '@hono/node-server@2.1.8(hono@4.13.18)':
+  '@hono/node-server@2.1.10(hono@4.13.19)':
     dependencies:
-      hono: 4.13.18
+      hono: 4.13.19
 
   '@img/colour@1.1.0': {}
 
@@ -2721,13 +2721,13 @@ snapshots:
     dependencies:
       '@sentry/core': 11.15.0
 
-  '@sentry/hono@11.15.0(@sentry/node@11.15.0)(hono@4.13.18)':
+  '@sentry/hono@11.15.0(@sentry/node@11.15.0)(hono@4.13.19)':
     dependencies:
       '@opentelemetry/api': 1.10.0
       '@sentry/conventions': 0.33.0
       '@sentry/core': 11.15.0
       '@sentry/server-utils': 11.15.0
-      hono: 4.13.18
+      hono: 4.13.19
     optionalDependencies:
       '@sentry/node': 11.15.0
 
@@ -3103,7 +3103,7 @@ snapshots:
 
   help-me@5.0.0: {}
 
-  hono@4.13.18: {}
+  hono@4.13.19: {}
 
   html-entities@2.6.0: {}
 
