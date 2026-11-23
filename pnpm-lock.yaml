@@ -236,8 +236,8 @@ importers:
         specifier: 2.11.1
         version: 2.11.1(html-entities@2.6.0)
       '@hono/node-server':
-        specifier: 2.1.10
-        version: 2.1.10(hono@4.13.19)
+        specifier: 2.1.11
+        version: 2.1.11(hono@4.13.19)
       '@protontech/crypto':
         specifier: 2.2.0
         version: 2.2.0(@types/node@26.6.6)(typescript@7.0.2)
@@ -578,8 +578,8 @@ packages:
   '@fontsource-variable/geist@5.3.0':
     resolution: {integrity: sha512-j0m+vLQuG5XAYoHtGCVu0spvlGreR3EzpECUVzkFmI1mTVnAO38l/NEPDCFgZ177JxzYJCLSmTQibIiYPilGrA==}
 
-  '@hono/node-server@2.1.10':
-    resolution: {integrity: sha512-rEdjdRArcFWSAAy5K4NBbo4rXfJTnuAOxyHuGqnCSQVdpWh/DWN9H/7nIoqiteZxPL2t21PLYi8cSte+wxS4aw==}
+  '@hono/node-server@2.1.11':
+    resolution: {integrity: sha512-KzKz9vl4vvr1vgLHamj+g5uonbrj5NwAdO3yzOS6cd2HjALVeOgTgeZOyAzNxejbkfOOPIcvuf/Tg8l1pEFLog==}
     engines: {node: '>=20'}
     peerDependencies:
       hono: ^4 || ^5.0.0-0
@@ -2340,7 +2340,7 @@ snapshots:
 
   '@fontsource-variable/geist@5.3.0': {}
 
-  '@hono/node-server@2.1.10(hono@4.13.19)':
+  '@hono/node-server@2.1.11(hono@4.13.19)':
     dependencies:
       hono: 4.13.19
 
