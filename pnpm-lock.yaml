@@ -1495,8 +1495,8 @@ packages:
   eckey-utils@0.7.14:
     resolution: {integrity: sha512-s/mENS+mMnJjDSydy0muBQQHMTWJ1nPe8EiphANZrf+lv/1u35aP9WvWHTWqCBJ21blNIurGF7UoLjtaOpoCFw==}
 
-  electron-to-chromium@1.5.486:
-    resolution: {integrity: sha512-rpybw4Ac4ak/An6G1Me2+61xzwobowDGyuJe71QHHOVpkZv4fPVobsLl7WH6zHSKusAMpaHxGKTpOvpy7+r3dQ==}
+  electron-to-chromium@1.5.487:
+    resolution: {integrity: sha512-qWotOhQYeYEj+DK4+Y+cfPj44qiC6ETIiWtJLfmDJydED2BJJ7loPA4SfBbbrMI6X/X3tryJgxnY9nxsO545Zw==}
 
   end-of-stream@1.4.5:
     resolution: {integrity: sha512-ooEGc6HP26xXq/N+GCGOT0JKCLDGrq2bQUZrQ7gyrJiZANJ/8YDTxTpQBXGMn+WbIQXNVpyWymm7KYVICQnyOg==}
@@ -2938,7 +2938,7 @@ snapshots:
     dependencies:
       baseline-browser-mapping: 2.11.38
       caniuse-lite: 1.0.30001826
-      electron-to-chromium: 1.5.486
+      electron-to-chromium: 1.5.487
       node-releases: 2.0.64
       update-browserslist-db: 1.4.0(browserslist@4.29.6)
 
@@ -3010,7 +3010,7 @@ snapshots:
 
   eckey-utils@0.7.14: {}
 
-  electron-to-chromium@1.5.486: {}
+  electron-to-chromium@1.5.487: {}
 
   end-of-stream@1.4.5:
     dependencies:
