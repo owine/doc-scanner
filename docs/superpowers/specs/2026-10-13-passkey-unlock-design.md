@@ -157,7 +157,7 @@ A credential the authenticator already holds (excluded) throws `InvalidStateErro
 2. The PWA calls `navigator.credentials.get` once, with:
    - `allowCredentials` listing them
    - `userVerification: 'required'`
-   - `extensions: { prf: { evalByCredential: { [credentialId]: { first: salt } } } }`
+   - `extensions: { prf: { evalByCredential: { [credentialId]: { first: salt } } } }`, or `{ prf: { eval: { first: salt } } }` when only one passkey is enrolled. Both mean the same for one credential, and 1Password (found 2026-11-25, on the only prod passkey) returns no PRF result for `evalByCredential`
 3. `POST /api/auth/unlock` with body `{ credentialId, prf }` (takes the shared mutex with login, then re-checks state):
    - If `proton` is already `'live'`: 200 with the status (idempotent).
    - If there is no stored Proton session: 409 `proton_login_required`.
@@ -299,7 +299,7 @@ Whenever the focused control disappears, focus moves to what replaced it: **Sign
 - **The nudge:** shown, dismissed and remembered.
 - **`passkeys.ts`:**
   - against a mocked `navigator.credentials`, including the enrolment follow-up `get`
-  - `evalByCredential`
+  - `evalByCredential` for several passkeys, plain `eval` for one
   - cancellation (`NotAllowedError` and `AbortError`), `prf.enabled === false` with no second prompt, and `webauthn_<name>` for other errors
 
 **Manual (the user):** in production with header mode on:
