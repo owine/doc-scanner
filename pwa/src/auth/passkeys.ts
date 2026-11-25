@@ -137,10 +137,20 @@ async function readPrf(credentialId: string, salt: Uint8Array<ArrayBuffer>): Pro
   return prf ? { kind: 'ok', credentialId, prf } : { kind: 'prf_unsupported', credentialId };
 }
 
-/** One prompt for any enrolled passkey; each gets its own salt, keyed by its id (spec §2, Unlock). */
+/**
+ * One prompt for any enrolled passkey; each gets its own salt, keyed by its id
+ * (spec §2, Unlock). A single passkey gets its salt as plain `eval` instead,
+ * which means the same: 1Password returns no PRF result for `evalByCredential`.
+ */
 export async function unlockWithPasskey(credentials: UnlockCredential[]): Promise<UnlockResult> {
-  const evalByCredential: Record<string, AuthenticationExtensionsPRFValues> = {};
-  for (const c of credentials) evalByCredential[c.credentialId] = { first: fromBase64url(c.salt) };
+  let prfInputs: AuthenticationExtensionsPRFInputs;
+  if (credentials.length === 1) {
+    prfInputs = { eval: { first: fromBase64url(credentials[0]!.salt) } };
+  } else {
+    const evalByCredential: Record<string, AuthenticationExtensionsPRFValues> = {};
+    for (const c of credentials) evalByCredential[c.credentialId] = { first: fromBase64url(c.salt) };
+    prfInputs = { evalByCredential };
+  }
   let got: PublicKeyCredential | null;
   try {
     got = asPublicKey(
@@ -149,7 +159,7 @@ export async function unlockWithPasskey(credentials: UnlockCredential[]): Promis
           challenge: challenge(),
           allowCredentials: credentials.map((c) => descriptor(c.credentialId)),
           userVerification: 'required',
-          extensions: { prf: { evalByCredential } },
+          extensions: { prf: prfInputs },
         },
       }),
     );
