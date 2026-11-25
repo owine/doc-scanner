@@ -125,6 +125,16 @@ describe('unlockWithPasskey', () => {
     expect(bytes(options.extensions.prf.evalByCredential[ID_2].first)).toEqual(Array.from(new Uint8Array(32).fill(4)));
   });
 
+  it('asks for one passkey with plain eval, which 1Password answers and evalByCredential it does not', async () => {
+    const c = installCredentials();
+    c.get.mockResolvedValue(fakeCredential(ID, PRF));
+    expect(await unlockWithPasskey([{ credentialId: ID, salt: SALT }])).toEqual({ kind: 'ok', credentialId: ID, prf: toBase64url(PRF) });
+    const options = c.get.mock.calls[0]![0].publicKey;
+    expect(options.allowCredentials.map((d: PublicKeyCredentialDescriptor) => toBase64url(d.id))).toEqual([ID]);
+    expect(options.extensions.prf.evalByCredential).toBeUndefined();
+    expect(bytes(options.extensions.prf.eval.first)).toEqual(Array.from(new Uint8Array(32).fill(3)));
+  });
+
   it('maps a cancelled or aborted prompt, other WebAuthn failures by name, and a credential with no PRF result', async () => {
     const c = installCredentials();
     c.get.mockRejectedValueOnce(domError('NotAllowedError'));
