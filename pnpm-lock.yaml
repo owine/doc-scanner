@@ -237,7 +237,7 @@ importers:
         version: 2.11.1(html-entities@2.6.0)
       '@hono/node-server':
         specifier: 2.1.11
-        version: 2.1.11(hono@4.13.19)
+        version: 2.1.11(hono@4.13.22)
       '@protontech/crypto':
         specifier: 2.2.0
         version: 2.2.0(@types/node@26.6.6)(typescript@7.0.2)
@@ -246,7 +246,7 @@ importers:
         version: 0.24.0(@protontech/crypto@2.2.0(@types/node@26.6.6)(typescript@7.0.2))
       '@sentry/hono':
         specifier: 11.16.0
-        version: 11.16.0(@sentry/node@11.16.0)(hono@4.13.19)
+        version: 11.16.0(@sentry/node@11.16.0)(hono@4.13.22)
       '@sentry/node':
         specifier: 11.16.0
         version: 11.16.0
@@ -254,8 +254,8 @@ importers:
         specifier: 3.0.3
         version: 3.0.3
       hono:
-        specifier: 4.13.19
-        version: 4.13.19
+        specifier: 4.13.22
+        version: 4.13.22
       openpgp:
         specifier: 6.3.3
         version: 6.3.3(@openpgp/web-stream-tools@0.3.1(@types/node@26.6.6)(typescript@7.0.2))
@@ -1584,8 +1584,8 @@ packages:
   help-me@5.0.0:
     resolution: {integrity: sha512-7xgomUX6ADmcYzFik0HzAxh/73YlKR9bmFzf51CZwR+b6YtzU2m0u49hQCqV6SvlqIqsaxovfwdvbnsw3b/zpg==}
 
-  hono@4.13.19:
-    resolution: {integrity: sha512-KmXvQAXwcAHV+muzbIwoJ23niEB5nMoDVr9WcRkU8mvjUECm/1+7v4Jgp7P7a+H6MLFrh+vXrGonGrGS+RQfkA==}
+  hono@4.13.22:
+    resolution: {integrity: sha512-wncKd5/40Pj8grx0RZ2fgNIicFEmVFwIHT5UFLTnphR8I6AQWFf9c2JoM6ZJ9g8y4pMzg3sNlCVNe0m2Yclg0Q==}
     engines: {node: '>=16.9.0'}
 
   html-entities@2.6.0:
@@ -2343,9 +2343,9 @@ snapshots:
 
   '@fontsource-variable/geist@5.3.0': {}
 
-  '@hono/node-server@2.1.11(hono@4.13.19)':
+  '@hono/node-server@2.1.11(hono@4.13.22)':
     dependencies:
-      hono: 4.13.19
+      hono: 4.13.22
 
   '@img/colour@1.1.0': {}
 
@@ -2724,13 +2724,13 @@ snapshots:
     dependencies:
       '@sentry/core': 11.16.0
 
-  '@sentry/hono@11.16.0(@sentry/node@11.16.0)(hono@4.13.19)':
+  '@sentry/hono@11.16.0(@sentry/node@11.16.0)(hono@4.13.22)':
     dependencies:
       '@opentelemetry/api': 1.10.0
       '@sentry/conventions': 0.34.0
       '@sentry/core': 11.16.0
       '@sentry/server-utils': 11.16.0
-      hono: 4.13.19
+      hono: 4.13.22
     optionalDependencies:
       '@sentry/node': 11.16.0
 
@@ -3108,7 +3108,7 @@ snapshots:
 
   help-me@5.0.0: {}
 
-  hono@4.13.19: {}
+  hono@4.13.22: {}
 
   html-entities@2.6.0: {}
 
