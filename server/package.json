@@ -16,7 +16,7 @@
     "eval:analyzer:judge-check": "node --env-file=../.env --import tsx evals/analyzer/judge-check.ts"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "1.12.0",
+    "@anthropic-ai/sdk": "1.14.0",
     "@cantoo/pdf-lib": "2.11.1",
     "@hono/node-server": "2.1.11",
     "@protontech/crypto": "2.2.0",
@@ -33,7 +33,7 @@
     "zod": "4.6.7"
   },
   "devDependencies": {
-    "@types/node": "26.6.6",
+    "@types/node": "26.6.7",
     "typescript": "7.0.2",
     "vitest": "5.1.1"
   }
